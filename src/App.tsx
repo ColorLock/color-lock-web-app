@@ -1,5 +1,8 @@
+import { fetchPuzzleFromFirestore } from './firebase_client';
 import React, { useState, useEffect } from 'react';
 import './App.css';
+import { getHint, HintResult } from './hints';
+
 
 // -------------------------------------------------------------------------
 // 1. Types & Data
@@ -42,7 +45,21 @@ interface DailyPuzzle {
   bestScoreUsed: number | null;
   timesPlayed: number;
   totalMovesForThisBoard: number;
+  algoScore: number;
 }
+
+export interface PuzzleGrid {
+  [row: string]: TileColor[];
+}
+
+// Define the Firestore data structure
+export interface FirestorePuzzleData {
+  algoScore: number;
+  targetColor: TileColor;
+  states: PuzzleGrid[];
+  actions: number[];
+}
+
 
 // -------------------------------------------------------------------------
 // 2. Utility Functions
@@ -225,43 +242,33 @@ function saveDailyPuzzle(puzzle: DailyPuzzle) {
 // 3. Puzzle Generation
 // -------------------------------------------------------------------------
 
-/**
- * Generate a puzzle for a given date and grid size.
- * This uses only the date (e.g. "2025-03-06") to create a stable seed so that
- * the puzzle remains the same for the entire day.
- */
-function generatePuzzleForDate(dateStr: string, gridSize: number): DailyPuzzle {
-  // Match Swift's stableSeed(for:) exactly
-  const seedVal = stableSeedForDate(dateStr);
-  console.log(`Using seed ${seedVal} (based solely on the date)`);
+
+function generatePuzzleFromDB(firestoreData: FirestorePuzzleData, dateStr: string): DailyPuzzle {
+  // Get the first state from the states list
+  const initialState = firestoreData.states[0];
   
-  // Create a seeded generator that matches Swift's implementation
-  const rng = createSwiftSeededGenerator(seedVal);
+  // Get the grid size from the first state object
+  const gridSize = Object.keys(initialState).length;
   
-  // Match Swift's makeRandomGrid function exactly
+  // Initialize an empty 2D array for the grid
   const grid: TileColor[][] = [];
+  
+  // Convert the object-based initialState to a 2D array
   for (let r = 0; r < gridSize; r++) {
-    const row: TileColor[] = [];
-    for (let c = 0; c < gridSize; c++) {
-      // Must match Swift's Int.random(in: 0..<allColors.count, using: &rng) behavior
-      const colorIndex = rng.nextIntInRange(allColors.length);
-      row.push(allColors[colorIndex]);
-    }
-    grid.push(row);
+    // Get the row array from initialState using the string index
+    const rowKey = r.toString();
+    const rowColors = initialState[rowKey] as TileColor[];
+    grid.push(rowColors);
   }
   
-  // Match Swift's target color selection
-  const targetIndex = rng.nextIntInRange(allColors.length);
-  const target = allColors[targetIndex];
-  
   // Log the exact sequence of random numbers generated
-  console.log("Generated random indices:", rng.getGeneratedNumbers());
+  console.log("Generated grid from firebase");
   
   // Use the same algorithm for finding the largest region
   const locked = findLargestRegion(grid);
   
   console.log("Web: Generated grid for", dateStr, ":", grid);
-  console.log("Web: Target color:", target);
+  // console.log("Web: Target color:", target);
   console.log("Web: Locked cells:", locked);
   // Print locked cells in a format easy to compare with Swift
   console.log("Locked cells as array:", Array.from(locked));
@@ -273,24 +280,13 @@ function generatePuzzleForDate(dateStr: string, gridSize: number): DailyPuzzle {
     isSolved: false,
     isLost: false,
     lockedCells: locked,
-    targetColor: target,
+    targetColor: firestoreData.targetColor,
     startingGrid: grid.map(row => [...row]),
     bestScoreUsed: null,
     timesPlayed: 0,
-    totalMovesForThisBoard: 0
+    totalMovesForThisBoard: 0,
+    algoScore: firestoreData.algoScore
   };
-}
-
-function generatePuzzleForToday(gridSize: number): DailyPuzzle {
-  const key = dateKeyForToday();
-  const existing = loadDailyPuzzleIfExists(key);
-  if (existing) {
-    console.log(`Loaded puzzle for ${key}`);
-    return existing;
-  }
-  const puzzle = generatePuzzleForDate(key, gridSize);
-  saveDailyPuzzle(puzzle);
-  return puzzle;
 }
 
 // -------------------------------------------------------------------------
@@ -305,19 +301,66 @@ const App: React.FC = () => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [selectedTile, setSelectedTile] = useState<{ row: number; col: number } | null>(null);
   const [showWinModal, setShowWinModal] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [hintCell, setHintCell] = useState<HintResult | null>(null);
+  const [firestoreData, setFirestoreData] = useState<FirestorePuzzleData | null>(null);
 
   // Generate the puzzle for the fixed date on first render.
   useEffect(() => {
-    const newPuzzle = generatePuzzleForToday(GRID_SIZE);
-    setPuzzle(newPuzzle);
+    const loadPuzzle = async () => {
+      try {
+        setLoading(true);
+        console.log("Starting puzzle loading process");
+        
+        // Add a timeout to prevent infinite waiting
+        const fetchPuzzleWithTimeout = async (): Promise<FirestorePuzzleData> => {
+          const timeout = new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Fetch timeout')), 10000)
+          );
+          
+          // Add type assertion to the result of Promise.race
+          return Promise.race([
+            fetchPuzzleFromFirestore(DATE_TO_USE),
+            timeout
+          ]) as Promise<FirestorePuzzleData>;
+        };
+        
+        try {
+          console.log("Attempting to fetch puzzle from Firestore");
+          const firestoreData = await fetchPuzzleWithTimeout();
+          console.log("Firestore data received:", firestoreData);
+          setFirestoreData(firestoreData);
+          const newPuzzle = generatePuzzleFromDB(firestoreData, DATE_TO_USE);
+          console.log("Successfully fetched puzzle from Firestore");
+          setPuzzle(newPuzzle);
+          setError(null);
+        } catch (err) {
+          console.error('Detailed fetch error:', err);
+          setError('Using offline mode - connected features unavailable');
+          throw err; // Re-throw to trigger the fallback
+        }
+      } catch (finalError) {
+        console.error('Critical error in puzzle loading:', finalError);
+        setError('Failed to load puzzle. Please refresh the page.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadPuzzle();
   }, []);
 
-  if (!puzzle) {
+  if (loading) {
     return <div className="loading">Loading puzzle...</div>;
   }
 
+  if (!puzzle) {
+    return <div>Loading puzzle...</div>;
+  }
+
   // Get the daily goal if available
-  const dailyGoal = dailyGoalData[puzzle.dateString] ?? 999;
+  const dailyGoal = puzzle.algoScore;
 
   // Handle tile clicks
   const handleTileClick = (row: number, col: number) => {
@@ -330,6 +373,10 @@ const App: React.FC = () => {
   // When a new color is selected, perform flood fill and update the puzzle.
   const handleColorSelect = (newColor: TileColor) => {
     if (!selectedTile) return;
+    
+    // Clear any active hints
+    setHintCell(null);
+    
     const { row, col } = selectedTile;
     const oldColor = puzzle.grid[row][col];
     if (oldColor === newColor) {
@@ -394,14 +441,47 @@ const App: React.FC = () => {
   };
 
   // "Try Again" resets the puzzle using the same date-based seed.
-  const handleTryAgain = () => {
-    const newPuzzle = generatePuzzleForDate(DATE_TO_USE, GRID_SIZE);
-    setPuzzle(newPuzzle);
-    setShowWinModal(false);
+  const handleTryAgain = async () => {
+    try {
+      const firestoreData = await fetchPuzzleFromFirestore(DATE_TO_USE);
+      const newPuzzle = generatePuzzleFromDB(firestoreData, DATE_TO_USE);
+      setPuzzle(newPuzzle);
+    } catch (error) {
+      console.error("Error in try again:", error);
+      // Don't leave the app hanging if there's an error
+      setError("Couldn't load new puzzle. Please refresh the page.");
+    } finally {
+      setShowWinModal(false);
+    }
   };
 
   const closeWinModal = () => {
     setShowWinModal(false);
+  };
+
+  const handleHint = () => {
+    // Clear previous hint
+    setHintCell(null);
+    
+    if (!puzzle || !firestoreData) {
+      console.error("Cannot provide hint: puzzle or firestoreData is missing");
+      return;
+    }
+
+    if (puzzle.isSolved || puzzle.isLost) {
+      console.log("Game is already over, no hint needed");
+      return;
+    }
+
+    // Get hint for the current move number
+    const hint = getHint(firestoreData, puzzle.userMovesUsed);
+    
+    if (hint && hint.valid) {
+      console.log("Hint provided:", hint);
+      setHintCell(hint);
+    } else {
+      console.log("No valid hint available");
+    }
   };
 
   return (
@@ -417,6 +497,7 @@ const App: React.FC = () => {
           <span>Goal: {dailyGoal}</span>
           <span>Moves: {puzzle.userMovesUsed}</span>
         </div>
+        <button className="hint-button" onClick={handleHint}>Get Hint</button>
       </div>
 
       {/* Grid */}
@@ -426,18 +507,16 @@ const App: React.FC = () => {
             {row.map((color, cIdx) => {
               const key = `${rIdx},${cIdx}`;
               const isLocked = puzzle.lockedCells.has(key);
+              const isHinted = hintCell && hintCell.row === rIdx && hintCell.col === cIdx;
               return (
                 <div key={key} className="grid-cell-container">
                   <div
-                    className="grid-cell"
+                    className={`grid-cell ${isHinted ? 'hint-highlight' : ''}`}
                     style={{ backgroundColor: color }}
                     onClick={() => handleTileClick(rIdx, cIdx)}
-                  />
-                  {isLocked && (
-                    <div className="locked-overlay">
-                      <span className="lock-icon" />
-                    </div>
-                  )}
+                  >
+                    {isLocked && <div className="lock-overlay"><span>🔒</span></div>}
+                  </div>
                 </div>
               );
             })}
