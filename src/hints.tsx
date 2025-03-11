@@ -15,15 +15,30 @@ export interface HintResult {
 /**
  * Decodes an action_id into row, column, and color
  */
-export function decodeActionId(actionId: number): HintResult {
-  const row = Math.floor(actionId / (GRID_SIZE * NUM_COLORS));
+export function decodeActionId(actionId: number, firestoreData: FirestorePuzzleData): HintResult {
+  // Get the original row value
+  const originalRow = Math.floor(actionId / (GRID_SIZE * NUM_COLORS));
+  
+  // Reverse the row mapping (0→4, 1→3, 2→2, 3→1, 4→0)
+  const row = (GRID_SIZE - 1) - originalRow;
+  
   const remainder = actionId % (GRID_SIZE * NUM_COLORS);
   const col = Math.floor(remainder / NUM_COLORS);
   const colorIndex = remainder % NUM_COLORS;
   
-  // Convert color index to TileColor
-  const colorValues = Object.values(TileColor);
-  const newColor = colorValues[colorIndex] as TileColor;
+  // Get the color from the firestoreData.colorMap based on colorIndex
+  let newColor: TileColor;
+  
+  if (firestoreData.colorMap && colorIndex < firestoreData.colorMap.length) {
+    // Use the colorMap to get the mapped color index
+    const mappedColorIndex = firestoreData.colorMap[colorIndex];
+    const colorValues = Object.values(TileColor);
+    newColor = colorValues[mappedColorIndex] as TileColor;
+  } else {
+    // Fallback to direct mapping if colorMap is not available
+    const colorValues = Object.values(TileColor);
+    newColor = colorValues[colorIndex] as TileColor;
+  }
   
   return {
     row,
@@ -42,5 +57,5 @@ export function getHint(firestoreData: FirestorePuzzleData, moveNumber: number):
   }
   
   const actionId = firestoreData.actions[moveNumber];
-  return decodeActionId(actionId);
+  return decodeActionId(actionId, firestoreData);
 }

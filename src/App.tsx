@@ -58,6 +58,7 @@ export interface FirestorePuzzleData {
   targetColor: TileColor;
   states: PuzzleGrid[];
   actions: number[];
+  colorMap?: number[];
 }
 
 
@@ -508,14 +509,29 @@ const App: React.FC = () => {
               const key = `${rIdx},${cIdx}`;
               const isLocked = puzzle.lockedCells.has(key);
               const isHinted = hintCell && hintCell.row === rIdx && hintCell.col === cIdx;
+              
+              // For hinted cells, use custom CSS variables
+              const cellStyle = isHinted ? {
+                '--current-color': color,
+                '--target-color': hintCell.newColor,
+                animation: 'color-fade 3.5s infinite ease-in-out'
+              } : {
+                backgroundColor: color
+              };
+              
               return (
                 <div key={key} className="grid-cell-container">
                   <div
-                    className={`grid-cell ${isHinted ? 'hint-highlight' : ''}`}
-                    style={{ backgroundColor: color }}
+                    className={`grid-cell ${isHinted ? 'hint-cell' : ''}`}
+                    style={cellStyle}
                     onClick={() => handleTileClick(rIdx, cIdx)}
                   >
                     {isLocked && <div className="lock-overlay"><span>🔒</span></div>}
+                    
+                    {/* Separate element for the blue border */}
+                    {isHinted && (
+                      <div className="blue-outline"></div>
+                    )}
                   </div>
                 </div>
               );
