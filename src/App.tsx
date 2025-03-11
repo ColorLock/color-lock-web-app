@@ -510,13 +510,15 @@ const App: React.FC = () => {
               const isLocked = puzzle.lockedCells.has(key);
               const isHinted = hintCell && hintCell.row === rIdx && hintCell.col === cIdx;
               
-              // For hinted cells, use custom CSS variables
-              const cellStyle = isHinted ? {
-                '--current-color': color,
-                '--target-color': hintCell.newColor,
-                animation: 'color-fade 3.5s infinite ease-in-out'
-              } : {
-                backgroundColor: color
+              // For hinted cells, set the background color explicitly and add animations
+              const cellStyle = {
+                backgroundColor: color, // Always set the base color explicitly
+                ...(isHinted && {
+                  border: '2px solid #1e90ff', // Persistent blue border
+                  boxShadow: '0 0 6px 1px rgba(30, 144, 255, 0.6)', // Persistent blue glow
+                  '--current-color': color,
+                  '--target-color': hintCell.newColor,
+                })
               };
               
               return (
@@ -527,11 +529,6 @@ const App: React.FC = () => {
                     onClick={() => handleTileClick(rIdx, cIdx)}
                   >
                     {isLocked && <div className="lock-overlay"><span>🔒</span></div>}
-                    
-                    {/* Separate element for the blue border */}
-                    {isHinted && (
-                      <div className="blue-outline"></div>
-                    )}
                   </div>
                 </div>
               );

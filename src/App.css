@@ -66,7 +66,6 @@
   cursor: pointer;
   transition: transform 0.1s;
   box-sizing: border-box;
-  overflow: visible;
 }
 .grid-cell:hover {
   transform: scale(1.05);
@@ -237,9 +236,10 @@
   100% { box-shadow: inset 0 0 10px 2px, 0 0 8px 1px; } /* Less intense */
 }
 
-/* Hinted cell with CSS variables for animation */
+/* Hinted cell with animation */
 .hint-cell {
-  animation: color-fade 3.5s infinite ease-in-out;
+  animation: color-fade 3s infinite;
+  animation-fill-mode: both; /* Ensure styles are applied during delays */
 }
 
 /* Blue outline that appears after color change starts */
@@ -249,9 +249,9 @@
   left: -2px;
   width: 100%;
   height: 100%;
-  border: 2px solid rgba(30, 144, 255, 0.8);
+  border: 1px solid rgba(30, 144, 255, 0.8);
   border-radius: 5px;
-  box-shadow: 0 0 6px 1px rgba(30, 144, 255, 0.5);
+  box-shadow: 0 0 10px 2px rgba(30, 144, 255, 0.5);
   pointer-events: none;
   z-index: 4;
   opacity: 0;
@@ -259,42 +259,39 @@
   animation-delay: 0.35s; /* Delay to start after color change begins */
 }
 
-/* Animation for smoother color transition */
+/* Animation for color transition with a brief flash */
 @keyframes color-fade {
   0% {
-    background-color: var(--current-color);
+    background-color: var(--current-color); /* Start with current color */
   }
-  15% { /* Start transition even earlier */
-    background-color: var(--current-color);
-  }
-  50% { /* Mid-point is fully transitioned */
+  20% { /* Fast transition to new color */
     background-color: var(--target-color);
   }
-  85% { /* Hold target color longer */
-    background-color: var(--target-color);
+  80% { /* Fast transition back */
+    background-color: var(--current-color);
   }
   100% {
     background-color: var(--current-color);
   }
 }
 
-/* Very subtle appearance and pulsation for the blue outline */
+/* Adjust the blue outline animation to match */
 @keyframes outline-fade {
   0% {
     opacity: 0;
     box-shadow: 0 0 3px 0px rgba(30, 144, 255, 0.3);
   }
-  20% {
+  15% {
     opacity: 1;
     box-shadow: 0 0 6px 1px rgba(30, 144, 255, 0.5);
   }
-  50% {
+  30% { /* Shorter time at peak visibility */
     opacity: 1;
     box-shadow: 0 0 7px 1.5px rgba(30, 144, 255, 0.6);
   }
-  80% {
-    opacity: 1;
-    box-shadow: 0 0 6px 1px rgba(30, 144, 255, 0.5);
+  45% {
+    opacity: 0;
+    box-shadow: 0 0 3px 0px rgba(30, 144, 255, 0.3);
   }
   100% {
     opacity: 0;
@@ -315,7 +312,7 @@
   background-color: rgba(0, 0, 0, 0.2);
   border-radius: 8px;
   pointer-events: none;
-  z-index: 5; /* Make sure lock is on top */
+  z-index: 5;
 }
 
 .lock-overlay span {
