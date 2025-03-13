@@ -158,63 +158,115 @@
 .color-picker-modal-backdrop {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background-color: rgba(0,0,0,0.4);
+  background-color: rgba(0,0,0,0.15);
   display: flex;
   justify-content: center;
   align-items: flex-end;
   z-index: 1000;
 }
+
 .color-picker-modal {
-  background: #fff;
-  border-top-left-radius: 16px;
-  border-top-right-radius: 16px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
   width: 100%;
-  max-width: 500px;
-  padding: 16px;
-  box-shadow: 0 -2px 8px rgba(0,0,0,0.2);
+  max-width: 360px;
+  padding: 10px 8px 8px;
+  box-shadow: 0 -1px 8px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 50px; /* Now positioned midway between Try Again and bottom */
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
 }
-.color-picker-modal h3 {
-  text-align: center;
-  margin-bottom: 16px;
+
+.color-picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
 }
+
+.color-picker-header h3 {
+  text-align: left;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: #555;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.color-picker-close-button {
+  font-size: 16px;
+  margin: 0;
+  padding: 4px;
+  color: #777;
+}
+
 .color-bubbles {
   display: flex;
+  flex-direction: row;
   justify-content: space-around;
-  margin-bottom: 16px;
+  gap: 10px; /* Increased gap slightly */
 }
+
 .color-bubble-container {
   display: flex;
   flex-direction: column;
   align-items: center;
 }
+
+/* Updated color picker squares */
 .color-bubble {
-  width: 44px;
-  height: 44px;
-  border-radius: 22px;
+  width: 40px;  /* Increased size further */
+  height: 40px; /* Increased size further */
+  border-radius: 8px; /* More rounded corners */
+  margin: 2px;
   border: none;
   cursor: pointer;
-  margin-bottom: 4px;
+  transition: transform 0.1s;
+  box-sizing: border-box;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
+
+.color-bubble:hover {
+  transform: scale(1.05);
+}
+
+/* Apply high contrast mode to color bubbles */
+.high-contrast-mode .color-bubble {
+  border: 2px solid black;
+}
+
+/* Updated color label */
 .color-label {
-  font-size: 0.75rem;
-  color: #333;
+  font-size: 10px;  /* Slightly larger text */
+  font-weight: 500;
+  color: #777;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  text-transform: capitalize;
+  margin-top: 4px;  /* Increased margin for better spacing */
 }
+
 .cancel-button {
   display: block;
   margin: 0 auto;
   padding: 8px 16px;
-  font-size: 1rem;
-  background: #ddd;
+  font-size: 14px;
+  background: #E9E9EB;
+  color: #3478F6;
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
+  font-weight: 500;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
   width: 100%;
   max-width: 200px;
   text-align: center;
   transition: background-color 0.2s;
 }
+
 .cancel-button:hover {
-  background-color: #ccc;
+  background-color: #d9d9db;
 }
 
 /* Hint button styling */
@@ -548,4 +600,296 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   font-weight: bold;
   letter-spacing: 0.5px;
+}
+
+/* Copy tooltip styles */
+.copy-tooltip {
+  position: fixed;
+  bottom: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(0, 0, 0, 0.75);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 16px;
+  z-index: 2000;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  transition: opacity 0.3s ease;
+}
+
+.copy-tooltip.success {
+  background-color: rgba(40, 167, 69, 0.9);
+}
+
+.copy-tooltip.error {
+  background-color: rgba(220, 53, 69, 0.9);
+}
+
+.copy-tooltip.fade-out {
+  opacity: 0;
+}
+
+/* Settings Button */
+.settings-button {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: #f0f0f0;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  cursor: pointer;
+  color: #333;
+  transition: background-color 0.2s, transform 0.2s;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+}
+
+.settings-button:hover {
+  background-color: #e0e0e0;
+  transform: rotate(30deg);
+}
+
+/* Settings Modal */
+.settings-modal {
+  background-color: white;
+  border-radius: 20px;
+  padding: 20px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 85vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eee;
+}
+
+.settings-header h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.settings-close-button {
+  font-size: 20px;
+  margin: 0;
+  padding: 8px;
+}
+
+.settings-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.settings-section {
+  margin-bottom: 24px;
+}
+
+.settings-section h3 {
+  font-size: 18px;
+  margin-bottom: 12px;
+  font-weight: 600;
+  color: #333;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.setting-item label {
+  font-size: 16px;
+  font-weight: 500;
+  color: #333;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.setting-description {
+  margin: 4px 0 0 0;
+  font-size: 14px;
+  color: #666;
+  font-weight: normal;
+}
+
+.settings-footer {
+  padding-top: 16px;
+  border-top: 1px solid #eee;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settings-save-button {
+  background-color: #3478F6;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 24px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  transition: background-color 0.2s;
+}
+
+.settings-save-button:hover {
+  background-color: #2960c7;
+}
+
+/* Settings Select */
+.settings-select {
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 16px;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  width: 180px;
+  color: #333;
+}
+
+/* Toggle Switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 26px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: .4s;
+  border-radius: 26px;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 22px;
+  width: 22px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  transition: .4s;
+  border-radius: 50%;
+}
+
+input:checked + .toggle-slider {
+  background-color: #3478F6;
+}
+
+input:focus + .toggle-slider {
+  box-shadow: 0 0 1px #3478F6;
+}
+
+input:checked + .toggle-slider:before {
+  transform: translateX(24px);
+}
+
+/* No animations class should properly handle toggle switches */
+.no-animations .toggle-slider,
+.no-animations .toggle-slider:before {
+  transition: none !important;
+}
+
+.no-animations input:checked + .toggle-slider:before {
+  transform: none !important;
+  left: 26px !important;
+}
+
+.no-animations input:not(:checked) + .toggle-slider:before {
+  left: 2px !important;
+}
+
+/* Highlighted region style */
+.highlight-largest-region {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 8px 2px rgba(255, 255, 255, 0.7);
+}
+
+/* High contrast mode */
+.high-contrast-mode .grid-cell {
+  border: 2px solid black;
+}
+
+/* Animation toggles */
+.no-animations * {
+  animation: none !important;
+  transition: none !important;
+  transform: none !important;
+}
+
+.no-animations .hint-cell {
+  animation: none !important;
+  border: 2px solid #1e90ff !important;
+}
+
+.no-animations .toggle-slider:before {
+  transition: none !important;
+}
+
+.no-animations input:checked + .toggle-slider:before {
+  left: 24px !important;
+}
+
+/* Highlight currently changing color square with a more visible neon blue effect */
+.color-bubble.currently-changing {
+  box-shadow: 0 0 12px 4px rgba(0, 191, 255, 0.6);
+}
+
+/* Neon glow effect for game board cells with pulsing animation */
+.grid-cell.neon-glow::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  right: -4px;
+  bottom: -4px;
+  border-radius: inherit;
+  box-shadow: 0 0 16px 6px rgba(0, 191, 255, 0.7);
+  z-index: -1;
+  animation: neon-glow-pulse 2s infinite alternate;
+}
+
+@keyframes neon-glow-pulse {
+  0% {
+    box-shadow: 0 0 16px 6px rgba(0, 191, 255, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 20px 8px rgba(0, 191, 255, 0.9);
+  }
+  100% {
+    box-shadow: 0 0 16px 6px rgba(0, 191, 255, 0.7);
+  }
 }

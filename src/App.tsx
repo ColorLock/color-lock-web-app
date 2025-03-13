@@ -3,7 +3,9 @@ import React, { useState, useEffect } from 'react';
 import './App.css';
 import { getHint, HintResult, getValidActions, computeActionDifference, NUM_COLORS } from './hints';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faLock } from '@fortawesome/free-solid-svg-icons';
+import { faLock, faCopy, faGear, faXmark } from '@fortawesome/free-solid-svg-icons';
+import { faTwitter, faFacebookF } from '@fortawesome/free-brands-svg-icons';
+import SettingsModal, { AppSettings, defaultSettings, ColorBlindMode } from './SettingsModal';
 
 
 // -------------------------------------------------------------------------
@@ -312,6 +314,21 @@ const App: React.FC = () => {
   const [moveCount, setMoveCount] = useState(0);
   const [nextPuzzleTime, setNextPuzzleTime] = useState({ hours: 23, minutes: 18, seconds: 52 });
 
+  // Add settings state
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState<AppSettings>(() => {
+    // Load settings from localStorage on initial render
+    const savedSettings = localStorage.getItem('colorLockSettings');
+    if (savedSettings) {
+      try {
+        return JSON.parse(savedSettings);
+      } catch (e) {
+        console.error('Failed to parse saved settings', e);
+      }
+    }
+    return defaultSettings;
+  });
+
   // Generate the puzzle for the fixed date on first render.
   useEffect(() => {
     const loadPuzzle = async () => {
@@ -356,6 +373,11 @@ const App: React.FC = () => {
 
     loadPuzzle();
   }, []);
+
+  // Save settings to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('colorLockSettings', JSON.stringify(settings));
+  }, [settings]);
 
   if (loading) {
     return <div className="loading">Loading puzzle...</div>;
@@ -698,20 +720,89 @@ const App: React.FC = () => {
     return lockedColor !== null ? getColorCSS(lockedColor) : '#ffffff';
   };
 
-  // Add this function to convert TileColor to CSS color string
-  const getColorCSS = (color: TileColor): string => {
-    // Map TileColor enum values to CSS colors
-    const colorMap = {
-      [TileColor.Red]: '#ff5555',
-      [TileColor.Green]: '#55ff55',
-      [TileColor.Blue]: '#5555ff',
-      [TileColor.Yellow]: '#ffff55',
-      [TileColor.Purple]: '#ff55ff',
-      [TileColor.Orange]: '#ff9955',
-      // Add any other colors your game uses
+  // Custom function to get adjusted colors based on color blindness setting
+  const getAdjustedColorCSS = (color: TileColor): string => {
+    // For custom color scheme
+    if (settings.customColorScheme[color]) {
+      return settings.customColorScheme[color] as string;
+    }
+    
+    // For color blind modes
+    if (settings.colorBlindMode !== ColorBlindMode.None) {
+      const colorBlindPresets: Record<ColorBlindMode, Record<TileColor, string>> = {
+        [ColorBlindMode.Protanopia]: {
+          [TileColor.Red]: '#a0a0a0', // Gray instead of red
+          [TileColor.Green]: '#f5f5a0', // Yellow-ish instead of green
+          [TileColor.Blue]: '#5555ff', // Keep blue
+          [TileColor.Yellow]: '#ffff55', // Keep yellow
+          [TileColor.Purple]: '#a0a0ff', // Light blue instead of purple
+          [TileColor.Orange]: '#f5f5a0', // Yellow-ish instead of orange
+        },
+        [ColorBlindMode.Deuteranopia]: {
+          [TileColor.Red]: '#ff5555', // Keep red
+          [TileColor.Green]: '#a0a0a0', // Gray instead of green
+          [TileColor.Blue]: '#5555ff', // Keep blue
+          [TileColor.Yellow]: '#ffff55', // Keep yellow
+          [TileColor.Purple]: '#ff55ff', // Keep purple
+          [TileColor.Orange]: '#ff5555', // Red-ish instead of orange
+        },
+        [ColorBlindMode.Tritanopia]: {
+          [TileColor.Red]: '#ff5555', // Keep red
+          [TileColor.Green]: '#55ff55', // Keep green
+          [TileColor.Blue]: '#a0a0a0', // Gray instead of blue
+          [TileColor.Yellow]: '#ff5555', // Red-ish instead of yellow
+          [TileColor.Purple]: '#ff55ff', // Keep purple
+          [TileColor.Orange]: '#ff9955', // Keep orange
+        },
+        [ColorBlindMode.None]: {} as Record<TileColor, string> // This is a placeholder
+      };
+      
+      if (colorBlindPresets[settings.colorBlindMode][color]) {
+        return colorBlindPresets[settings.colorBlindMode][color];
+      }
+    }
+    
+    // Use default colors enhanced for high contrast mode if enabled
+    const baseColorMap = {
+      [TileColor.Red]: settings.highContrastMode ? '#ff3333' : '#ff5555',
+      [TileColor.Green]: settings.highContrastMode ? '#33ff33' : '#55ff55',
+      [TileColor.Blue]: settings.highContrastMode ? '#3333ff' : '#5555ff',
+      [TileColor.Yellow]: settings.highContrastMode ? '#ffff33' : '#ffff55',
+      [TileColor.Purple]: settings.highContrastMode ? '#ff33ff' : '#ff55ff',
+      [TileColor.Orange]: settings.highContrastMode ? '#ff9933' : '#ff9955',
     };
     
-    return colorMap[color] || '#ffffff'; // Default to white if color not found
+    return baseColorMap[color] || '#ffffff';
+  };
+
+  // Override the original getColorCSS function to use our new adjusted version
+  const getColorCSS = (color: TileColor): string => {
+    return getAdjustedColorCSS(color);
+  };
+
+  // Function to handle settings change
+  const handleSettingsChange = (newSettings: AppSettings) => {
+    console.log("Applying new settings:", newSettings);
+    setSettings(prevSettings => {
+      // First check if any settings actually changed to avoid unnecessary rerenders
+      const hasChanges = Object.keys(newSettings).some(key => {
+        const k = key as keyof AppSettings;
+        // Deep compare for objects like customColorScheme
+        if (k === 'customColorScheme') {
+          return JSON.stringify(newSettings[k]) !== JSON.stringify(prevSettings[k]);
+        }
+        return newSettings[k] !== prevSettings[k];
+      });
+      
+      if (hasChanges) {
+        // Only update if there are actual changes
+        const updatedSettings = {...newSettings};
+        // Save to localStorage immediately
+        localStorage.setItem('colorLockSettings', JSON.stringify(updatedSettings));
+        return updatedSettings;
+      }
+      return prevSettings;
+    });
   };
 
   // Define this function inside the component
@@ -720,14 +811,144 @@ const App: React.FC = () => {
     return puzzle ? puzzle.userMovesUsed : 0;
   }
 
+  // Helper function to convert TileColor to emoji
+  function tileColorToEmoji(color: TileColor): string {
+    const colorEmojis = {
+      [TileColor.Red]: "🟥",
+      [TileColor.Green]: "🟩",
+      [TileColor.Blue]: "🟦",
+      [TileColor.Yellow]: "🟨",
+      [TileColor.Purple]: "🟪",
+      [TileColor.Orange]: "🟧",
+    };
+    
+    return colorEmojis[color] || "⬜";
+  }
+
+  // Function to generate share text with emojis
+  const generateShareText = (): string => {
+    if (!puzzle) return "";
+    
+    // Get current date
+    const now = new Date();
+    const dateStr = `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()}`;
+    
+    // Create header text
+    let shareText = `Color Lock - ${dateStr}\n`;
+    shareText += `Target: ${tileColorToEmoji(puzzle.targetColor)}\n\n`;
+    shareText += `Score: ${puzzle.userMovesUsed} moves`;
+    
+    // Add medal emoji if move count meets or beats the goal
+    if (puzzle.userMovesUsed <= puzzle.algoScore) {
+      shareText += " 🏅";
+    }
+    
+    shareText += "\n\n";
+    shareText += "Today's Board:\n";
+    
+    // Add the starting grid
+    for (let r = 0; r < puzzle.startingGrid.length; r++) {
+      const row = puzzle.startingGrid[r];
+      const rowEmojis = row.map(color => tileColorToEmoji(color)).join("");
+      shareText += rowEmojis + "\n";
+    }
+    
+    return shareText;
+  };
+  
+  // Function to handle generic share action
+  const handleShare = async () => {
+    const shareText = generateShareText();
+    
+    // Try to use the Web Share API if available
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Color Lock Results',
+          text: shareText,
+        });
+        console.log('Successfully shared');
+      } catch (error) {
+        console.error('Error sharing:', error);
+        // Fall back to clipboard if sharing fails
+        copyToClipboard(shareText, 'Result copied to clipboard!');
+      }
+    } else {
+      // Fallback to clipboard for browsers that don't support Web Share API
+      copyToClipboard(shareText, 'Result copied to clipboard!');
+    }
+  };
+  
+  // Function to share to Twitter
+  const shareToTwitter = () => {
+    const shareText = generateShareText();
+    const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
+    window.open(twitterUrl, '_blank', 'noopener,noreferrer');
+  };
+  
+  // Function to share to Facebook
+  const shareToFacebook = () => {
+    const shareText = generateShareText();
+    // Facebook sharing requires a URL, so we'll share the game URL and use the text as the quote
+    const baseUrl = window.location.href.split('?')[0]; // Remove any query parameters
+    const facebookUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(baseUrl)}&quote=${encodeURIComponent(shareText)}`;
+    window.open(facebookUrl, '_blank', 'noopener,noreferrer');
+  };
+  
+  // Helper function to copy to clipboard with visual feedback
+  const copyToClipboard = (text: string, message: string = 'Copied to clipboard!') => {
+    // Create a tooltip element for feedback
+    const tooltip = document.createElement('div');
+    tooltip.className = 'copy-tooltip';
+    
+    navigator.clipboard.writeText(text)
+      .then(() => {
+        // Success message
+        tooltip.textContent = message;
+        tooltip.classList.add('success');
+      })
+      .catch((err) => {
+        // Error message
+        console.error('Failed to copy: ', err);
+        tooltip.textContent = 'Failed to copy';
+        tooltip.classList.add('error');
+      })
+      .finally(() => {
+        // Display tooltip
+        document.body.appendChild(tooltip);
+        
+        // Remove tooltip after 2 seconds
+        setTimeout(() => {
+          tooltip.classList.add('fade-out');
+          setTimeout(() => {
+            document.body.removeChild(tooltip);
+          }, 300);
+        }, 2000);
+      });
+  };
+
+  // Determine additional container classes based on settings
+  const containerClasses = ['container'];
+  if (settings.highContrastMode) {
+    containerClasses.push('high-contrast-mode');
+  }
+  if (!settings.enableAnimations) {
+    containerClasses.push('no-animations');
+  }
+
   return (
-    <div className="container">
+    <div className={containerClasses.join(' ')}>
+      {/* Settings Button */}
+      <button className="settings-button" onClick={() => setShowSettings(true)} aria-label="Settings">
+        <FontAwesomeIcon icon={faGear} />
+      </button>
+
       {/* Top info card */}
       <div className="top-card">
         <h1>Color Lock</h1>
         <div className="target-row">
           <span>Target:</span>
-          <div className="target-circle" style={{ backgroundColor: puzzle.targetColor }} />
+          <div className="target-circle" style={{ backgroundColor: getColorCSS(puzzle.targetColor) }} />
         </div>
         <div className="goal-row">
           <span>Goal: {dailyGoal}</span>
@@ -744,22 +965,28 @@ const App: React.FC = () => {
               const key = `${rIdx},${cIdx}`;
               const isLocked = puzzle.lockedCells.has(key);
               const isHinted = hintCell && hintCell.row === rIdx && hintCell.col === cIdx;
+              const isPartOfLargestRegion = isLocked && settings.highlightLargestRegion;
               
               // For hinted cells, set the background color explicitly and add animations
               const cellStyle = {
-                backgroundColor: color, // Always set the base color explicitly
-                ...(isHinted && {
+                backgroundColor: getColorCSS(color), // Always set the base color explicitly
+                ...(isHinted && settings.enableAnimations && {
                   border: '2px solid #1e90ff', // Persistent blue border
                   boxShadow: '0 0 6px 1px rgba(30, 144, 255, 0.6)', // Persistent blue glow
-                  '--current-color': color,
-                  '--target-color': hintCell.newColor,
+                  '--current-color': getColorCSS(color),
+                  '--target-color': getColorCSS(hintCell.newColor),
                 })
               };
+              
+              // Determine additional cell classes
+              const cellClasses = ['grid-cell'];
+              if (isHinted && settings.enableAnimations) cellClasses.push('hint-cell');
+              if (isPartOfLargestRegion) cellClasses.push('highlight-largest-region');
               
               return (
                 <div key={key} className="grid-cell-container">
                   <div
-                    className={`grid-cell ${isHinted ? 'hint-cell' : ''}`}
+                    className={cellClasses.join(' ')}
                     style={cellStyle}
                     onClick={() => handleTileClick(rIdx, cIdx)}
                   >
@@ -785,19 +1012,21 @@ const App: React.FC = () => {
       <div className="controls-container">
         <div className="controls-inner">
           {/* Locked region indicator with updated styling */}
-          <div className="locked-region-counter">
-            <span className="locked-label game-title-font">Locked Squares:</span>
-            <span 
-              className="locked-count"
-              style={{ 
-                color: getLockedColorCSS(),
-                textShadow: '-0.5px -0.5px 0 #000, 0.5px -0.5px 0 #000, -0.5px 0.5px 0 #000, 0.5px 0.5px 0 #000',
-                fontSize: '22px'
-              }}
-            >
-              {getLockedRegionSize()}
-            </span>
-          </div>
+          {settings.showLockedRegionCounter && (
+            <div className="locked-region-counter">
+              <span className="locked-label game-title-font">Locked Squares:</span>
+              <span 
+                className="locked-count"
+                style={{ 
+                  color: getLockedColorCSS(),
+                  textShadow: '-0.5px -0.5px 0 #000, 0.5px -0.5px 0 #000, -0.5px 0.5px 0 #000, 0.5px 0.5px 0 #000',
+                  fontSize: '22px'
+                }}
+              >
+                {getLockedRegionSize()}
+              </span>
+            </div>
+          )}
           
           {/* Try Again button */}
           <button 
@@ -811,7 +1040,7 @@ const App: React.FC = () => {
 
       {/* Color Picker Modal */}
       {showColorPicker && (
-        <ColorPickerModal onSelect={handleColorSelect} onCancel={closeColorPicker} />
+        <ColorPickerModal onSelect={handleColorSelect} onCancel={closeColorPicker} getColorCSS={getColorCSS} />
       )}
 
       {/* Win Modal */}
@@ -836,16 +1065,52 @@ const App: React.FC = () => {
             </div>
             
             <div className="modal-buttons">
-              <button className="share-button">Share</button>
-              <button 
-                className="try-again-modal-button"
-                onClick={() => {
-                  handleTryAgain();
-                  setShowWinModal(false);
-                }}
-              >
-                Try Again
-              </button>
+              {/* Main share button row */}
+              <div className="share-row">
+                <button 
+                  className="share-button"
+                  onClick={handleShare}
+                >
+                  Share
+                </button>
+                <button 
+                  className="try-again-modal-button"
+                  onClick={() => {
+                    handleTryAgain();
+                    setShowWinModal(false);
+                  }}
+                >
+                  Try Again
+                </button>
+              </div>
+              
+              {/* Social sharing options */}
+              <div className="social-share-options">
+                <p className="share-on-text">Share on:</p>
+                <div className="social-buttons">
+                  <button 
+                    className="social-button twitter-button"
+                    onClick={shareToTwitter}
+                    aria-label="Share on Twitter"
+                  >
+                    <FontAwesomeIcon icon={faTwitter} />
+                  </button>
+                  <button 
+                    className="social-button facebook-button"
+                    onClick={shareToFacebook}
+                    aria-label="Share on Facebook"
+                  >
+                    <FontAwesomeIcon icon={faFacebookF} />
+                  </button>
+                  <button
+                    className="social-button copy-button"
+                    onClick={() => copyToClipboard(generateShareText(), 'Result copied to clipboard!')}
+                    aria-label="Copy to clipboard"
+                  >
+                    <FontAwesomeIcon icon={faCopy} />
+                  </button>
+                </div>
+              </div>
             </div>
             
             <button 
@@ -857,6 +1122,14 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Settings Modal */}
+      <SettingsModal 
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        settings={settings}
+        onSettingsChange={handleSettingsChange}
+      />
     </div>
   );
 };
@@ -867,28 +1140,26 @@ const App: React.FC = () => {
 interface ColorPickerModalProps {
   onSelect: (color: TileColor) => void;
   onCancel: () => void;
+  getColorCSS: (color: TileColor) => string;
 }
 
-const ColorPickerModal: React.FC<ColorPickerModalProps> = ({ onSelect, onCancel }) => {
+const ColorPickerModal: React.FC<ColorPickerModalProps> = ({ onSelect, onCancel, getColorCSS }) => {
   return (
-    <div className="color-picker-modal-backdrop">
-      <div className="color-picker-modal">
-        <h3>Pick a Color</h3>
+    <div className="color-picker-modal-backdrop" onClick={onCancel}>
+      <div className="color-picker-modal" onClick={e => e.stopPropagation()}>
         <div className="color-bubbles">
           {allColors.map((color) => (
             <div key={color} className="color-bubble-container">
               <button
                 className="color-bubble"
-                style={{ backgroundColor: color }}
+                style={{ backgroundColor: getColorCSS(color) }}
                 onClick={() => onSelect(color)}
+                aria-label={`Select ${color} color`}
               />
               <div className="color-label">{color}</div>
             </div>
           ))}
         </div>
-        <button className="cancel-button" onClick={onCancel}>
-          Cancel
-        </button>
       </div>
     </div>
   );

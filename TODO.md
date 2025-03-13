@@ -8,7 +8,7 @@
 - Add Web Share API integration for modern browsers
 - Create a shareable link with URL parameters that encode the current game state
 - Include the following share options:
-  - Copy to clipboard (example format below, tiles should reflect initial state of daily puzzle):
+  - ~~Copy to clipboard (example format below, tiles should reflect initial state of daily puzzle):
     Color Lock - 3/12/2025
     Target: 🟧
     
@@ -19,12 +19,12 @@
     🟪🟧🟪🟪🟥
     🟩🟩🟩🟦🟧
     🟨🟦🟥🟩🟧
-    🟥🟥🟩🟦🟧
+    🟥🟥🟩🟦🟧~~
   - Share to Twitter/X
   - Share to Facebook
   - Share via Email
 - Implement fallbacks for browsers that don't support Web Share API
-- Location: Update the share button in the win modal (`App.tsx` around line ~850)
+- ~~Location: Update the share button in the win modal (`App.tsx` around line ~850)~~
 - Add share icon/options to the UI
 
 ## 2. Improve Hint System
@@ -57,7 +57,7 @@
   - Implement tutorial skip/dismiss option that remembers user preference
 - Suggested implementation: Create a new `Tutorial.tsx` component with overlay UI
 
-## 4. Settings Panel
+~~## 4. Settings Panel
 
 **Task**: Add settings button with color accessibility and region toggles
 
@@ -72,8 +72,9 @@
   - Toggle for highlighting largest region (on/off)
   - Toggle for animations/effects
   - Sound effects toggle
+  - toggle for locked region counter (on/off)
 - Save user preferences in localStorage
-- Ensure all settings follow accessibility best practices
+- Ensure all settings follow accessibility best practices~~
 
 ## 5. Statistics Dashboard
 
@@ -93,7 +94,7 @@
     - Average moves per solve
     - Best score ever
     - Streak of consecutive days played
-- Add visualization of stats (mini charts/graphs)
+- Add visualization of stats (mini charts/graphs plotted over time)
 - Save statistics in localStorage and optionally sync with Firebase if user account exists
 - Add share stats feature to the stats modal
 
