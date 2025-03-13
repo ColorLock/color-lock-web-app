@@ -103,11 +103,11 @@
 **Task**: Add Banana Standard logo to loading screen
 
 **Implementation Details**:
-- Create/source the Banana Standard logo
+- use public/tbs_logo.png
 - Enhance the loading UI in `App.tsx` (around line ~332)
 - Replace the simple "Loading puzzle..." text with a branded loading experience
-- Add a subtle animation to the logo during loading
-- Optimize the loading screen to display quickly before the full app loads
+- Optimize the loading screen to display quickly before the full app loads. This is important.
+
 
 ## 7. Firebase Security
 
@@ -124,7 +124,7 @@
 - Test the secure connection thoroughly
 - Consider implementing rate limiting for API calls
 
-## 8. Enhance Win Popup
+~~## 8. Enhance Win Popup
 
 **Task**: Improve game won popup with countdown and visual effects
 
@@ -137,6 +137,8 @@
   - Add a background color pulse or gradient animation
 - Make the modal more visually appealing with better typography and spacing
 - Display additional win statistics in the modal
+- Make the share buttons more in line with design of website and better spaced
+- Improve spacing of whole module~~
 
 ## 9. Autocomplete Feature
 
@@ -155,14 +157,16 @@
 **Task**: Improve color picker modal to dismiss when clicking outside
 
 **Implementation Details**:
-- Modify the `ColorPickerModal` component in `App.tsx`
+~~- Modify the `ColorPickerModal` component in `App.tsx`
 - Add click outside detection using a ref and event listener
 - Keep the Cancel button as a fallback
 - Ensure mobile touch events are also properly handled
 - Add subtle animations for opening/closing the picker
-- Test thoroughly across different devices and browsers
+- Test thoroughly across different devices and browsers~~
+- add neon blue glow to the square on the board you clicked
 
-## 11. Fix Failure Conditions
+
+~~## 11. Fix Failure Conditions
 
 **Task**: Fix failure condition for locking too many non-target colors
 
@@ -172,7 +176,7 @@
 - Ensure proper messaging when this failure occurs
 - Add a visual indicator showing how close the user is to locking too many tiles
 - Consider adding a warning when a move might lead to this failure condition
-- Test edge cases thoroughly
+- Test edge cases thoroughly~~
 
 ---
 

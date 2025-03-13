@@ -19,6 +19,7 @@ export interface AppSettings {
   
   // Game settings
   enableSoundEffects: boolean;
+  soundEnabled: boolean;
   showLockedRegionCounter: boolean;
 }
 
@@ -38,6 +39,7 @@ export const defaultSettings: AppSettings = {
   highlightLargestRegion: true,
   enableAnimations: true,
   enableSoundEffects: false,
+  soundEnabled: false,
   showLockedRegionCounter: true
 };
 

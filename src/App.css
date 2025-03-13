@@ -489,56 +489,229 @@
   z-index: 1000;
 }
 
-/* Win modal styling */
+/* Modal backdrop */
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+/* Enhanced Win modal styling */
 .win-modal {
   background-color: white;
   border-radius: 20px;
   padding: 30px;
-  width: 80%;
+  width: 85%;
   max-width: 400px;
   text-align: center;
   display: flex;
   flex-direction: column;
   gap: 20px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  animation: modalFadeIn 0.4s ease-out;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Modal animation */
+@keyframes modalFadeIn {
+  0% { opacity: 0; transform: scale(0.9); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* Win modal animation - background color pulse */
+.win-modal-animated {
+  animation: modalFadeIn 0.4s ease-out, backgroundPulse 8s ease-in-out infinite;
+}
+
+@keyframes backgroundPulse {
+  0% { background-color: #ffffff; }
+  50% { background-color: #f8f9ff; }
+  100% { background-color: #ffffff; }
 }
 
 /* Title styling */
 .congratulations-title {
-  font-size: 36px;
+  font-size: 32px;
   font-weight: bold;
-  margin: 10px 0;
+  margin: 0;
+  background: linear-gradient(45deg, #ff0055, #0066ff);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: titleGlow 4s ease-in-out infinite;
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+@keyframes titleGlow {
+  0% { text-shadow: 0 0 5px rgba(255, 0, 85, 0.1); }
+  50% { text-shadow: 0 0 15px rgba(0, 102, 255, 0.2); }
+  100% { text-shadow: 0 0 5px rgba(255, 0, 85, 0.1); }
 }
 
 /* Message about unlocking color */
 .unlocked-message {
-  font-size: 22px;
-  margin: 15px 0;
+  font-size: 20px;
+  margin: 0;
+  padding: 5px 0;
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.color-name {
+  font-weight: 600;
+}
+
+.optimal-badge {
+  font-size: 20px;
+  margin-left: 8px;
+  animation: medalPulse 2s infinite;
+}
+
+@keyframes medalPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+/* Win stats display */
+.win-stats {
+  display: flex;
+  justify-content: center;
+  gap: 30px;
+  margin: 5px 0;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.stat-value {
+  font-size: 26px;
+  font-weight: bold;
+  color: #3478F6;
+}
+
+.stat-label {
+  font-size: 14px;
+  color: #666;
 }
 
 /* Next puzzle timer section */
 .next-puzzle-timer {
-  margin: 15px 0;
+  margin: 5px 0 15px;
 }
 
 .next-puzzle-timer p {
-  font-size: 18px;
+  font-size: 16px;
   margin-bottom: 5px;
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #555;
 }
 
 /* Timer display */
 .timer {
-  font-size: 30px;
+  font-size: 28px;
   color: #3478F6; /* iOS blue */
   font-weight: bold;
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  margin: 5px 0;
+}
+
+.time-unit {
+  animation: timeUnitPulse 1s infinite;
+  display: inline-block;
+  width: 32px;
+}
+
+@keyframes timeUnitPulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.8; }
+  100% { opacity: 1; }
 }
 
 .time-separator {
   margin: 0 2px;
+  opacity: 0.8;
+}
+
+/* Share section */
+.share-section {
+  margin: 10px 0;
+  position: relative;
+}
+
+.share-button {
+  background-color: #3478F6;
+  color: white;
+  border: none;
+  border-radius: 12px;
+  padding: 12px 30px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.share-button:hover {
+  background-color: #2861d6;
+}
+
+.share-options {
+  margin-top: 15px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.share-on {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.social-buttons {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+}
+
+.social-button {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background-color: #f0f0f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s, background-color 0.2s;
+}
+
+.social-button:hover {
+  transform: scale(1.1);
+  background-color: #e8e8e8;
 }
 
 /* Button container */
@@ -546,45 +719,41 @@
   display: flex;
   justify-content: center;
   gap: 15px;
-  margin: 15px 0;
-}
-
-/* Share button - blue */
-.share-button {
-  background-color: #3478F6; /* iOS blue */
-  color: white;
-  border: none;
-  border-radius: 10px;
-  padding: 12px 30px;
-  font-size: 18px;
-  font-weight: 500;
-  cursor: pointer;
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-/* Try again button - light gray */
-.try-again-modal-button {
-  background-color: #E9E9EB; /* iOS light gray */
-  color: #3478F6; /* iOS blue text */
-  border: none;
-  border-radius: 10px;
-  padding: 12px 30px;
-  font-size: 18px;
-  font-weight: 500;
-  cursor: pointer;
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-/* Close button - plain text */
-.close-button {
-  background: none;
-  border: none;
-  color: black;
-  font-size: 18px;
-  padding: 10px;
-  cursor: pointer;
   margin-top: 10px;
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.try-again-modal-button {
+  background-color: #f0f0f0;
+  color: #333;
+  border: none;
+  border-radius: 12px;
+  padding: 12px 20px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.try-again-modal-button:hover {
+  background-color: #e0e0e0;
+}
+
+.close-button {
+  background-color: transparent;
+  color: #666;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 12px 20px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.close-button:hover {
+  background-color: #f5f5f5;
+  color: #333;
+  border-color: #ccc;
 }
 
 /* Use the same font style as the game title */

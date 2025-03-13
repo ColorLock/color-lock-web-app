@@ -1,11 +1,12 @@
 import { fetchPuzzleFromFirestore } from './firebase_client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext, createContext } from 'react';
 import './App.css';
 import { getHint, HintResult, getValidActions, computeActionDifference, NUM_COLORS } from './hints';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faLock, faCopy, faGear, faXmark } from '@fortawesome/free-solid-svg-icons';
 import { faTwitter, faFacebookF } from '@fortawesome/free-brands-svg-icons';
 import SettingsModal, { AppSettings, defaultSettings, ColorBlindMode } from './SettingsModal';
+import ReactConfetti from 'react-confetti';
 
 
 // -------------------------------------------------------------------------
@@ -298,6 +299,9 @@ function generatePuzzleFromDB(firestoreData: FirestorePuzzleData, dateStr: strin
 // 4. Main App Component
 // -------------------------------------------------------------------------
 
+// Create settings context
+export const SettingsContext = createContext<AppSettings | null>(null);
+
 const App: React.FC = () => {
   const GRID_SIZE = 5;
   const DATE_TO_USE = dateKeyForToday();
@@ -312,7 +316,12 @@ const App: React.FC = () => {
   const [firestoreData, setFirestoreData] = useState<FirestorePuzzleData | null>(null);
   const [isOnOptimalPath, setIsOnOptimalPath] = useState(true);
   const [moveCount, setMoveCount] = useState(0);
-  const [nextPuzzleTime, setNextPuzzleTime] = useState({ hours: 23, minutes: 18, seconds: 52 });
+  const [nextPuzzleTime, setNextPuzzleTime] = useState<{hours: string, minutes: string, seconds: string}>({
+    hours: "00",
+    minutes: "00",
+    seconds: "00"
+  });
+  const [timeLeft, setTimeLeft] = useState<string>("23:59:59");
 
   // Add settings state
   const [showSettings, setShowSettings] = useState(false);
@@ -328,6 +337,13 @@ const App: React.FC = () => {
     }
     return defaultSettings;
   });
+
+  const [windowDimensions, setWindowDimensions] = useState<{width: number, height: number}>({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  });
+  const [confettiActive, setConfettiActive] = useState<boolean>(true);
+  const [showShareButtons, setShowShareButtons] = useState<boolean>(false);
 
   // Generate the puzzle for the fixed date on first render.
   useEffect(() => {
@@ -936,6 +952,9 @@ const App: React.FC = () => {
     containerClasses.push('no-animations');
   }
 
+  // Sound settings
+  const soundEnabled = settings?.enableSoundEffects || false;
+
   return (
     <div className={containerClasses.join(' ')}>
       {/* Settings Button */}
@@ -1045,82 +1064,17 @@ const App: React.FC = () => {
 
       {/* Win Modal */}
       {showWinModal && (
-        <div className="modal-overlay">
-          <div className="win-modal">
-            <h1 className="congratulations-title">Congratulations!</h1>
-            
-            <p className="unlocked-message">
-              Unlocked {tileColorToName(puzzle.targetColor)} in {getCurrentMoveCount()} moves!
-            </p>
-            
-            <div className="next-puzzle-timer">
-              <p>New Puzzle in:</p>
-              <div className="timer">
-                <span className="time-value">{nextPuzzleTime.hours}</span>
-                <span className="time-separator">:</span>
-                <span className="time-value">{nextPuzzleTime.minutes.toString().padStart(2, '0')}</span>
-                <span className="time-separator">:</span>
-                <span className="time-value">{nextPuzzleTime.seconds.toString().padStart(2, '0')}</span>
-              </div>
-            </div>
-            
-            <div className="modal-buttons">
-              {/* Main share button row */}
-              <div className="share-row">
-                <button 
-                  className="share-button"
-                  onClick={handleShare}
-                >
-                  Share
-                </button>
-                <button 
-                  className="try-again-modal-button"
-                  onClick={() => {
-                    handleTryAgain();
-                    setShowWinModal(false);
-                  }}
-                >
-                  Try Again
-                </button>
-              </div>
-              
-              {/* Social sharing options */}
-              <div className="social-share-options">
-                <p className="share-on-text">Share on:</p>
-                <div className="social-buttons">
-                  <button 
-                    className="social-button twitter-button"
-                    onClick={shareToTwitter}
-                    aria-label="Share on Twitter"
-                  >
-                    <FontAwesomeIcon icon={faTwitter} />
-                  </button>
-                  <button 
-                    className="social-button facebook-button"
-                    onClick={shareToFacebook}
-                    aria-label="Share on Facebook"
-                  >
-                    <FontAwesomeIcon icon={faFacebookF} />
-                  </button>
-                  <button
-                    className="social-button copy-button"
-                    onClick={() => copyToClipboard(generateShareText(), 'Result copied to clipboard!')}
-                    aria-label="Copy to clipboard"
-                  >
-                    <FontAwesomeIcon icon={faCopy} />
-                  </button>
-                </div>
-              </div>
-            </div>
-            
-            <button 
-              className="close-button"
-              onClick={() => setShowWinModal(false)}
-            >
-              Close
-            </button>
-          </div>
-        </div>
+        <WinModal 
+          puzzle={puzzle} 
+          onTryAgain={handleTryAgain} 
+          onClose={() => setShowWinModal(false)}
+          getColorCSS={getColorCSS}
+          shareToTwitter={shareToTwitter}
+          shareToFacebook={shareToFacebook}
+          copyToClipboard={(text) => copyToClipboard(text, 'Result copied to clipboard!')}
+          generateShareText={generateShareText}
+          setShowWinModal={setShowWinModal}
+        />
       )}
 
       {/* Settings Modal */}
@@ -1172,11 +1126,67 @@ interface WinModalProps {
   puzzle: DailyPuzzle;
   onTryAgain: () => void;
   onClose: () => void;
+  getColorCSS: (color: TileColor) => string;
+  shareToTwitter: () => void;
+  shareToFacebook: () => void;
+  copyToClipboard: (text: string) => void;
+  generateShareText: () => string;
+  setShowWinModal: (show: boolean) => void;
 }
 
-const WinModal: React.FC<WinModalProps> = ({ puzzle, onTryAgain, onClose }) => {
+const WinModal: React.FC<WinModalProps> = ({ 
+  puzzle, 
+  onTryAgain, 
+  onClose, 
+  getColorCSS, 
+  shareToTwitter, 
+  shareToFacebook, 
+  copyToClipboard, 
+  generateShareText,
+  setShowWinModal
+}) => {
   const [timeLeft, setTimeLeft] = useState<string>("");
+  const [windowDimensions, setWindowDimensions] = useState<{width: number, height: number}>({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  });
+  const [confettiActive, setConfettiActive] = useState<boolean>(true);
+  const [showShareButtons, setShowShareButtons] = useState<boolean>(false);
 
+  // Get settings for sound playback
+  const settings = useContext(SettingsContext);
+  const soundEnabled = settings?.soundEnabled || false;
+  
+  // Play celebration sound once
+  useEffect(() => {
+    if (soundEnabled) {
+      const audio = new Audio('/sounds/win-celebration.mp3');
+      audio.volume = 0.5;
+      audio.play().catch(err => console.warn('Could not play sound:', err));
+    }
+    
+    // Setup window resize listener for confetti
+    const handleResize = () => {
+      setWindowDimensions({
+        width: window.innerWidth,
+        height: window.innerHeight
+      });
+    };
+    
+    window.addEventListener('resize', handleResize);
+    
+    // Stop confetti after some time
+    const timer = setTimeout(() => {
+      setConfettiActive(false);
+    }, 5000);
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearTimeout(timer);
+    };
+  }, [soundEnabled]);
+
+  // Timer countdown effect
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -1198,17 +1208,98 @@ const WinModal: React.FC<WinModalProps> = ({ puzzle, onTryAgain, onClose }) => {
     return () => clearInterval(interval);
   }, [onTryAgain]);
 
+  // Get color name for display
+  const colorName = tileColorToName(puzzle.targetColor);
+
+  // Calculate if the user beat the optimal solution
+  const beatOptimal = puzzle.userMovesUsed <= puzzle.algoScore;
+  
+  // Generate share text
+  const shareText = generateShareText();
+
+  // Handle share button click
+  const handleShareClick = () => {
+    setShowShareButtons(!showShareButtons);
+  };
+
   return (
     <div className="modal-backdrop">
-      <div className="win-modal">
-        <h2>Congratulations!</h2>
-        <p>
-          You unlocked {puzzle.targetColor} in {puzzle.userMovesUsed} moves!
-        </p>
-        <p>New Puzzle in: {timeLeft}</p>
+      {confettiActive && (
+        <ReactConfetti
+          width={windowDimensions.width}
+          height={windowDimensions.height}
+          recycle={true}
+          numberOfPieces={250}
+          colors={['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff']}
+        />
+      )}
+      
+      <div className="win-modal win-modal-animated">
+        <h2 className="congratulations-title">Congratulations!</h2>
+        
+        <div className="unlocked-message">
+          Unlocked <span className="color-name" style={{color: getColorCSS(puzzle.targetColor)}}>{colorName}</span> in <strong>{puzzle.userMovesUsed}</strong> moves!
+          {beatOptimal && <span className="optimal-badge">🏅</span>}
+        </div>
+        
+        <div className="win-stats">
+          <div className="stat-item">
+            <div className="stat-value">{puzzle.algoScore}</div>
+            <div className="stat-label">Optimal Moves</div>
+          </div>
+          <div className="stat-item">
+            <div className="stat-value">{puzzle.timesPlayed}</div>
+            <div className="stat-label">Times Played</div>
+          </div>
+        </div>
+        
+        <div className="next-puzzle-timer">
+          <p>New Puzzle in:</p>
+          <div className="timer">
+            {timeLeft.split(':').map((unit, index) => (
+              <React.Fragment key={index}>
+                {index > 0 && <span className="time-separator">:</span>}
+                <span className="time-unit">{unit}</span>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+        
+        <div className="share-section">
+          <button className="share-button" onClick={handleShareClick}>
+            Share
+          </button>
+          
+          {showShareButtons && (
+            <div className="share-options">
+              <span className="share-on">Share on:</span>
+              <div className="social-buttons">
+                <button className="social-button twitter-button" onClick={shareToTwitter}>
+                  <svg viewBox="0 0 24 24" width="24" height="24">
+                    <path d="M22.46 6c-.77.35-1.6.58-2.46.69.88-.53 1.56-1.37 1.88-2.38-.83.5-1.75.85-2.72 1.05C18.37 4.5 17.26 4 16 4c-2.35 0-4.27 1.92-4.27 4.29 0 .34.04.67.11.98C8.28 9.09 5.11 7.38 3 4.79c-.37.63-.58 1.37-.58 2.15 0 1.49.75 2.81 1.91 3.56-.71 0-1.37-.2-1.95-.5v.03c0 2.08 1.48 3.82 3.44 4.21a4.22 4.22 0 0 1-1.93.07 4.28 4.28 0 0 0 4 2.98 8.521 8.521 0 0 1-5.33 1.84c-.34 0-.68-.02-1.02-.06C3.44 20.29 5.7 21 8.12 21 16 21 20.33 14.46 20.33 20.33 8.79c0-.19 0-.37-.01-.56.84-.6 1.56-1.36 2.14-2.23z" fill="#1DA1F2" />
+                  </svg>
+                </button>
+                <button className="social-button facebook-button" onClick={shareToFacebook}>
+                  <svg viewBox="0 0 24 24" width="24" height="24">
+                    <path d="M20 3H4a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h8.61v-6.97h-2.34V11.3h2.34v-2c0-2.33 1.42-3.6 3.5-3.6 1 0 1.84.07 2.1.1v2.43h-1.44c-1.13 0-1.35.54-1.35 1.33v1.74h2.7l-.35 2.73h-2.35V21H20a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1z" fill="#4267B2" />
+                  </svg>
+                </button>
+                <button className="social-button clipboard-button" onClick={() => copyToClipboard(shareText)}>
+                  <svg viewBox="0 0 24 24" width="24" height="24">
+                    <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" fill="#333" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+        
         <div className="modal-buttons">
-          <button onClick={onTryAgain}>Try Again</button>
-          <button onClick={onClose}>Close</button>
+          <button className="try-again-modal-button" onClick={() => {
+            onTryAgain();
+            setShowWinModal(false);
+          }}>Try Again</button>
+          <button className="close-button" onClick={onClose}>Close</button>
         </div>
       </div>
     </div>
