@@ -3,9 +3,10 @@ import React, { useState, useEffect, useContext, createContext } from 'react';
 import './App.css';
 import { getHint, HintResult, getValidActions, computeActionDifference, NUM_COLORS } from './hints';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faLock, faCopy, faGear, faXmark } from '@fortawesome/free-solid-svg-icons';
+import { faLock, faCopy, faGear, faXmark, faTrophy } from '@fortawesome/free-solid-svg-icons';
 import { faTwitter, faFacebookF } from '@fortawesome/free-brands-svg-icons';
 import SettingsModal, { AppSettings, defaultSettings, ColorBlindMode } from './SettingsModal';
+import StatsModal, { GameStatistics, defaultStats } from './StatsModal';
 import ReactConfetti from 'react-confetti';
 
 
@@ -338,12 +339,118 @@ const App: React.FC = () => {
     return defaultSettings;
   });
 
+  // Add statistics state
+  const [showStats, setShowStats] = useState(false);
+  const [gameStats, setGameStats] = useState<GameStatistics>(() => {
+    // Load stats from localStorage on initial render
+    const savedStats = localStorage.getItem('colorLockStats');
+    if (savedStats) {
+      try {
+        return JSON.parse(savedStats);
+      } catch (e) {
+        console.error('Failed to parse saved stats', e);
+      }
+    }
+    return { ...defaultStats };
+  });
+  
+  // Track game start time for calculating time spent
+  const [gameStartTime, setGameStartTime] = useState<Date | null>(null);
+
   const [windowDimensions, setWindowDimensions] = useState<{width: number, height: number}>({
     width: window.innerWidth,
     height: window.innerHeight,
   });
   const [confettiActive, setConfettiActive] = useState<boolean>(true);
   const [showShareButtons, setShowShareButtons] = useState<boolean>(false);
+
+  // Load game statistics
+  const loadGameStats = (): GameStatistics => {
+    const savedStats = localStorage.getItem('colorLockStats');
+    if (savedStats) {
+      try {
+        return JSON.parse(savedStats);
+      } catch (e) {
+        console.error('Failed to parse saved stats', e);
+        return { ...defaultStats };
+      }
+    }
+    return { ...defaultStats };
+  };
+
+  // Save game statistics
+  const saveGameStats = (stats: GameStatistics) => {
+    localStorage.setItem('colorLockStats', JSON.stringify(stats));
+    setGameStats(stats);
+  };
+
+  // Update daily stats with current game data
+  const updateGameStats = (isSolved: boolean) => {
+    const currentDate = dateKeyForToday();
+    const currentStats = loadGameStats();
+    const timeSpent = gameStartTime ? Math.floor((new Date().getTime() - gameStartTime.getTime()) / 1000) : 0;
+    
+    // Update today's stats
+    const todayStats = {
+      movesUsed: moveCount,
+      bestScore: currentStats.todayStats.bestScore === null || moveCount < currentStats.todayStats.bestScore 
+        ? moveCount 
+        : currentStats.todayStats.bestScore,
+      timeSpent: timeSpent
+    };
+    
+    // Calculate daily scores for the mini chart
+    const dailyScores = { ...currentStats.allTimeStats.dailyScores };
+    if (isSolved) {
+      dailyScores[currentDate] = moveCount;
+    }
+    
+    // Calculate streak
+    let streak = currentStats.allTimeStats.streak;
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayKey = yesterday.toISOString().split('T')[0];
+    
+    if (isSolved) {
+      // If yesterday is in our records, increment streak, otherwise reset to 1
+      if (dailyScores[yesterdayKey] !== undefined) {
+        streak += 1;
+      } else {
+        streak = 1;
+      }
+    }
+    
+    // Calculate other all-time stats
+    const gamesPlayed = currentStats.allTimeStats.gamesPlayed + 1;
+    const winCount = Object.keys(dailyScores).length;
+    const winPercentage = gamesPlayed > 0 ? (winCount / gamesPlayed) * 100 : 0;
+    
+    // Calculate average moves per solve
+    const totalMoves = Object.values(dailyScores).reduce((sum, moves) => sum + moves, 0);
+    const averageMovesPerSolve = winCount > 0 ? totalMoves / winCount : 0;
+    
+    // Find best score ever
+    const allScores = Object.values(dailyScores);
+    const bestScoreEver = allScores.length > 0 ? Math.min(...allScores) : null;
+    
+    // Update all-time stats
+    const allTimeStats = {
+      gamesPlayed,
+      winPercentage,
+      averageMovesPerSolve,
+      bestScoreEver,
+      streak,
+      dailyScores
+    };
+    
+    // Save updated stats
+    const updatedStats: GameStatistics = {
+      todayStats,
+      allTimeStats
+    };
+    
+    saveGameStats(updatedStats);
+  };
 
   // Generate the puzzle for the fixed date on first render.
   useEffect(() => {
@@ -389,6 +496,13 @@ const App: React.FC = () => {
 
     loadPuzzle();
   }, []);
+
+  // When the puzzle is first loaded, set the game start time
+  useEffect(() => {
+    if (puzzle && !gameStartTime) {
+      setGameStartTime(new Date());
+    }
+  }, [puzzle, gameStartTime]);
 
   // Save settings to localStorage whenever they change
   useEffect(() => {
@@ -621,27 +735,42 @@ const App: React.FC = () => {
     };
   };
 
+  const handlePuzzleSolved = () => {
+    // Update statistics when puzzle is solved
+    updateGameStats(true);
+    setShowWinModal(true);
+  };
+
   // Reset isOnOptimalPath when trying again
   const handleTryAgain = async () => {
     try {
+      // If the player resets and doesn't solve the puzzle, count it as a played game
+      if (puzzle && !puzzle.isSolved) {
+        updateGameStats(false);
+      }
+      
       // Clear any active hints
       setHintCell(null);
       
-      const firestoreData = await fetchPuzzleFromFirestore(DATE_TO_USE);
-      const newPuzzle = generatePuzzleFromDB(firestoreData, DATE_TO_USE);
+      let puzzleData = firestoreData;
+      // If we don't have the data cached, fetch it
+      if (!puzzleData) {
+        puzzleData = await fetchPuzzleFromFirestore(DATE_TO_USE);
+        setFirestoreData(puzzleData);
+      }
+      
+      // Reset the game
+      const newPuzzle = generatePuzzleFromDB(puzzleData, DATE_TO_USE);
       setPuzzle(newPuzzle);
-      setIsOnOptimalPath(true); // Reset path tracking
+      setIsOnOptimalPath(true);
+      setMoveCount(0);
+      setGameStartTime(new Date()); // Reset start time
     } catch (error) {
       console.error("Error in try again:", error);
-      // Don't leave the app hanging if there's an error
       setError("Couldn't load new puzzle. Please refresh the page.");
     } finally {
       setShowWinModal(false);
     }
-  };
-
-  const handlePuzzleSolved = () => {
-    setShowWinModal(true);
   };
 
   // More detailed locked region analysis
@@ -943,6 +1072,28 @@ const App: React.FC = () => {
       });
   };
 
+  // Share statistics
+  const shareGameStats = () => {
+    const { todayStats, allTimeStats } = gameStats;
+    
+    let shareText = `🔒 Color Lock Stats 🔒\n\n`;
+    shareText += `Today's Game:\n`;
+    shareText += `Moves: ${todayStats.movesUsed}\n`;
+    shareText += `Best Score: ${todayStats.bestScore !== null ? todayStats.bestScore : '-'}\n`;
+    shareText += `Time: ${Math.floor(todayStats.timeSpent / 60)}:${(todayStats.timeSpent % 60).toString().padStart(2, '0')}\n\n`;
+    
+    shareText += `All-time Stats:\n`;
+    shareText += `Games: ${allTimeStats.gamesPlayed}\n`;
+    shareText += `Win Rate: ${allTimeStats.winPercentage.toFixed(0)}%\n`;
+    shareText += `Avg Moves: ${allTimeStats.averageMovesPerSolve.toFixed(1)}\n`;
+    shareText += `Best Ever: ${allTimeStats.bestScoreEver !== null ? allTimeStats.bestScoreEver : '-'}\n`;
+    shareText += `Streak: ${allTimeStats.streak}\n\n`;
+    
+    shareText += `Play at: https://colorlock.game`;
+    
+    copyToClipboard(shareText, 'Stats copied to clipboard!');
+  };
+
   // Determine additional container classes based on settings
   const containerClasses = ['container'];
   if (settings.highContrastMode) {
@@ -960,6 +1111,11 @@ const App: React.FC = () => {
       {/* Settings Button */}
       <button className="settings-button" onClick={() => setShowSettings(true)} aria-label="Settings">
         <FontAwesomeIcon icon={faGear} />
+      </button>
+
+      {/* Stats Button */}
+      <button className="stats-button" onClick={() => setShowStats(true)} aria-label="Statistics">
+        <FontAwesomeIcon icon={faTrophy} />
       </button>
 
       {/* Top info card */}
@@ -1083,6 +1239,14 @@ const App: React.FC = () => {
         onClose={() => setShowSettings(false)}
         settings={settings}
         onSettingsChange={handleSettingsChange}
+      />
+
+      {/* Stats Modal */}
+      <StatsModal 
+        isOpen={showStats}
+        onClose={() => setShowStats(false)}
+        stats={gameStats}
+        onShareStats={shareGameStats}
       />
     </div>
   );
