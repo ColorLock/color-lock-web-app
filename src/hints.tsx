@@ -2,7 +2,7 @@ import { TileColor, FirestorePuzzleData } from './App';
 
 // Constants
 const GRID_SIZE = 5;
-const NUM_COLORS = 6; // Assuming 6 colors based on the TileColor enum
+export const NUM_COLORS = 6; // Assuming 6 colors based on the TileColor enum
 
 // Interface for the decoded hint
 export interface HintResult {
@@ -13,57 +13,76 @@ export interface HintResult {
 }
 
 /**
- * Helper function for flood fill (simplification of the one in App.tsx)
+ * Helper function for flood fill - matching Python implementation
  */
 function _floodFillSimple(
   grid: TileColor[][],
   row: number,
   col: number,
-  oldColor: TileColor
+  color: TileColor
 ): [number, number][] {
   const visited = new Set<string>();
-  const stack = [[row, col]];
+  const stack: [number, number][] = [[row, col]];
   const changedCells: [number, number][] = [];
   
   while (stack.length > 0) {
     const [r, c] = stack.pop()!;
-    if (r < 0 || r >= GRID_SIZE || c < 0 || c >= GRID_SIZE) continue;
-    if (grid[r][c] !== oldColor) continue;
     const key = `${r},${c}`;
-    if (visited.has(key)) continue;
-
-    visited.add(key);
-    changedCells.push([r, c]);
-
-    stack.push([r + 1, c], [r - 1, c], [r, c + 1], [r, c - 1]);
+    
+    // Match Python's order of checks
+    if (visited.has(key)) {
+      continue;
+    }
+    
+    if (r >= 0 && r < GRID_SIZE && c >= 0 && c < GRID_SIZE) {
+      if (grid[r][c] === color) {
+        visited.add(key);
+        changedCells.push([r, c]);
+        
+        // Add all neighbors like Python's stack.extend()
+        stack.push([r + 1, c], [r - 1, c], [r, c + 1], [r, c - 1]);
+      }
+    }
   }
+  
   return changedCells;
 }
 
 /**
- * Helper function for static flood fill (returns size and cells)
+ * Helper function for static flood fill - matching Python implementation
  */
 function _floodFillStatic(
   grid: TileColor[][],
-  row: number,
-  col: number,
+  startR: number,
+  startC: number,
   color: TileColor
 ): [number, Set<string>] {
-  const visited = new Set<string>();
-  const stack = [[row, col]];
+  const regionCells = new Set<string>();
+  const stack: [number, number][] = [[startR, startC]];
   
   while (stack.length > 0) {
     const [r, c] = stack.pop()!;
-    if (r < 0 || r >= GRID_SIZE || c < 0 || c >= GRID_SIZE) continue;
-    if (grid[r][c] !== color) continue;
     const key = `${r},${c}`;
-    if (visited.has(key)) continue;
-
-    visited.add(key);
     
-    stack.push([r + 1, c], [r - 1, c], [r, c + 1], [r, c - 1]);
+    // Match Python's order of checks
+    if (regionCells.has(key)) {
+      continue;
+    }
+    
+    if (r >= 0 && r < GRID_SIZE && c >= 0 && c < GRID_SIZE) {
+      if (grid[r][c] === color) {
+        regionCells.add(key);
+        
+        // Match Python's individual append calls to preserve order
+        stack.push([r + 1, c]);
+        stack.push([r - 1, c]);
+        stack.push([r, c + 1]);
+        stack.push([r, c - 1]);
+      }
+    }
   }
-  return [visited.size, visited];
+  
+  return [regionCells.size, regionCells];
 }
 
 /**
@@ -74,16 +93,34 @@ export function computeActionDifference(
   grid: TileColor[][],
   lockedCells: Set<string>,
   targetColor: TileColor,
-  actionIdx: number
+  actionIdx: number,
+  firestoreData: FirestorePuzzleData
 ): number {
-  // Decode action (same logic as in decodeActionId)
-  const row = Math.floor(actionIdx / (GRID_SIZE * NUM_COLORS));
+  // Decode action (use SAME logic as in decodeActionId)
+  const row = (GRID_SIZE - 1) - Math.floor(actionIdx / (GRID_SIZE * NUM_COLORS));
   const remainder = actionIdx % (GRID_SIZE * NUM_COLORS);
   const col = Math.floor(remainder / NUM_COLORS);
-  const newColorIdx = remainder % NUM_COLORS;
+  const colorIndex = remainder % NUM_COLORS;
   
-  const colorValues = Object.values(TileColor);
-  const newColor = colorValues[newColorIdx] as TileColor;
+  // Get the color using the same logic as decodeActionId
+  let newColor: TileColor;
+  
+  if (firestoreData.colorMap) {
+    // Find the index where the value equals colorIndex in the colorMap array
+    const mappedIndex = firestoreData.colorMap.indexOf(colorIndex);
+    if (mappedIndex !== -1) {
+      const colorValues = Object.values(TileColor);
+      newColor = colorValues[mappedIndex] as TileColor;
+    } else {
+      // Fallback if value not found in colorMap
+      const colorValues = Object.values(TileColor);
+      newColor = colorValues[colorIndex] as TileColor;
+    }
+  } else {
+    // Fallback to direct mapping if colorMap is not available
+    const colorValues = Object.values(TileColor);
+    newColor = colorValues[colorIndex] as TileColor;
+  }
 
   // Early exit conditions
   if (!(0 <= row && row < GRID_SIZE && 0 <= col && col < GRID_SIZE)) {
@@ -168,19 +205,38 @@ export function computeActionDifference(
  */
 export function getValidActions(
   grid: TileColor[][],
-  lockedCells: Set<string>
+  lockedCells: Set<string>,
+  firestoreData: FirestorePuzzleData
 ): number[] {
   const valid: number[] = [];
   const totalActions = GRID_SIZE * GRID_SIZE * NUM_COLORS;
 
   for (let actionIdx = 0; actionIdx < totalActions; actionIdx++) {
-    const row = Math.floor(actionIdx / (GRID_SIZE * NUM_COLORS));
+    // Use the same decoding logic as decodeActionId to ensure consistency
+    const row = (GRID_SIZE - 1) - Math.floor(actionIdx / (GRID_SIZE * NUM_COLORS));
     const remainder = actionIdx % (GRID_SIZE * NUM_COLORS);
     const col = Math.floor(remainder / NUM_COLORS);
-    const newColorIdx = remainder % NUM_COLORS;
+    const colorIndex = remainder % NUM_COLORS;
     
-    const colorValues = Object.values(TileColor);
-    const newColor = colorValues[newColorIdx] as TileColor;
+    // Get the color using the same logic as decodeActionId
+    let newColor: TileColor;
+    
+    if (firestoreData.colorMap) {
+      // Find the index where the value equals colorIndex in the colorMap array
+      const mappedIndex = firestoreData.colorMap.indexOf(colorIndex);
+      if (mappedIndex !== -1) {
+        const colorValues = Object.values(TileColor);
+        newColor = colorValues[mappedIndex] as TileColor;
+      } else {
+        // Fallback if value not found in colorMap
+        const colorValues = Object.values(TileColor);
+        newColor = colorValues[colorIndex] as TileColor;
+      }
+    } else {
+      // Fallback to direct mapping if colorMap is not available
+      const colorValues = Object.values(TileColor);
+      newColor = colorValues[colorIndex] as TileColor;
+    }
 
     // 1) If (row,col) is in locked region => invalid
     if (lockedCells.has(`${row},${col}`)) {

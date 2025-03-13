@@ -1,7 +1,9 @@
 import { fetchPuzzleFromFirestore } from './firebase_client';
 import React, { useState, useEffect } from 'react';
 import './App.css';
-import { getHint, HintResult } from './hints';
+import { getHint, HintResult, getValidActions, computeActionDifference, NUM_COLORS } from './hints';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faLock } from '@fortawesome/free-solid-svg-icons';
 
 
 // -------------------------------------------------------------------------
@@ -306,6 +308,9 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [hintCell, setHintCell] = useState<HintResult | null>(null);
   const [firestoreData, setFirestoreData] = useState<FirestorePuzzleData | null>(null);
+  const [isOnOptimalPath, setIsOnOptimalPath] = useState(true);
+  const [moveCount, setMoveCount] = useState(0);
+  const [nextPuzzleTime, setNextPuzzleTime] = useState({ hours: 23, minutes: 18, seconds: 52 });
 
   // Generate the puzzle for the fixed date on first render.
   useEffect(() => {
@@ -371,7 +376,32 @@ const App: React.FC = () => {
     setShowColorPicker(true);
   };
 
-  // When a new color is selected, perform flood fill and update the puzzle.
+  // Add a utility function to check if the current grid matches the expected state
+  const checkIfOnOptimalPath = (grid: TileColor[][], moveNumber: number): boolean => {
+    if (!firestoreData || !firestoreData.states || moveNumber >= firestoreData.states.length) {
+      return false;
+    }
+    
+    // Get the expected state for the current move number
+    const expectedState = firestoreData.states[moveNumber];
+    
+    // Compare current grid with expected state
+    for (let r = 0; r < GRID_SIZE; r++) {
+      const rowKey = r.toString();
+      if (!expectedState[rowKey]) return false;
+      
+      const expectedRow = expectedState[rowKey];
+      for (let c = 0; c < GRID_SIZE; c++) {
+        if (grid[r][c] !== expectedRow[c]) {
+          return false;
+        }
+      }
+    }
+    
+    return true;
+  };
+
+  // Modify handleColorSelect to check if user is still on optimal path after each move
   const handleColorSelect = (newColor: TileColor) => {
     if (!selectedTile) return;
     
@@ -420,6 +450,14 @@ const App: React.FC = () => {
       }
     }
 
+    // NEW: Check if the user is still on the optimal path
+    const willBeOnPath = checkIfOnOptimalPath(newGrid, newUserMoves);
+    setIsOnOptimalPath(willBeOnPath);
+    
+    if (!willBeOnPath) {
+      console.log("User has deviated from the optimal solution path");
+    }
+
     const updated: DailyPuzzle = {
       ...puzzle,
       grid: newGrid,
@@ -432,7 +470,7 @@ const App: React.FC = () => {
     closeColorPicker();
 
     if (updated.isSolved) {
-      setShowWinModal(true);
+      handlePuzzleSolved();
     }
   };
 
@@ -441,25 +479,7 @@ const App: React.FC = () => {
     setSelectedTile(null);
   };
 
-  // "Try Again" resets the puzzle using the same date-based seed.
-  const handleTryAgain = async () => {
-    try {
-      const firestoreData = await fetchPuzzleFromFirestore(DATE_TO_USE);
-      const newPuzzle = generatePuzzleFromDB(firestoreData, DATE_TO_USE);
-      setPuzzle(newPuzzle);
-    } catch (error) {
-      console.error("Error in try again:", error);
-      // Don't leave the app hanging if there's an error
-      setError("Couldn't load new puzzle. Please refresh the page.");
-    } finally {
-      setShowWinModal(false);
-    }
-  };
-
-  const closeWinModal = () => {
-    setShowWinModal(false);
-  };
-
+  // Update the handleHint function to use dynamic calculation if off-path
   const handleHint = () => {
     // Clear previous hint
     setHintCell(null);
@@ -474,8 +494,55 @@ const App: React.FC = () => {
       return;
     }
 
-    // Get hint for the current move number
-    const hint = getHint(firestoreData, puzzle.userMovesUsed);
+    let hint: HintResult | null = null;
+    
+    if (isOnOptimalPath) {
+      // User is on the optimal path, use the predefined next action
+      console.log("User is on optimal path, providing next predefined action");
+      hint = getHint(firestoreData, puzzle.userMovesUsed);
+    } else {
+      // User has deviated, calculate the best action dynamically
+      console.log("User has deviated from optimal path, calculating best action");
+      
+      // Get all valid actions
+      const validActions = getValidActions(puzzle.grid, puzzle.lockedCells, firestoreData);
+      
+      if (validActions.length === 0) {
+        console.log("No valid actions available");
+        return;
+      }
+      
+      // Evaluate each action and find the best one(s)
+      let bestActions: number[] = [];
+      let bestDifference = -Infinity;
+      
+      validActions.forEach(actionIdx => {
+        const difference = computeActionDifference(
+          puzzle.grid, 
+          puzzle.lockedCells, 
+          puzzle.targetColor, 
+          actionIdx,
+          firestoreData
+        );
+        
+        if (difference > bestDifference) {
+          bestDifference = difference;
+          bestActions = [actionIdx];
+        } else if (difference === bestDifference) {
+          bestActions.push(actionIdx);
+        }
+      });
+      
+      if (bestActions.length > 0) {
+        // If there are ties, choose randomly
+        const randomIndex = Math.floor(Math.random() * bestActions.length);
+        const bestActionIdx = bestActions[randomIndex];
+        
+        // Create a hint result from the best action
+        hint = decodeActionIdFromApp(bestActionIdx, firestoreData);
+        console.log(`Selected best action with difference ${bestDifference}`);
+      }
+    }
     
     if (hint && hint.valid) {
       console.log("Hint provided:", hint);
@@ -484,6 +551,174 @@ const App: React.FC = () => {
       console.log("No valid hint available");
     }
   };
+  
+  // Helper function to decode action ID (similar to the one in hints.tsx)
+  const decodeActionIdFromApp = (actionId: number, firestoreData: FirestorePuzzleData): HintResult => {
+    const row = (GRID_SIZE - 1) - Math.floor(actionId / (GRID_SIZE * NUM_COLORS));
+    const remainder = actionId % (GRID_SIZE * NUM_COLORS);
+    const col = Math.floor(remainder / NUM_COLORS);
+    const colorIndex = remainder % NUM_COLORS;
+    
+    let newColor: TileColor;
+    
+    if (firestoreData.colorMap) {
+      const mappedIndex = firestoreData.colorMap.indexOf(colorIndex);
+      if (mappedIndex !== -1) {
+        const colorValues = Object.values(TileColor);
+        newColor = colorValues[mappedIndex] as TileColor;
+      } else {
+        const colorValues = Object.values(TileColor);
+        newColor = colorValues[colorIndex] as TileColor;
+      }
+    } else {
+      const colorValues = Object.values(TileColor);
+      newColor = colorValues[colorIndex] as TileColor;
+    }
+    
+    return {
+      row,
+      col,
+      newColor,
+      valid: row >= 0 && row < GRID_SIZE && col >= 0 && col < GRID_SIZE
+    };
+  };
+
+  // Reset isOnOptimalPath when trying again
+  const handleTryAgain = async () => {
+    try {
+      // Clear any active hints
+      setHintCell(null);
+      
+      const firestoreData = await fetchPuzzleFromFirestore(DATE_TO_USE);
+      const newPuzzle = generatePuzzleFromDB(firestoreData, DATE_TO_USE);
+      setPuzzle(newPuzzle);
+      setIsOnOptimalPath(true); // Reset path tracking
+    } catch (error) {
+      console.error("Error in try again:", error);
+      // Don't leave the app hanging if there's an error
+      setError("Couldn't load new puzzle. Please refresh the page.");
+    } finally {
+      setShowWinModal(false);
+    }
+  };
+
+  const handlePuzzleSolved = () => {
+    setShowWinModal(true);
+  };
+
+  // More detailed locked region analysis
+  function getLockedRegionsInfo(grid: TileColor[][], lockedCells: Set<string>): { 
+    totalSize: number, 
+    regions: number[]  // Array of sizes of each connected region
+  } {
+    if (lockedCells.size === 0) {
+      return { totalSize: 0, regions: [] };
+    }
+    
+    // Convert locked cells to array of [row, col] pairs
+    const lockedCoords: [number, number][] = Array.from(lockedCells).map(key => {
+      const [row, col] = key.split(',').map(Number);
+      return [row, col];
+    });
+    
+    // Track visited cells
+    const visited = new Set<string>();
+    const regions: number[] = [];
+    
+    // For each locked cell
+    for (const [startRow, startCol] of lockedCoords) {
+      const key = `${startRow},${startCol}`;
+      if (visited.has(key)) continue;
+      
+      // Start a new region
+      const stack: [number, number][] = [[startRow, startCol]];
+      let regionSize = 0;
+      
+      // Flood fill to find connected cells
+      while (stack.length > 0) {
+        const [row, col] = stack.pop()!;
+        const cellKey = `${row},${col}`;
+        
+        if (visited.has(cellKey)) continue;
+        if (!lockedCells.has(cellKey)) continue;
+        
+        visited.add(cellKey);
+        regionSize++;
+        
+        // Check neighbors
+        const neighbors: [number, number][] = [
+          [row+1, col], [row-1, col], [row, col+1], [row, col-1]
+        ];
+        
+        for (const [nr, nc] of neighbors) {
+          const neighborKey = `${nr},${nc}`;
+          if (!visited.has(neighborKey) && lockedCells.has(neighborKey)) {
+            stack.push([nr, nc]);
+          }
+        }
+      }
+      
+      regions.push(regionSize);
+    }
+    
+    // Sort regions by size (largest first)
+    regions.sort((a, b) => b - a);
+    
+    return {
+      totalSize: lockedCells.size,
+      regions
+    };
+  }
+
+  // Function to calculate locked region size
+  const getLockedRegionSize = () => {
+    return puzzle?.lockedCells?.size || 0;
+  };
+  
+  // Function to get the color of locked squares
+  const getLockedSquaresColor = (): TileColor | null => {
+    // If no locked cells, return null
+    if (!puzzle?.lockedCells?.size) return null;
+    
+    // Get the first locked cell coordinates
+    const firstLockedCell = Array.from(puzzle.lockedCells)[0];
+    if (!firstLockedCell) return null;
+    
+    // Convert 'row,col' string to row and col numbers
+    const [row, col] = firstLockedCell.split(',').map(Number);
+    
+    // Return the color of that locked cell from the grid
+    return puzzle.grid[row][col];
+  };
+  
+  // Function to get CSS color for the locked count
+  const getLockedColorCSS = () => {
+    const lockedColor = getLockedSquaresColor();
+    // Use the color of locked squares, or white if not available
+    return lockedColor !== null ? getColorCSS(lockedColor) : '#ffffff';
+  };
+
+  // Add this function to convert TileColor to CSS color string
+  const getColorCSS = (color: TileColor): string => {
+    // Map TileColor enum values to CSS colors
+    const colorMap = {
+      [TileColor.Red]: '#ff5555',
+      [TileColor.Green]: '#55ff55',
+      [TileColor.Blue]: '#5555ff',
+      [TileColor.Yellow]: '#ffff55',
+      [TileColor.Purple]: '#ff55ff',
+      [TileColor.Orange]: '#ff9955',
+      // Add any other colors your game uses
+    };
+    
+    return colorMap[color] || '#ffffff'; // Default to white if color not found
+  };
+
+  // Define this function inside the component
+  function getCurrentMoveCount() {
+    // Simply return the current moves from the puzzle state
+    return puzzle ? puzzle.userMovesUsed : 0;
+  }
 
   return (
     <div className="container">
@@ -528,7 +763,9 @@ const App: React.FC = () => {
                     style={cellStyle}
                     onClick={() => handleTileClick(rIdx, cIdx)}
                   >
-                    {isLocked && <div className="lock-overlay"><span>🔒</span></div>}
+                    {isLocked && (
+                      <MinimalWhiteLock />
+                    )}
                   </div>
                 </div>
               );
@@ -544,10 +781,33 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Try Again button */}
-      <button className="try-again-button" onClick={handleTryAgain}>
-        Try Again
-      </button>
+      {/* Controls section with locked region indicator and centered Try Again button */}
+      <div className="controls-container">
+        <div className="controls-inner">
+          {/* Locked region indicator with updated styling */}
+          <div className="locked-region-counter">
+            <span className="locked-label game-title-font">Locked Squares:</span>
+            <span 
+              className="locked-count"
+              style={{ 
+                color: getLockedColorCSS(),
+                textShadow: '-0.5px -0.5px 0 #000, 0.5px -0.5px 0 #000, -0.5px 0.5px 0 #000, 0.5px 0.5px 0 #000',
+                fontSize: '22px'
+              }}
+            >
+              {getLockedRegionSize()}
+            </span>
+          </div>
+          
+          {/* Try Again button */}
+          <button 
+            className="try-again-button" 
+            onClick={handleTryAgain}
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
 
       {/* Color Picker Modal */}
       {showColorPicker && (
@@ -555,8 +815,47 @@ const App: React.FC = () => {
       )}
 
       {/* Win Modal */}
-      {showWinModal && puzzle.isSolved && (
-        <WinModal puzzle={puzzle} onTryAgain={handleTryAgain} onClose={closeWinModal} />
+      {showWinModal && (
+        <div className="modal-overlay">
+          <div className="win-modal">
+            <h1 className="congratulations-title">Congratulations!</h1>
+            
+            <p className="unlocked-message">
+              Unlocked {tileColorToName(puzzle.targetColor)} in {getCurrentMoveCount()} moves!
+            </p>
+            
+            <div className="next-puzzle-timer">
+              <p>New Puzzle in:</p>
+              <div className="timer">
+                <span className="time-value">{nextPuzzleTime.hours}</span>
+                <span className="time-separator">:</span>
+                <span className="time-value">{nextPuzzleTime.minutes.toString().padStart(2, '0')}</span>
+                <span className="time-separator">:</span>
+                <span className="time-value">{nextPuzzleTime.seconds.toString().padStart(2, '0')}</span>
+              </div>
+            </div>
+            
+            <div className="modal-buttons">
+              <button className="share-button">Share</button>
+              <button 
+                className="try-again-modal-button"
+                onClick={() => {
+                  handleTryAgain();
+                  setShowWinModal(false);
+                }}
+              >
+                Try Again
+              </button>
+            </div>
+            
+            <button 
+              className="close-button"
+              onClick={() => setShowWinModal(false)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -644,5 +943,42 @@ const WinModal: React.FC<WinModalProps> = ({ puzzle, onTryAgain, onClose }) => {
     </div>
   );
 };
+
+// Add this component to your file
+const MinimalWhiteLock = () => (
+  <svg 
+    width="14" 
+    height="14" 
+    viewBox="0 0 14 14" 
+    fill="none" 
+    xmlns="http://www.w3.org/2000/svg"
+    className="lock-icon"
+  >
+    {/* Thinner shackle */}
+    <path 
+      d="M5 7V5.5C5 4.6 6.3 4 7 4C7.7 4 9 4.6 9 5.5V7" 
+      stroke="white" 
+      strokeWidth="1.2" 
+      strokeLinecap="round"
+    />
+    
+    {/* Thinner lock body */}
+    <rect x="4" y="7" width="6" height="5" fill="white" rx="0.8" />
+  </svg>
+);
+
+// Helper function to convert TileColor to color name
+function tileColorToName(color: TileColor): string {
+  const colorNames = {
+    [TileColor.Red]: "Red",
+    [TileColor.Green]: "Green",
+    [TileColor.Blue]: "Blue",
+    [TileColor.Yellow]: "Yellow",
+    [TileColor.Purple]: "Purple",
+    [TileColor.Orange]: "Orange",
+  };
+  
+  return colorNames[color] || "Color";
+}
 
 export default App;
