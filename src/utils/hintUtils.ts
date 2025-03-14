@@ -1,4 +1,4 @@
-import { TileColor, FirestorePuzzleData } from './types';
+import { TileColor, FirestorePuzzleData } from '../types';
 
 // Constants
 const GRID_SIZE = 5;
@@ -303,4 +303,4 @@ export function getHint(firestoreData: FirestorePuzzleData, moveNumber: number):
   
   const actionId = firestoreData.actions[moveNumber];
   return decodeActionId(actionId, firestoreData);
-}
+} 

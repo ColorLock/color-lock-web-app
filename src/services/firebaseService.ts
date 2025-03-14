@@ -3,9 +3,9 @@ import { getAuth, signInAnonymously, User } from 'firebase/auth';
 import { getFirestore, doc, getDoc } from 'firebase/firestore';
 // Import AppCheck types but we'll make it optional
 import { AppCheck } from 'firebase/app-check';
-import { FirestorePuzzleData } from './types';
+import { FirestorePuzzleData } from '../types';
 // Import the Firebase configuration
-import firebaseConfig from './firebase_config';
+import firebaseConfig from '../firebase_config';
 
 // Initialize Firebase app
 const app = initializeApp(firebaseConfig);
@@ -101,4 +101,4 @@ export const fetchPuzzleFromFirestore = async (date: string): Promise<FirestoreP
   }
 };
 
-export default app;
+export default app; 

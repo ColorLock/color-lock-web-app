@@ -232,6 +232,31 @@
   transform: scale(1.05);
 }
 
+/* Style for the current color in the picker */
+.color-bubble.current-color {
+  position: relative;
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+  border: 2px dashed rgba(0,0,0,0.3);
+}
+
+.color-bubble.current-color:hover {
+  transform: none;
+}
+
+/* Style for the check mark */
+.current-color-check {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #333;
+  font-size: 20px;
+  opacity: 0.8;
+  filter: drop-shadow(0 0 1px white);
+}
+
 /* Apply high contrast mode to color bubbles */
 .high-contrast-mode .color-bubble {
   border: 2px solid black;

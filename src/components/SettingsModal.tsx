@@ -1,48 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import './App.css';
-import { TileColor } from './types';
+import '../App.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faXmark } from '@fortawesome/free-solid-svg-icons';
+import { TileColor } from '../types';
+import { AppSettings, ColorBlindMode, defaultSettings } from '../types/settings';
 
-// Define the settings interface
-export interface AppSettings {
-  // Accessibility settings
-  highContrastMode: boolean;
-  colorBlindMode: ColorBlindMode;
-  customColorScheme: {
-    [key in TileColor]?: string;
-  };
-  
-  // Visual settings
-  highlightLargestRegion: boolean;
-  enableAnimations: boolean;
-  
-  // Game settings
-  enableSoundEffects: boolean;
-  soundEnabled: boolean;
-  showLockedRegionCounter: boolean;
-}
-
-// Color blindness options
-export enum ColorBlindMode {
-  None = "none",
-  Protanopia = "protanopia",
-  Deuteranopia = "deuteranopia",
-  Tritanopia = "tritanopia"
-}
-
-// Default settings
-export const defaultSettings: AppSettings = {
-  highContrastMode: false,
-  colorBlindMode: ColorBlindMode.None,
-  customColorScheme: {},
-  highlightLargestRegion: true,
-  enableAnimations: true,
-  enableSoundEffects: false,
-  soundEnabled: false,
-  showLockedRegionCounter: true
-};
-
+// Define the SettingsModal props
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -50,6 +13,7 @@ interface SettingsModalProps {
   onSettingsChange: (newSettings: AppSettings) => void;
 }
 
+// SettingsModal component
 const SettingsModal: React.FC<SettingsModalProps> = ({ 
   isOpen, 
   onClose, 
@@ -232,7 +196,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
           </section>
 
           <section className="settings-section">
-            <h3>Sound</h3>
+            <h3>Game</h3>
             
             <div className="setting-item">
               <label htmlFor="enable-sound">
@@ -245,6 +209,22 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                   id="enable-sound"
                   checked={localSettings.enableSoundEffects}
                   onChange={(e) => handleToggleChange('enableSoundEffects', e.target.checked)}
+                />
+                <span className="toggle-slider"></span>
+              </label>
+            </div>
+            
+            <div className="setting-item">
+              <label htmlFor="show-optimal-path">
+                Show Optimal Path
+                <p className="setting-description">Show hints for optimal solution</p>
+              </label>
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  id="show-optimal-path"
+                  checked={localSettings.showOptimalPath}
+                  onChange={(e) => handleToggleChange('showOptimalPath', e.target.checked)}
                 />
                 <span className="toggle-slider"></span>
               </label>

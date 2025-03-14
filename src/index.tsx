@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
-import './firebase_client'; // Import firebase_client early to initialize Auth first
+import './services/firebaseService'; // Import firebaseService early to initialize Auth first
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement

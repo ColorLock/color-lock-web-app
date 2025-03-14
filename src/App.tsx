@@ -1,304 +1,43 @@
-import { fetchPuzzleFromFirestore } from './firebase_client';
-import React, { useState, useEffect, useContext, createContext } from 'react';
+import React, { useState, useEffect, createContext, useContext } from 'react';
 import './App.css';
-import { getHint, HintResult, getValidActions, computeActionDifference, NUM_COLORS } from './hints';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faLock, faCopy, faGear, faXmark, faTrophy } from '@fortawesome/free-solid-svg-icons';
+import { faGear, faTrophy, faXmark, faLock, faCopy } from '@fortawesome/free-solid-svg-icons';
 import { faTwitter, faFacebookF } from '@fortawesome/free-brands-svg-icons';
-import SettingsModal, { AppSettings, defaultSettings, ColorBlindMode } from './SettingsModal';
-import StatsModal, { GameStatistics, defaultStats } from './StatsModal';
 import ReactConfetti from 'react-confetti';
 
+// Types
+import { TileColor, allColors, DailyPuzzle, FirestorePuzzleData } from './types';
+import { AppSettings, defaultSettings, ColorBlindMode } from './types/settings';
+import { GameStatistics, defaultStats } from './types/stats';
 
-// -------------------------------------------------------------------------
-// 1. Types & Data
-// -------------------------------------------------------------------------
+// Components
+import ColorPickerModal from './components/ColorPickerModal';
+import WinModal from './components/WinModal';
+import SettingsModal from './components/SettingsModal';
+import StatsModal from './components/StatsModal';
+import { MinimalWhiteLock } from './components/icons';
 
-export enum TileColor {
-  Red = 'red',
-  Green = 'green',
-  Blue = 'blue',
-  Yellow = 'yellow',
-  Purple = 'purple',
-  Orange = 'orange'
-}
+// Utils
+import { floodFill, findLargestRegion, isBoardUnified, generatePuzzleFromDB } from './utils/gameLogic';
+import { dateKeyForToday } from './utils/dateUtils';
+import { loadDailyPuzzleIfExists, saveDailyPuzzle } from './utils/storageUtils';
+import { tileColorToName, tileColorToEmoji, generateShareText, copyToClipboard } from './utils/shareUtils';
+import { getHint, HintResult, getValidActions, computeActionDifference, NUM_COLORS } from './utils/hintUtils';
 
-const allColors = [
-  TileColor.Red,
-  TileColor.Green,
-  TileColor.Blue,
-  TileColor.Yellow,
-  TileColor.Purple,
-  TileColor.Orange
-];
+// Hooks
+import useSettings from './hooks/useSettings';
+import useGameStats from './hooks/useGameStats';
 
-// Example daily goals (optional)
-const dailyGoalData: Record<string, number> = {
-  '2025-03-05': 10,
-  '2025-03-06': 8,
-  '2025-03-07': 10
-};
+// Services
+import { fetchPuzzleFromFirestore } from './services/firebaseService';
 
-interface DailyPuzzle {
-  dateString: string;
-  grid: TileColor[][];
-  userMovesUsed: number;
-  isSolved: boolean;
-  isLost: boolean;
-  lockedCells: Set<string>;
-  targetColor: TileColor;
-  startingGrid: TileColor[][]; // Deep-copied initial grid
-  bestScoreUsed: number | null;
-  timesPlayed: number;
-  totalMovesForThisBoard: number;
-  algoScore: number;
-}
-
-export interface PuzzleGrid {
-  [row: string]: TileColor[];
-}
-
-// Define the Firestore data structure
-export interface FirestorePuzzleData {
-  algoScore: number;
-  targetColor: TileColor;
-  states: PuzzleGrid[];
-  actions: number[];
-  colorMap?: number[];
-}
-
-
-// -------------------------------------------------------------------------
-// 2. Utility Functions
-// -------------------------------------------------------------------------
-
-/**
- * Creates a date-based seed:
- *   seed = y * 10000 + m * 100 + d
- * (if the result is 0, use 0xDEADBEEF)
- */
-function stableSeedForDate(dateStr: string): number {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const combined = y * 10000 + m * 100 + d;
-  const seed = combined === 0 ? 0xDEADBEEF : combined;
-  console.log(`Generating base seed for date ${dateStr}: ${seed}`);
-  return seed;
-}
-
-/**
- * A 64-bit xorshift RNG matching the Swift version.
- */
-function createSwiftSeededGenerator(seed: number) {
-  // Convert to BigInt for 64-bit precision
-  let state = BigInt(seed);
-  console.log(`Initial RNG state: ${state}`);
-  
-  // For debugging: track every random value generated
-  const generatedNumbers: number[] = [];
-
-  function nextUInt64(): bigint {
-    // XorShift64 algorithm - must match Swift exactly
-    state ^= state << 13n;
-    state ^= state >> 7n;
-    state ^= state << 17n;
-    return state;
-  }
-
-  // Ensure nextIntInRange behaves exactly like Swift
-  function nextIntInRange(upperBound: number): number {
-    // Swift's Int.random(in: 0..<upperBound, using: &rng)
-    const range = BigInt(upperBound);
-    if (range <= 1n) return 0;
-    
-    // This matches Swift's implementation for uniform distribution
-    const threshold = (0xFFFFFFFFFFFFFFFFn - range + 1n) % range;
-    
-    let value;
-    while (true) {
-      value = nextUInt64() & 0xFFFFFFFFFFFFFFFFn; // Ensure positive values only
-      if (value >= threshold) {
-        const result = Number(value % range);
-        generatedNumbers.push(result);
-        return result;
-      }
-    }
-  }
-
-  return { 
-    nextIntInRange,
-    getGeneratedNumbers: () => generatedNumbers
-  };
-}
-
-/**
- * Flood fill: returns arrays of row and column indices that were changed.
- */
-function floodFill(
-  grid: TileColor[][],
-  row: number,
-  col: number,
-  oldColor: TileColor
-): [number[], number[]] {
-  const visited = new Set<string>();
-  const stack = [[row, col]];
-  const rowsChanged: number[] = [];
-  const colsChanged: number[] = [];
-  const size = grid.length;
-
-  while (stack.length > 0) {
-    const [r, c] = stack.pop()!;
-    if (r < 0 || r >= size || c < 0 || c >= size) continue;
-    if (grid[r][c] !== oldColor) continue;
-    const key = `${r},${c}`;
-    if (visited.has(key)) continue;
-
-    visited.add(key);
-    rowsChanged.push(r);
-    colsChanged.push(c);
-
-    stack.push([r + 1, c], [r - 1, c], [r, c + 1], [r, c - 1]);
-  }
-  return [rowsChanged, colsChanged];
-}
-
-/**
- * Finds the largest connected region of the same color in the grid.
- */
-function findLargestRegion(grid: TileColor[][]): Set<string> {
-  const visited = new Set<string>();
-  let largestRegion: string[] = [];
-  const size = grid.length;
-
-  for (let r = 0; r < size; r++) {
-    for (let c = 0; c < size; c++) {
-      const key = `${r},${c}`;
-      if (!visited.has(key)) {
-        const color = grid[r][c];
-        const stack = [[r, c]];
-        const currentRegion: string[] = [];
-
-        while (stack.length > 0) {
-          const [rr, cc] = stack.pop()!;
-          if (rr < 0 || rr >= size || cc < 0 || cc >= size) continue;
-          const k2 = `${rr},${cc}`;
-          if (visited.has(k2)) continue;
-          if (grid[rr][cc] !== color) continue;
-
-          visited.add(k2);
-          currentRegion.push(k2);
-          
-          // Make sure we push neighbors in the same order as Swift
-          // This is critical for matching results exactly!
-          stack.push([rr + 1, cc], [rr - 1, cc], [rr, cc + 1], [rr, cc - 1]);
-        }
-        
-        if (currentRegion.length > largestRegion.length) {
-          largestRegion = currentRegion;
-        }
-      }
-    }
-  }
-  return new Set(largestRegion);
-}
-
-/**
- * Checks if the entire grid is a single color.
- */
-function isBoardUnified(grid: TileColor[][]): boolean {
-  const first = grid[0][0];
-  for (let r = 0; r < grid.length; r++) {
-    for (let c = 0; c < grid.length; c++) {
-      if (grid[r][c] !== first) return false;
-    }
-  }
-  return true;
-}
-
-// Optionally store / load puzzle to mimic "UserDefaults" from Swift
-function dateKeyForToday(): string {
-  const today = new Date();
-  const y = today.getFullYear();
-  const m = (today.getMonth() + 1).toString().padStart(2, '0');
-  const d = today.getDate().toString().padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-function loadDailyPuzzleIfExists(key: string): DailyPuzzle | null {
-  try {
-    const data = localStorage.getItem(key);
-    if (!data) return null;
-    const parsed = JSON.parse(data) as DailyPuzzle & { lockedCells: string[] };
-    // Reconstruct lockedCells as a Set after loading
-    return { ...parsed, lockedCells: new Set(parsed.lockedCells) };
-  } catch {
-    return null;
+// Extend CSSProperties to include our custom properties
+declare module 'react' {
+  interface CSSProperties {
+    '--current-color'?: string;
+    '--target-color'?: string;
   }
 }
-
-function saveDailyPuzzle(puzzle: DailyPuzzle) {
-  try {
-    // Convert lockedCells to an array before saving
-    const puzzleData = { ...puzzle, lockedCells: Array.from(puzzle.lockedCells) };
-    localStorage.setItem(puzzle.dateString, JSON.stringify(puzzleData));
-  } catch {
-    // ignore
-  }
-}
-
-// -------------------------------------------------------------------------
-// 3. Puzzle Generation
-// -------------------------------------------------------------------------
-
-
-function generatePuzzleFromDB(firestoreData: FirestorePuzzleData, dateStr: string): DailyPuzzle {
-  // Get the first state from the states list
-  const initialState = firestoreData.states[0];
-  
-  // Get the grid size from the first state object
-  const gridSize = Object.keys(initialState).length;
-  
-  // Initialize an empty 2D array for the grid
-  const grid: TileColor[][] = [];
-  
-  // Convert the object-based initialState to a 2D array
-  for (let r = 0; r < gridSize; r++) {
-    // Get the row array from initialState using the string index
-    const rowKey = r.toString();
-    const rowColors = initialState[rowKey] as TileColor[];
-    grid.push(rowColors);
-  }
-  
-  // Log the exact sequence of random numbers generated
-  console.log("Generated grid from firebase");
-  
-  // Use the same algorithm for finding the largest region
-  const locked = findLargestRegion(grid);
-  
-  console.log("Web: Generated grid for", dateStr, ":", grid);
-  // console.log("Web: Target color:", target);
-  console.log("Web: Locked cells:", locked);
-  // Print locked cells in a format easy to compare with Swift
-  console.log("Locked cells as array:", Array.from(locked));
-
-  return {
-    dateString: dateStr,
-    grid,
-    userMovesUsed: 0,
-    isSolved: false,
-    isLost: false,
-    lockedCells: locked,
-    targetColor: firestoreData.targetColor,
-    startingGrid: grid.map(row => [...row]),
-    bestScoreUsed: null,
-    timesPlayed: 0,
-    totalMovesForThisBoard: 0,
-    algoScore: firestoreData.algoScore
-  };
-}
-
-// -------------------------------------------------------------------------
-// 4. Main App Component
-// -------------------------------------------------------------------------
 
 // Create settings context
 export const SettingsContext = createContext<AppSettings | null>(null);
@@ -341,18 +80,7 @@ const App: React.FC = () => {
 
   // Add statistics state
   const [showStats, setShowStats] = useState(false);
-  const [gameStats, setGameStats] = useState<GameStatistics>(() => {
-    // Load stats from localStorage on initial render
-    const savedStats = localStorage.getItem('colorLockStats');
-    if (savedStats) {
-      try {
-        return JSON.parse(savedStats);
-      } catch (e) {
-        console.error('Failed to parse saved stats', e);
-      }
-    }
-    return { ...defaultStats };
-  });
+  const { gameStats, updateGameStats: updateStats } = useGameStats(defaultStats);
   
   // Track game start time for calculating time spent
   const [gameStartTime, setGameStartTime] = useState<Date | null>(null);
@@ -381,75 +109,6 @@ const App: React.FC = () => {
   // Save game statistics
   const saveGameStats = (stats: GameStatistics) => {
     localStorage.setItem('colorLockStats', JSON.stringify(stats));
-    setGameStats(stats);
-  };
-
-  // Update daily stats with current game data
-  const updateGameStats = (isSolved: boolean) => {
-    const currentDate = dateKeyForToday();
-    const currentStats = loadGameStats();
-    const timeSpent = gameStartTime ? Math.floor((new Date().getTime() - gameStartTime.getTime()) / 1000) : 0;
-    
-    // Update today's stats
-    const todayStats = {
-      movesUsed: moveCount,
-      bestScore: currentStats.todayStats.bestScore === null || moveCount < currentStats.todayStats.bestScore 
-        ? moveCount 
-        : currentStats.todayStats.bestScore,
-      timeSpent: timeSpent
-    };
-    
-    // Calculate daily scores for the mini chart
-    const dailyScores = { ...currentStats.allTimeStats.dailyScores };
-    if (isSolved) {
-      dailyScores[currentDate] = moveCount;
-    }
-    
-    // Calculate streak
-    let streak = currentStats.allTimeStats.streak;
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayKey = yesterday.toISOString().split('T')[0];
-    
-    if (isSolved) {
-      // If yesterday is in our records, increment streak, otherwise reset to 1
-      if (dailyScores[yesterdayKey] !== undefined) {
-        streak += 1;
-      } else {
-        streak = 1;
-      }
-    }
-    
-    // Calculate other all-time stats
-    const gamesPlayed = currentStats.allTimeStats.gamesPlayed + 1;
-    const winCount = Object.keys(dailyScores).length;
-    const winPercentage = gamesPlayed > 0 ? (winCount / gamesPlayed) * 100 : 0;
-    
-    // Calculate average moves per solve
-    const totalMoves = Object.values(dailyScores).reduce((sum, moves) => sum + moves, 0);
-    const averageMovesPerSolve = winCount > 0 ? totalMoves / winCount : 0;
-    
-    // Find best score ever
-    const allScores = Object.values(dailyScores);
-    const bestScoreEver = allScores.length > 0 ? Math.min(...allScores) : null;
-    
-    // Update all-time stats
-    const allTimeStats = {
-      gamesPlayed,
-      winPercentage,
-      averageMovesPerSolve,
-      bestScoreEver,
-      streak,
-      dailyScores
-    };
-    
-    // Save updated stats
-    const updatedStats: GameStatistics = {
-      todayStats,
-      allTimeStats
-    };
-    
-    saveGameStats(updatedStats);
   };
 
   // Generate the puzzle for the fixed date on first render.
@@ -503,6 +162,24 @@ const App: React.FC = () => {
       setGameStartTime(new Date());
     }
   }, [puzzle, gameStartTime]);
+
+  // Initialize the locked cells based on the largest region when the puzzle first loads
+  useEffect(() => {
+    if (puzzle && puzzle.lockedCells.size === 0) {
+      // Find the largest region
+      const largestRegion = findLargestRegion(puzzle.grid);
+      if (largestRegion.size > 0) {
+        // Update the puzzle with the locked cells
+        setPuzzle(prevPuzzle => {
+          if (!prevPuzzle) return null;
+          return {
+            ...prevPuzzle,
+            lockedCells: largestRegion
+          };
+        });
+      }
+    }
+  }, [puzzle]);
 
   // Save settings to localStorage whenever they change
   useEffect(() => {
@@ -737,7 +414,8 @@ const App: React.FC = () => {
 
   const handlePuzzleSolved = () => {
     // Update statistics when puzzle is solved
-    updateGameStats(true);
+    const timeSpent = gameStartTime ? Math.floor((new Date().getTime() - gameStartTime.getTime()) / 1000) : 0;
+    updateStats(true, moveCount, timeSpent);
     setShowWinModal(true);
   };
 
@@ -746,7 +424,8 @@ const App: React.FC = () => {
     try {
       // If the player resets and doesn't solve the puzzle, count it as a played game
       if (puzzle && !puzzle.isSolved) {
-        updateGameStats(false);
+        const timeSpent = gameStartTime ? Math.floor((new Date().getTime() - gameStartTime.getTime()) / 1000) : 0;
+        updateStats(false, moveCount, timeSpent);
       }
       
       // Clear any active hints
@@ -1139,36 +818,22 @@ const App: React.FC = () => {
             {row.map((color, cIdx) => {
               const key = `${rIdx},${cIdx}`;
               const isLocked = puzzle.lockedCells.has(key);
-              const isHinted = hintCell && hintCell.row === rIdx && hintCell.col === cIdx;
+              const isHinted = !!(hintCell && hintCell.row === rIdx && hintCell.col === cIdx);
               const isPartOfLargestRegion = isLocked && settings.highlightLargestRegion;
-              
-              // For hinted cells, set the background color explicitly and add animations
-              const cellStyle = {
-                backgroundColor: getColorCSS(color), // Always set the base color explicitly
-                ...(isHinted && settings.enableAnimations && {
-                  border: '2px solid #1e90ff', // Persistent blue border
-                  boxShadow: '0 0 6px 1px rgba(30, 144, 255, 0.6)', // Persistent blue glow
-                  '--current-color': getColorCSS(color),
-                  '--target-color': getColorCSS(hintCell.newColor),
-                })
-              };
-              
-              // Determine additional cell classes
-              const cellClasses = ['grid-cell'];
-              if (isHinted && settings.enableAnimations) cellClasses.push('hint-cell');
-              if (isPartOfLargestRegion) cellClasses.push('highlight-largest-region');
               
               return (
                 <div key={key} className="grid-cell-container">
-                  <div
-                    className={cellClasses.join(' ')}
-                    style={cellStyle}
-                    onClick={() => handleTileClick(rIdx, cIdx)}
-                  >
-                    {isLocked && (
-                      <MinimalWhiteLock />
-                    )}
-                  </div>
+                  <Tile
+                    color={color}
+                    row={rIdx}
+                    col={cIdx}
+                    isLocked={isLocked}
+                    isHighlighted={isPartOfLargestRegion}
+                    isHinted={isHinted}
+                    onClick={handleTileClick}
+                    getColorCSS={getColorCSS}
+                    hintCell={hintCell}
+                  />
                 </div>
               );
             })}
@@ -1214,8 +879,13 @@ const App: React.FC = () => {
       </div>
 
       {/* Color Picker Modal */}
-      {showColorPicker && (
-        <ColorPickerModal onSelect={handleColorSelect} onCancel={closeColorPicker} getColorCSS={getColorCSS} />
+      {showColorPicker && selectedTile && (
+        <ColorPickerModal 
+          onSelect={handleColorSelect} 
+          onCancel={closeColorPicker} 
+          getColorCSS={getColorCSS}
+          currentColor={puzzle.grid[selectedTile.row][selectedTile.col]} 
+        />
       )}
 
       {/* Win Modal */}
@@ -1227,7 +897,7 @@ const App: React.FC = () => {
           getColorCSS={getColorCSS}
           shareToTwitter={shareToTwitter}
           shareToFacebook={shareToFacebook}
-          copyToClipboard={(text) => copyToClipboard(text, 'Result copied to clipboard!')}
+          copyToClipboard={(text: string) => copyToClipboard(text, 'Result copied to clipboard!')}
           generateShareText={generateShareText}
           setShowWinModal={setShowWinModal}
         />
@@ -1252,259 +922,50 @@ const App: React.FC = () => {
   );
 };
 
-// -------------------------------------------------------------------------
-// 5. Color Picker Modal Component
-// -------------------------------------------------------------------------
-interface ColorPickerModalProps {
-  onSelect: (color: TileColor) => void;
-  onCancel: () => void;
+// Create component to render a single tile
+const Tile: React.FC<{
+  color: TileColor;
+  row: number;
+  col: number;
+  isLocked: boolean;
+  isHighlighted: boolean;
+  isHinted: boolean;
+  onClick: (row: number, col: number) => void;
   getColorCSS: (color: TileColor) => string;
-}
-
-const ColorPickerModal: React.FC<ColorPickerModalProps> = ({ onSelect, onCancel, getColorCSS }) => {
+  hintCell?: HintResult | null;
+}> = ({ color, row, col, isLocked, isHighlighted, isHinted, onClick, getColorCSS, hintCell }) => {
+  const colorName = tileColorToName(color);
+  
+  // Determine the CSS classes for the tile
+  const classes = ['grid-cell'];
+  if (isLocked) classes.push('locked');
+  if (isHighlighted) classes.push('highlight-largest-region');
+  if (isHinted) classes.push('hint-cell');
+  
+  // For hinted cells, set the background color explicitly and add animations
+  const cellStyle = {
+    backgroundColor: getColorCSS(color),
+    ...(isHinted && hintCell && {
+      '--current-color': getColorCSS(color),
+      '--target-color': getColorCSS(hintCell.newColor),
+      border: '2px solid #1e90ff', // Persistent blue border
+      boxShadow: '0 0 6px 1px rgba(30, 144, 255, 0.6)' // Persistent blue glow
+    })
+  };
+  
   return (
-    <div className="color-picker-modal-backdrop" onClick={onCancel}>
-      <div className="color-picker-modal" onClick={e => e.stopPropagation()}>
-        <div className="color-bubbles">
-          {allColors.map((color) => (
-            <div key={color} className="color-bubble-container">
-              <button
-                className="color-bubble"
-                style={{ backgroundColor: getColorCSS(color) }}
-                onClick={() => onSelect(color)}
-                aria-label={`Select ${color} color`}
-              />
-              <div className="color-label">{color}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+    <div 
+      className={classes.join(' ')}
+      style={cellStyle}
+      onClick={() => onClick(row, col)}
+      aria-label={`${colorName} tile at row ${row+1}, column ${col+1}${isLocked ? ', locked' : ''}`}
+      data-row={row}
+      data-col={col}
+      data-color={color}
+    >
+      {isLocked && <MinimalWhiteLock size={16} />}
     </div>
   );
 };
-
-// -------------------------------------------------------------------------
-// 6. Win Modal Component
-// -------------------------------------------------------------------------
-interface WinModalProps {
-  puzzle: DailyPuzzle;
-  onTryAgain: () => void;
-  onClose: () => void;
-  getColorCSS: (color: TileColor) => string;
-  shareToTwitter: () => void;
-  shareToFacebook: () => void;
-  copyToClipboard: (text: string) => void;
-  generateShareText: () => string;
-  setShowWinModal: (show: boolean) => void;
-}
-
-const WinModal: React.FC<WinModalProps> = ({ 
-  puzzle, 
-  onTryAgain, 
-  onClose, 
-  getColorCSS, 
-  shareToTwitter, 
-  shareToFacebook, 
-  copyToClipboard, 
-  generateShareText,
-  setShowWinModal
-}) => {
-  const [timeLeft, setTimeLeft] = useState<string>("");
-  const [windowDimensions, setWindowDimensions] = useState<{width: number, height: number}>({
-    width: window.innerWidth,
-    height: window.innerHeight,
-  });
-  const [confettiActive, setConfettiActive] = useState<boolean>(true);
-  const [showShareButtons, setShowShareButtons] = useState<boolean>(false);
-
-  // Get settings for sound playback
-  const settings = useContext(SettingsContext);
-  const soundEnabled = settings?.soundEnabled || false;
-  
-  // Play celebration sound once
-  useEffect(() => {
-    if (soundEnabled) {
-      const audio = new Audio('/sounds/win-celebration.mp3');
-      audio.volume = 0.5;
-      audio.play().catch(err => console.warn('Could not play sound:', err));
-    }
-    
-    // Setup window resize listener for confetti
-    const handleResize = () => {
-      setWindowDimensions({
-        width: window.innerWidth,
-        height: window.innerHeight
-      });
-    };
-    
-    window.addEventListener('resize', handleResize);
-    
-    // Stop confetti after some time
-    const timer = setTimeout(() => {
-      setConfettiActive(false);
-    }, 5000);
-    
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      clearTimeout(timer);
-    };
-  }, [soundEnabled]);
-
-  // Timer countdown effect
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      const midnight = new Date();
-      midnight.setHours(24, 0, 0, 0);
-      const diff = midnight.getTime() - now.getTime();
-      const secs = Math.floor(diff / 1000);
-      const hrs = Math.floor(secs / 3600);
-      const mins = Math.floor((secs % 3600) / 60);
-      const s = secs % 60;
-      setTimeLeft(`${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
-      if (secs <= 0) {
-        onTryAgain();
-      }
-    };
-
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, [onTryAgain]);
-
-  // Get color name for display
-  const colorName = tileColorToName(puzzle.targetColor);
-
-  // Calculate if the user beat the optimal solution
-  const beatOptimal = puzzle.userMovesUsed <= puzzle.algoScore;
-  
-  // Generate share text
-  const shareText = generateShareText();
-
-  // Handle share button click
-  const handleShareClick = () => {
-    setShowShareButtons(!showShareButtons);
-  };
-
-  return (
-    <div className="modal-backdrop">
-      {confettiActive && (
-        <ReactConfetti
-          width={windowDimensions.width}
-          height={windowDimensions.height}
-          recycle={true}
-          numberOfPieces={250}
-          colors={['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff']}
-        />
-      )}
-      
-      <div className="win-modal win-modal-animated">
-        <h2 className="congratulations-title">Congratulations!</h2>
-        
-        <div className="unlocked-message">
-          Unlocked <span className="color-name" style={{color: getColorCSS(puzzle.targetColor)}}>{colorName}</span> in <strong>{puzzle.userMovesUsed}</strong> moves!
-          {beatOptimal && <span className="optimal-badge">🏅</span>}
-        </div>
-        
-        <div className="win-stats">
-          <div className="stat-item">
-            <div className="stat-value">{puzzle.algoScore}</div>
-            <div className="stat-label">Optimal Moves</div>
-          </div>
-          <div className="stat-item">
-            <div className="stat-value">{puzzle.timesPlayed}</div>
-            <div className="stat-label">Times Played</div>
-          </div>
-        </div>
-        
-        <div className="next-puzzle-timer">
-          <p>New Puzzle in:</p>
-          <div className="timer">
-            {timeLeft.split(':').map((unit, index) => (
-              <React.Fragment key={index}>
-                {index > 0 && <span className="time-separator">:</span>}
-                <span className="time-unit">{unit}</span>
-              </React.Fragment>
-            ))}
-          </div>
-        </div>
-        
-        <div className="share-section">
-          <button className="share-button" onClick={handleShareClick}>
-            Share
-          </button>
-          
-          {showShareButtons && (
-            <div className="share-options">
-              <span className="share-on">Share on:</span>
-              <div className="social-buttons">
-                <button className="social-button twitter-button" onClick={shareToTwitter}>
-                  <svg viewBox="0 0 24 24" width="24" height="24">
-                    <path d="M22.46 6c-.77.35-1.6.58-2.46.69.88-.53 1.56-1.37 1.88-2.38-.83.5-1.75.85-2.72 1.05C18.37 4.5 17.26 4 16 4c-2.35 0-4.27 1.92-4.27 4.29 0 .34.04.67.11.98C8.28 9.09 5.11 7.38 3 4.79c-.37.63-.58 1.37-.58 2.15 0 1.49.75 2.81 1.91 3.56-.71 0-1.37-.2-1.95-.5v.03c0 2.08 1.48 3.82 3.44 4.21a4.22 4.22 0 0 1-1.93.07 4.28 4.28 0 0 0 4 2.98 8.521 8.521 0 0 1-5.33 1.84c-.34 0-.68-.02-1.02-.06C3.44 20.29 5.7 21 8.12 21 16 21 20.33 14.46 20.33 20.33 8.79c0-.19 0-.37-.01-.56.84-.6 1.56-1.36 2.14-2.23z" fill="#1DA1F2" />
-                  </svg>
-                </button>
-                <button className="social-button facebook-button" onClick={shareToFacebook}>
-                  <svg viewBox="0 0 24 24" width="24" height="24">
-                    <path d="M20 3H4a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h8.61v-6.97h-2.34V11.3h2.34v-2c0-2.33 1.42-3.6 3.5-3.6 1 0 1.84.07 2.1.1v2.43h-1.44c-1.13 0-1.35.54-1.35 1.33v1.74h2.7l-.35 2.73h-2.35V21H20a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1z" fill="#4267B2" />
-                  </svg>
-                </button>
-                <button className="social-button clipboard-button" onClick={() => copyToClipboard(shareText)}>
-                  <svg viewBox="0 0 24 24" width="24" height="24">
-                    <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" fill="#333" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-        
-        <div className="modal-buttons">
-          <button className="try-again-modal-button" onClick={() => {
-            onTryAgain();
-            setShowWinModal(false);
-          }}>Try Again</button>
-          <button className="close-button" onClick={onClose}>Close</button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Add this component to your file
-const MinimalWhiteLock = () => (
-  <svg 
-    width="14" 
-    height="14" 
-    viewBox="0 0 14 14" 
-    fill="none" 
-    xmlns="http://www.w3.org/2000/svg"
-    className="lock-icon"
-  >
-    {/* Thinner shackle */}
-    <path 
-      d="M5 7V5.5C5 4.6 6.3 4 7 4C7.7 4 9 4.6 9 5.5V7" 
-      stroke="white" 
-      strokeWidth="1.2" 
-      strokeLinecap="round"
-    />
-    
-    {/* Thinner lock body */}
-    <rect x="4" y="7" width="6" height="5" fill="white" rx="0.8" />
-  </svg>
-);
-
-// Helper function to convert TileColor to color name
-function tileColorToName(color: TileColor): string {
-  const colorNames = {
-    [TileColor.Red]: "Red",
-    [TileColor.Green]: "Green",
-    [TileColor.Blue]: "Blue",
-    [TileColor.Yellow]: "Yellow",
-    [TileColor.Purple]: "Purple",
-    [TileColor.Orange]: "Orange",
-  };
-  
-  return colorNames[color] || "Color";
-}
 
 export default App;

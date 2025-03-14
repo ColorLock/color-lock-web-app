@@ -1,45 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
-import { TileColor } from './App';
+import { TileColor } from './types';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faXmark, faShareNodes } from '@fortawesome/free-solid-svg-icons';
-
-// Stats interface
-export interface GameStatistics {
-  // Today's game
-  todayStats: {
-    movesUsed: number;
-    bestScore: number | null;
-    timeSpent: number; // in seconds
-  };
-  
-  // All-time stats
-  allTimeStats: {
-    gamesPlayed: number;
-    winPercentage: number;
-    averageMovesPerSolve: number;
-    bestScoreEver: number | null;
-    streak: number; // consecutive days played
-    dailyScores: { [date: string]: number }; // For visualization
-  };
-}
-
-// Default statistics
-export const defaultStats: GameStatistics = {
-  todayStats: {
-    movesUsed: 0,
-    bestScore: null,
-    timeSpent: 0,
-  },
-  allTimeStats: {
-    gamesPlayed: 0,
-    winPercentage: 0,
-    averageMovesPerSolve: 0,
-    bestScoreEver: null,
-    streak: 0,
-    dailyScores: {},
-  }
-};
+import { GameStatistics, defaultStats } from './types/stats';
 
 interface StatsModalProps {
   isOpen: boolean;
