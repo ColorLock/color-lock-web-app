@@ -1,0 +1,122 @@
+@use '../abstracts' as *;
+
+// Bottom-sheet color picker modal
+.color-picker-modal-backdrop {
+  position: fixed;
+  top: 0; 
+  left: 0; 
+  right: 0; 
+  bottom: 0;
+  background-color: $color-overlay-light;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  z-index: $z-index-modal;
+}
+
+.color-picker-modal {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: $border-radius-large;
+  width: 100%;
+  max-width: 450px;
+  padding: 10px 8px 8px;
+  box-shadow: 0 -1px 8px rgba(0, 0, 0, 0.1);
+  @include flex-column;
+  margin-bottom: 50px;
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+
+.color-picker-header {
+  @include flex-between;
+  align-items: center;
+  margin-bottom: $spacing-xs;
+  
+  h3 {
+    text-align: left;
+    margin: 0;
+    font-size: $font-size-small;
+    font-weight: $font-weight-medium;
+    color: $color-text-light;
+  }
+}
+
+.color-picker-close-button {
+  font-size: $font-size-base;
+  margin: 0;
+  padding: $spacing-xxs;
+  color: $color-text-light;
+}
+
+.color-bubbles {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-around;
+  gap: 10px;
+}
+
+.color-bubble-container {
+  @include flex-column;
+  align-items: center;
+}
+
+// Color picker squares
+.color-bubble {
+  width: 40px;
+  height: 40px;
+  border-radius: $border-radius-medium;
+  margin: 2px;
+  border: none;
+  cursor: pointer;
+  transition: transform $transition-fast;
+  box-sizing: border-box;
+  box-shadow: $shadow-small;
+  
+  &:hover {
+    transform: scale(1.05);
+  }
+  
+  // Style for the current color
+  &.current-color {
+    position: relative;
+    opacity: 0.6;
+    cursor: not-allowed;
+    box-shadow: none;
+    border: 2px dashed rgba(0, 0, 0, 0.3);
+    
+    &:hover {
+      transform: none;
+    }
+  }
+  
+  // Highlight currently changing color
+  &.currently-changing {
+    box-shadow: 0 0 12px 4px rgba(0, 191, 255, 0.6);
+  }
+  
+  // High contrast mode
+  .high-contrast-mode & {
+    border: 2px solid $color-black;
+  }
+}
+
+// Style for the check mark
+.current-color-check {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: $color-text-primary;
+  font-size: 20px;
+  opacity: 0.8;
+  filter: drop-shadow(0 0 1px white);
+}
+
+// Color label
+.color-label {
+  font-size: 10px;
+  font-weight: $font-weight-medium;
+  color: $color-text-light;
+  text-transform: capitalize;
+  margin-top: $spacing-xxs;
+} 

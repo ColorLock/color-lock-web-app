@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import '../App.css';
+import '../scss/main.scss';
 import { TileColor } from '../types';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faXmark, faShareNodes } from '@fortawesome/free-solid-svg-icons';

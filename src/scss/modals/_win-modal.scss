@@ -1,0 +1,115 @@
+@use '../abstracts' as *;
+
+// Win modal styling
+.win-modal,
+.autocomplete-modal {
+  @include modal-container;
+  width: 95%;
+  max-width: 550px;
+  text-align: center;
+  @include flex-column;
+  gap: $spacing-lg;
+  position: relative;
+  overflow: hidden;
+}
+
+// Win modal animation
+.win-modal-animated,
+.autocomplete-modal-animated {
+  animation: modalFadeIn $transition-very-slow ease-out, backgroundPulse 8s ease-in-out infinite;
+}
+
+// Title styling
+.congratulations-title {
+  font-size: $font-size-xxl;
+  font-weight: $font-weight-bold;
+  margin: 0;
+  background: linear-gradient(45deg, #ff0055, #0066ff);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: titleGlow 4s ease-in-out infinite;
+}
+
+// Message about unlocking color
+.unlocked-message {
+  font-size: $font-size-larger;
+  margin: 0;
+  padding: 5px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.color-name {
+  font-weight: $font-weight-bold;
+}
+
+.optimal-badge {
+  font-size: $font-size-larger;
+  margin-left: $spacing-xs;
+  animation: medalPulse 2s infinite;
+}
+
+// Win stats display
+.win-stats {
+  display: flex;
+  justify-content: center;
+  gap: 30px;
+  margin: 5px 0;
+}
+
+.stat-item {
+  @include flex-column;
+  align-items: center;
+}
+
+.stat-value {
+  font-size: 26px;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+}
+
+.stat-label {
+  font-size: $font-size-small;
+  color: $color-text-secondary;
+}
+
+// Next puzzle timer section
+.next-puzzle-timer {
+  margin: 5px 0 $spacing-md;
+  
+  p {
+    font-size: $font-size-base;
+    margin-bottom: 5px;
+    color: $color-text-light;
+  }
+}
+
+// Timer display
+.timer {
+  font-size: $font-size-xl;
+  color: $color-primary;
+  font-weight: $font-weight-bold;
+  margin: 5px 0;
+}
+
+.time-unit {
+  animation: timeUnitPulse 1s infinite;
+  display: inline-block;
+  width: 32px;
+}
+
+.time-separator {
+  margin: 0 2px;
+  opacity: 0.8;
+}
+
+// Autocomplete content
+.autocomplete-content {
+  font-size: $font-size-large;
+  margin: 0;
+  padding: 5px 0;
+} 

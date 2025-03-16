@@ -1,0 +1,203 @@
+@use '../abstracts' as *;
+
+// Status messages
+.status-message {
+  margin-top: $spacing-md;
+  font-size: $font-size-base;
+  padding: $spacing-xs $spacing-md;
+  border-radius: $border-radius-medium;
+  max-width: 500px;
+  width: 100%;
+  text-align: center;
+  
+  &.solved {
+    background-color: $color-success-light;
+    color: $color-success;
+  }
+  
+  &.lost {
+    background-color: $color-error-light;
+    color: $color-error;
+  }
+}
+
+// Top card styling
+.top-card {
+  @include flex-column;
+  align-items: center;
+  background-color: $color-secondary;
+  padding: $spacing-md $spacing-lg;
+  border-radius: $border-radius-large;
+  box-shadow: $shadow-large;
+  margin-bottom: $spacing-lg;
+  max-width: 500px;
+  width: 100%;
+  
+  h1 {
+    margin: 0 0 $spacing-xs 0;
+    font-size: 1.8rem;
+  }
+}
+
+.target-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: $spacing-xs;
+}
+
+.target-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: $border-radius-circle;
+}
+
+.goal-row {
+  display: flex;
+  gap: $spacing-md;
+  font-weight: $font-weight-medium;
+}
+
+// Controls container
+.controls-container {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin: $spacing-lg 0;
+  padding: $spacing-md 0;
+  max-width: 500px;
+}
+
+// Inner container for vertical alignment
+.controls-inner {
+  @include flex-column;
+  align-items: center;
+  gap: $spacing-xs;
+  width: 100%;
+  padding: 0 $spacing-lg;
+}
+
+// Locked region counter styling
+.locked-region-counter {
+  color: $color-text-primary;
+  font-size: $font-size-large;
+  text-align: center;
+  font-weight: $font-weight-bold;
+  margin-bottom: 0;
+}
+
+.locked-label {
+  margin-right: $spacing-xxs;
+}
+
+.locked-count {
+  font-weight: $font-weight-bold;
+  margin-left: $spacing-xs;
+}
+
+// Toggle Switch
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 26px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: .4s;
+  border-radius: 26px;
+  
+  &:before {
+    position: absolute;
+    content: "";
+    height: 22px;
+    width: 22px;
+    left: 2px;
+    bottom: 2px;
+    background-color: $color-white;
+    transition: .4s;
+    border-radius: $border-radius-circle;
+  }
+}
+
+input:checked + .toggle-slider {
+  background-color: $color-primary;
+}
+
+input:focus + .toggle-slider {
+  box-shadow: 0 0 1px $color-primary;
+}
+
+input:checked + .toggle-slider:before {
+  transform: translateX(24px);
+}
+
+// Settings Select
+.settings-select {
+  background-color: $color-secondary-light;
+  border: 1px solid #ddd;
+  border-radius: $border-radius-medium;
+  padding: $spacing-xs $spacing-sm;
+  font-size: $font-size-base;
+  width: 180px;
+  color: $color-text-primary;
+}
+
+// Share section
+.share-section {
+  margin: $spacing-sm 0;
+  position: relative;
+}
+
+.share-options {
+  margin-top: $spacing-md;
+  @include flex-column;
+  align-items: center;
+  animation: fadeIn $transition-slow ease-out;
+}
+
+.share-on {
+  font-size: $font-size-small;
+  color: $color-text-secondary;
+  margin-bottom: $spacing-xs;
+}
+
+// Copy tooltip
+.copy-tooltip {
+  position: fixed;
+  bottom: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(0, 0, 0, 0.75);
+  color: $color-white;
+  padding: $spacing-sm $spacing-lg;
+  border-radius: $border-radius-medium;
+  font-size: $font-size-base;
+  z-index: $z-index-tooltip;
+  transition: opacity $transition-slow ease;
+  
+  &.success {
+    background-color: rgba(40, 167, 69, 0.9);
+  }
+  
+  &.error {
+    background-color: rgba(220, 53, 69, 0.9);
+  }
+  
+  &.fade-out {
+    opacity: 0;
+  }
+} 

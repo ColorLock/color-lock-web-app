@@ -1,0 +1,48 @@
+@use '../abstracts' as *;
+
+body {
+  font-family: $font-family-base;
+  color: $color-text-primary;
+  font-size: $font-size-base;
+  line-height: 1.5;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: $font-family-base;
+  font-weight: $font-weight-bold;
+  margin-top: 0;
+}
+
+h1 {
+  font-size: $font-size-xxl;
+  margin-bottom: $spacing-xs;
+}
+
+h2 {
+  font-size: $font-size-xl;
+  margin-bottom: $spacing-xs;
+}
+
+h3 {
+  font-size: $font-size-larger;
+  margin-bottom: $spacing-xs;
+}
+
+p {
+  margin-top: 0;
+  margin-bottom: $spacing-md;
+}
+
+// Game title specific font
+.game-title-font {
+  font-family: $font-family-base;
+  font-weight: $font-weight-bold;
+  letter-spacing: 0.5px;
+}
+
+// Color Lock specific font
+.color-lock-font {
+  font-family: $font-family-base;
+  font-weight: $font-weight-bold;
+  font-size: $font-size-base;
+} 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
-import './App.css';
+import './scss/main.scss';
 import ReactConfetti from 'react-confetti';
 
 // Types

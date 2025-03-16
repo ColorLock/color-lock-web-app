@@ -1,0 +1,196 @@
+@use '../abstracts' as *;
+
+// Primary button (Try Again button)
+.try-again-button {
+  @include primary-button;
+  margin-top: $spacing-md;
+  padding: $spacing-sm $spacing-lg;
+  font-size: $font-size-base;
+  max-width: 200px;
+}
+
+// Try again button inside a modal
+.try-again-modal-button {
+  @include secondary-button;
+  background-color: $color-secondary;
+  color: $color-text-primary;
+  border-radius: $border-radius-large;
+  padding: $spacing-sm $spacing-lg;
+  font-size: $font-size-base;
+  
+  &:hover {
+    background-color: $color-secondary-dark;
+  }
+}
+
+// Hint button
+.hint-button {
+  @include primary-button;
+  margin-top: $spacing-md;
+  padding: $spacing-xs $spacing-md;
+  background-color: $color-primary-light;
+  
+  &:hover {
+    background-color: $color-primary;
+  }
+  
+  &:active {
+    background-color: $color-primary-dark;
+  }
+}
+
+// Close button
+.close-button {
+  background-color: transparent;
+  color: $color-text-light;
+  border: 1px solid #ddd;
+  border-radius: $border-radius-large;
+  padding: $spacing-sm $spacing-lg;
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: background-color $transition-normal, color $transition-normal, border-color $transition-normal;
+  
+  &:hover {
+    background-color: $color-secondary-light;
+    color: $color-text-primary;
+    border-color: #ccc;
+  }
+}
+
+// Share button
+.share-button {
+  @include primary-button;
+  border-radius: $border-radius-large;
+  padding: $spacing-sm $spacing-xl;
+  box-shadow: $shadow-small;
+}
+
+// Inverse share button
+.inverse-share-button {
+  background-color: $color-white;
+  color: $color-primary;
+  border: 1px solid $color-primary;
+  border-radius: $border-radius-large;
+  padding: $spacing-sm $spacing-xl;
+  font-size: $font-size-base;
+  font-weight: $font-weight-bold;
+  cursor: pointer;
+  transition: background-color $transition-normal, color $transition-normal;
+  box-shadow: $shadow-small;
+  
+  &:hover {
+    background-color: #f5f8ff;
+  }
+}
+
+// Cancel button
+.cancel-button {
+  display: block;
+  margin: 0 auto;
+  padding: $spacing-xs $spacing-md;
+  font-size: $font-size-small;
+  background: #E9E9EB;
+  color: $color-primary;
+  border: none;
+  border-radius: $border-radius-medium;
+  cursor: pointer;
+  font-weight: $font-weight-medium;
+  width: 100%;
+  max-width: 200px;
+  text-align: center;
+  transition: background-color $transition-normal;
+  
+  &:hover {
+    background-color: #d9d9db;
+  }
+}
+
+// Icon buttons
+.settings-button,
+.stats-button {
+  @include icon-button;
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-radius: $border-radius-circle;
+  z-index: 10;
+}
+
+.settings-button {
+  top: 15px;
+  right: 15px;
+  
+  &:hover {
+    background-color: $color-secondary-dark;
+    transform: rotate(30deg);
+  }
+}
+
+.stats-button {
+  top: 65px;
+  right: 15px;
+  
+  &:hover {
+    background-color: $color-secondary-dark;
+  }
+}
+
+// Share stats button
+.share-stats-button {
+  @include primary-button;
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-sm $spacing-lg;
+  font-weight: $font-weight-bold;
+}
+
+// Social buttons
+.social-buttons {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+}
+
+.social-button {
+  width: 40px;
+  height: 40px;
+  border-radius: $border-radius-circle;
+  border: none;
+  background-color: $color-secondary;
+  @include flex-center;
+  cursor: pointer;
+  transition: transform $transition-normal, background-color $transition-normal;
+  
+  &:hover {
+    transform: scale(1.1);
+    background-color: $color-secondary-dark;
+  }
+}
+
+// Modal close button
+.modal-close,
+.stats-modal .close-button {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  background-color: $color-secondary;
+  border: none;
+  color: $color-text-primary;
+  font-size: 22px;
+  cursor: pointer;
+  padding: $spacing-xs;
+  width: 36px;
+  height: 36px;
+  @include flex-center;
+  border-radius: $border-radius-circle;
+  transition: all $transition-normal;
+  z-index: 10;
+  box-shadow: $shadow-small;
+  
+  &:hover {
+    background-color: $color-secondary-dark;
+    transform: scale(1.05);
+  }
+} 

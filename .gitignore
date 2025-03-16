@@ -23,3 +23,11 @@ yarn-debug.log*
 yarn-error.log*
 
 src/env/
+node_modules
+dist
+
+
+.nx/cache
+.nx/workspace-data
+vite.config.*.timestamp*
+vitest.config.*.timestamp*

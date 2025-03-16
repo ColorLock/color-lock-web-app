@@ -1,0 +1,132 @@
+@use 'variables' as *;
+
+// Flexbox mixins
+@mixin flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@mixin flex-column {
+  display: flex;
+  flex-direction: column;
+}
+
+@mixin flex-row {
+  display: flex;
+  flex-direction: row;
+}
+
+@mixin flex-between {
+  display: flex;
+  justify-content: space-between;
+}
+
+// Button mixins
+@mixin button-base {
+  cursor: pointer;
+  border: none;
+  font-family: $font-family-base;
+  font-weight: $font-weight-medium;
+  transition: background-color $transition-normal;
+}
+
+@mixin primary-button {
+  @include button-base;
+  background-color: $color-primary;
+  color: $color-white;
+  border-radius: $border-radius-large;
+  padding: $spacing-sm $spacing-lg;
+  font-size: $font-size-base;
+  font-weight: $font-weight-bold;
+  box-shadow: $shadow-medium;
+  
+  &:hover {
+    background-color: $color-primary-dark;
+  }
+}
+
+@mixin secondary-button {
+  @include button-base;
+  background-color: $color-secondary;
+  color: $color-text-primary;
+  border-radius: $border-radius-large;
+  padding: $spacing-sm $spacing-lg;
+  font-size: $font-size-base;
+  
+  &:hover {
+    background-color: $color-secondary-dark;
+  }
+}
+
+@mixin icon-button {
+  @include button-base;
+  @include flex-center;
+  background-color: $color-secondary;
+  color: $color-text-primary;
+  border-radius: $border-radius-circle;
+  transition: background-color $transition-normal, transform $transition-normal;
+  box-shadow: $shadow-medium;
+  
+  &:hover {
+    background-color: $color-secondary-dark;
+  }
+}
+
+// Modal mixins
+@mixin modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: $color-overlay;
+  @include flex-center;
+  z-index: $z-index-modal;
+}
+
+@mixin modal-container {
+  background-color: $color-white;
+  border-radius: $border-radius-xl;
+  padding: $spacing-lg;
+  box-shadow: $shadow-xl;
+  max-width: 90%;
+  animation: modalFadeIn $transition-very-slow ease-out;
+}
+
+// Animation mixins
+@mixin fade-in {
+  animation: fadeIn $transition-slow ease-in-out;
+}
+
+@mixin no-animations {
+  animation: none !important;
+  transition: none !important;
+  transform: none !important;
+}
+
+// Responsive mixins
+@mixin mobile {
+  @media (max-width: #{$breakpoint-mobile}) {
+    @content;
+  }
+}
+
+@mixin tablet {
+  @media (min-width: #{$breakpoint-mobile + 1px}) and (max-width: #{$breakpoint-tablet}) {
+    @content;
+  }
+}
+
+@mixin desktop {
+  @media (min-width: #{$breakpoint-tablet + 1px}) {
+    @content;
+  }
+}
+
+// High contrast mode
+@mixin high-contrast {
+  .high-contrast-mode & {
+    @content;
+  }
+} 

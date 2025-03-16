@@ -1,0 +1,59 @@
+@use '../abstracts' as *;
+
+// Modal overlay - darkens the background
+.modal-overlay,
+.modal-backdrop {
+  @include modal-backdrop;
+}
+
+// Modal container
+.modal-content {
+  background-color: $color-white;
+  border-radius: $border-radius-large;
+  padding: $spacing-lg;
+  max-width: 95%;
+  width: 450px;
+  box-shadow: $shadow-xl;
+  position: relative;
+  text-align: center;
+}
+
+// Modal body
+.modal-body {
+  @include flex-column;
+  align-items: center;
+  
+  h2 {
+    color: $color-error;
+    margin-top: 0;
+    margin-bottom: $spacing-md;
+    font-size: $font-size-xl;
+  }
+  
+  p {
+    margin: $spacing-xs 0;
+    font-size: $font-size-large;
+  }
+}
+
+// Modal header
+.modal-header {
+  position: relative;
+  text-align: center;
+  padding: 0 $spacing-xl;
+}
+
+.modal-title {
+  margin: 5px 0 $spacing-lg 0;
+  font-size: $font-size-larger;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+// Modal buttons container
+.modal-buttons {
+  display: flex;
+  justify-content: center;
+  gap: $spacing-md;
+  margin-top: $spacing-sm;
+} 

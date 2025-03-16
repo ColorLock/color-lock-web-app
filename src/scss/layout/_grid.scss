@@ -1,0 +1,116 @@
+@use '../abstracts' as *;
+
+// Grid styling (5x5) with bigger tiles
+.grid {
+  display: inline-block;
+}
+
+.grid-row {
+  display: flex;
+}
+
+.grid-cell-container {
+  position: relative;
+  width: $grid-cell-container-size;
+  height: $grid-cell-container-size;
+  margin: 0;
+}
+
+.grid-cell {
+  position: relative;
+  width: $grid-cell-size;
+  height: $grid-cell-size;
+  margin: $grid-cell-margin;
+  border-radius: $border-radius-small;
+  cursor: pointer;
+  transition: transform $transition-fast;
+  box-sizing: border-box;
+  
+  &:hover {
+    transform: scale(1.05);
+  }
+  
+  // Highlighted region style
+  &.highlight-largest-region {
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 8px 2px rgba(255, 255, 255, 0.7);
+  }
+  
+  // Hinted cell with animation
+  &.hint-cell {
+    animation: color-fade 3s infinite;
+    animation-fill-mode: both;
+  }
+  
+  // Neon glow effect
+  &.neon-glow::before {
+    content: "";
+    position: absolute;
+    top: -4px;
+    left: -4px;
+    right: -4px;
+    bottom: -4px;
+    border-radius: inherit;
+    box-shadow: 0 0 16px 6px rgba(0, 191, 255, 0.7);
+    z-index: -1;
+    animation: neon-glow-pulse 2s infinite alternate;
+  }
+  
+  // High contrast mode
+  .high-contrast-mode & {
+    border: 2px solid $color-black;
+  }
+}
+
+// Locked overlay styling
+.locked-overlay {
+  position: absolute;
+  top: 0; 
+  left: 0;
+  width: $grid-cell-size;
+  height: $grid-cell-size;
+  margin: $grid-cell-margin;
+  border-radius: $border-radius-small;
+  background-color: rgba(0, 0, 0, 0.3);
+  @include flex-center;
+}
+
+// Lock icon
+.lock-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 45%;
+  height: 45%;
+  pointer-events: none;
+  animation: subtleLockGlow 3s infinite ease-in-out;
+}
+
+// Blue outline that appears after color change starts
+.blue-outline {
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  width: 100%;
+  height: 100%;
+  border: 1px solid rgba(30, 144, 255, 0.8);
+  border-radius: 5px;
+  box-shadow: 0 0 10px 2px rgba(30, 144, 255, 0.5);
+  pointer-events: none;
+  z-index: 4;
+  opacity: 0;
+  animation: outline-fade 3.5s infinite ease-in-out;
+  animation-delay: 0.35s;
+}
+
+// Preview of the new color
+.hint-color-preview {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: $grid-cell-size;
+  height: $grid-cell-size;
+  border-radius: $border-radius-small;
+  z-index: 1;
+  animation: preview-pulse 1.5s infinite;
+} 
