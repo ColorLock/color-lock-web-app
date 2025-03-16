@@ -12,6 +12,11 @@ import SettingsModal from './components/SettingsModal';
 import StatsModal from './components/StatsModal';
 import GameGrid from './components/GameGrid';
 import { GameHeader, GameFooter } from './components/GameControls';
+import AutocompleteModal from './components/AutocompleteModal';
+import LostGameModal from './components/LostGameModal';
+
+// Utils
+import { generateShareText, shareToTwitter, shareToFacebook, copyToClipboard } from './utils/shareUtils';
 
 // Context
 import { GameProvider, useGameContext } from './contexts/GameContext';
@@ -37,6 +42,7 @@ const GameContainer = () => {
     handleColorSelect,
     closeColorPicker,
     handleTryAgain,
+    resetLostState,
     handleHint,
     handleSettingsChange,
     getColorCSSWithSettings,
@@ -52,7 +58,10 @@ const GameContainer = () => {
     setShowSettings,
     setShowStats,
     setShowWinModal,
-    shareGameStats
+    shareGameStats,
+    showAutocompleteModal,
+    setShowAutocompleteModal,
+    handleAutoComplete
   } = useGameContext();
 
   const [windowDimensions, setWindowDimensions] = useState<{width: number, height: number}>({
@@ -189,6 +198,28 @@ const GameContainer = () => {
         />
       )}
 
+      {/* Autocomplete Modal */}
+      {showAutocompleteModal && puzzle && (
+        <AutocompleteModal
+          isOpen={showAutocompleteModal}
+          onClose={() => setShowAutocompleteModal(false)}
+          onAutoComplete={handleAutoComplete}
+          targetColor={puzzle.targetColor}
+          getColorCSS={getColorCSSWithSettings}
+        />
+      )}
+
+      {/* Lost Game Modal */}
+      {puzzle.isLost && (
+        <LostGameModal
+          isOpen={puzzle.isLost}
+          targetColor={puzzle.targetColor}
+          getColorCSS={getColorCSSWithSettings}
+          onClose={resetLostState}
+          onTryAgain={handleTryAgain}
+        />
+      )}
+
       {/* Win Modal */}
       {showWinModal && (
         <WinModal 
@@ -196,10 +227,10 @@ const GameContainer = () => {
           onTryAgain={handleTryAgain} 
           onClose={() => setShowWinModal(false)}
           getColorCSS={getColorCSSWithSettings}
-          shareToTwitter={() => {}}
-          shareToFacebook={() => {}}
-          copyToClipboard={() => {}}
-          generateShareText={() => ''}
+          shareToTwitter={() => shareToTwitter(generateShareText(puzzle))}
+          shareToFacebook={() => shareToFacebook(generateShareText(puzzle))}
+          copyToClipboard={(text) => copyToClipboard(text)}
+          generateShareText={() => generateShareText(puzzle)}
           setShowWinModal={setShowWinModal}
         />
       )}

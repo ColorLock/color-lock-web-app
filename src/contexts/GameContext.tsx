@@ -10,6 +10,7 @@ import { applyColorChange, checkIfOnOptimalPath, getGameHint } from '../utils/ga
 import useSettings from '../hooks/useSettings';
 import useGameStats from '../hooks/useGameStats';
 import { getColorCSS, getLockedColorCSS, getLockedSquaresColor } from '../utils/colorUtils';
+import { shouldShowAutocomplete, autoCompletePuzzle } from '../utils/autocompleteUtils';
 
 // Interface for the context value
 interface GameContextValue {
@@ -27,12 +28,14 @@ interface GameContextValue {
   showStats: boolean;
   gameStats: GameStatistics;
   firestoreData: FirestorePuzzleData | null;
+  showAutocompleteModal: boolean;
   
   // Functions
   handleTileClick: (row: number, col: number) => void;
   handleColorSelect: (color: TileColor) => void;
   closeColorPicker: () => void;
   handleTryAgain: () => Promise<void>;
+  resetLostState: () => void;
   handleHint: () => void;
   handleSettingsChange: (newSettings: AppSettings) => void;
   getColorCSSWithSettings: (color: TileColor) => string;
@@ -42,6 +45,8 @@ interface GameContextValue {
   setShowStats: (show: boolean) => void;
   setShowWinModal: (show: boolean) => void;
   shareGameStats: () => void;
+  handleAutoComplete: () => void;
+  setShowAutocompleteModal: (show: boolean) => void;
 }
 
 // Create the context with a default undefined value
@@ -77,6 +82,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [firestoreData, setFirestoreData] = useState<FirestorePuzzleData | null>(null);
   const [isOnOptimalPath, setIsOnOptimalPath] = useState(true);
   const [gameStartTime, setGameStartTime] = useState<Date | null>(null);
+  const [showAutocompleteModal, setShowAutocompleteModal] = useState(false);
+  const [hasDeclinedAutocomplete, setHasDeclinedAutocomplete] = useState(false);
   
   // Settings and stats
   const [showSettings, setShowSettings] = useState(false);
@@ -149,6 +156,13 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     }
   }, [puzzle]);
 
+  // Check if puzzle should show autocomplete after puzzle is updated
+  useEffect(() => {
+    if (puzzle && shouldShowAutocomplete(puzzle) && !hasDeclinedAutocomplete) {
+      setShowAutocompleteModal(true);
+    }
+  }, [puzzle, hasDeclinedAutocomplete]);
+
   // Handle tile clicks
   const handleTileClick = (row: number, col: number) => {
     if (!puzzle || puzzle.isSolved || puzzle.isLost) return;
@@ -187,6 +201,11 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
     if (updatedPuzzle.isSolved) {
       handlePuzzleSolved();
+    }
+    
+    // Check for autocomplete conditions after every move
+    if (shouldShowAutocomplete(updatedPuzzle) && !hasDeclinedAutocomplete) {
+      setShowAutocompleteModal(true);
     }
   };
 
@@ -238,6 +257,9 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       // Clear any active hints
       setHintCell(null);
       
+      // Reset autocomplete declined state when starting a new game
+      setHasDeclinedAutocomplete(false);
+      
       let puzzleData = firestoreData;
       // If we don't have the data cached, fetch it
       if (!puzzleData) {
@@ -255,6 +277,16 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       setError("Couldn't load new puzzle. Please refresh the page.");
     } finally {
       setShowWinModal(false);
+    }
+  };
+
+  // Reset lost state without resetting the entire game
+  const resetLostState = () => {
+    if (puzzle) {
+      setPuzzle({
+        ...puzzle,
+        isLost: false
+      });
     }
   };
 
@@ -309,6 +341,32 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       });
   };
 
+  // Handle autocomplete
+  const handleAutoComplete = () => {
+    if (!puzzle) return;
+    
+    // Apply autocomplete to update all non-locked tiles to target color
+    const completedPuzzle = autoCompletePuzzle(puzzle);
+    setPuzzle(completedPuzzle);
+    
+    // Close autocomplete modal
+    setShowAutocompleteModal(false);
+    
+    // Show win modal
+    handlePuzzleSolved();
+  };
+
+  // Modified setShowAutocompleteModal function to handle declining
+  const handleSetShowAutocompleteModal = (show: boolean) => {
+    setShowAutocompleteModal(show);
+    
+    // If the user is closing the modal without completing,
+    // mark as declined so it doesn't appear again until restart
+    if (!show) {
+      setHasDeclinedAutocomplete(true);
+    }
+  };
+
   // Context value
   const contextValue: GameContextValue = {
     puzzle,
@@ -324,11 +382,13 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     showStats,
     gameStats,
     firestoreData,
+    showAutocompleteModal,
     
     handleTileClick,
     handleColorSelect,
     closeColorPicker,
     handleTryAgain,
+    resetLostState,
     handleHint,
     handleSettingsChange,
     getColorCSSWithSettings,
@@ -337,7 +397,9 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setShowSettings,
     setShowStats,
     setShowWinModal,
-    shareGameStats
+    shareGameStats,
+    handleAutoComplete,
+    setShowAutocompleteModal: handleSetShowAutocompleteModal
   };
 
   return (

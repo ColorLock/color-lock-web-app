@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useContext } from 'react';
 import ReactConfetti from 'react-confetti';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faXmark, faCopy } from '@fortawesome/free-solid-svg-icons';
+import { faXmark, faCopy, faEnvelope, faShare, faShareAlt } from '@fortawesome/free-solid-svg-icons';
 import { faTwitter, faFacebookF } from '@fortawesome/free-brands-svg-icons';
 import { DailyPuzzle, TileColor } from '../types';
-import { tileColorToName, copyToClipboard, shareToTwitter, shareToFacebook } from '../utils/shareUtils';
+import { tileColorToName } from '../utils/shareUtils';
 import { SettingsContext } from '../App';
 
 interface WinModalProps {
@@ -26,9 +26,9 @@ const WinModal: React.FC<WinModalProps> = ({
   getColorCSS, 
   generateShareText,
   setShowWinModal,
-  shareToTwitter,
-  shareToFacebook,
-  copyToClipboard
+  shareToTwitter: parentShareToTwitter,
+  shareToFacebook: parentShareToFacebook,
+  copyToClipboard: parentCopyToClipboard
 }) => {
   const [timeLeft, setTimeLeft] = useState<string>("");
   const [windowDimensions, setWindowDimensions] = useState<{width: number, height: number}>({
@@ -36,7 +36,13 @@ const WinModal: React.FC<WinModalProps> = ({
     height: window.innerHeight,
   });
   const [confettiActive, setConfettiActive] = useState<boolean>(true);
-  const [showShareButtons, setShowShareButtons] = useState<boolean>(false);
+  const [copySuccess, setCopySuccess] = useState<boolean>(false);
+  const [isWebShareSupported, setIsWebShareSupported] = useState<boolean>(false);
+
+  // Check if Web Share API is supported
+  useEffect(() => {
+    setIsWebShareSupported(typeof navigator.share === 'function');
+  }, []);
 
   // Get settings for sound playback
   const settings = useContext(SettingsContext);
@@ -99,18 +105,101 @@ const WinModal: React.FC<WinModalProps> = ({
   // Calculate if the user beat the optimal solution
   const beatOptimal = puzzle.userMovesUsed <= puzzle.algoScore;
   
-  // Generate share text
-  const shareText = generateShareText();
+  // Format the date for the share text
+  const formatDate = () => {
+    const now = new Date();
+    return `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()}`;
+  };
+  
+  // Helper to convert tile colors to emoji
+  const getTileEmoji = (color: TileColor): string => {
+    switch (color) {
+      case 'red': return '🟥';
+      case 'blue': return '🟦';
+      case 'green': return '🟩';
+      case 'yellow': return '🟨';
+      case 'purple': return '🟪';
+      case 'orange': return '🟧';
+      default: return '⬜';
+    }
+  };
+  
+  // Generate properly formatted share text
+  const getFormattedShareText = () => {
+    // Get the emoji representation directly from the puzzle's starting grid
+    const boardRows = puzzle.startingGrid.map(row => 
+      row.map(color => getTileEmoji(color)).join("")
+    ).join("\n");
+    
+    // Create formatted text that matches the required format
+    return `Color Lock - ${formatDate()}
+Target: ${getTileEmoji(puzzle.targetColor)}
 
-  // Handle share button click
-  const handleShareClick = () => {
-    setShowShareButtons(!showShareButtons);
+Score: ${puzzle.userMovesUsed} moves${beatOptimal ? ' 🏅' : ''}
+
+Today's Board:
+${boardRows}`;
+  };
+  
+  // Get the properly formatted share text
+  const formattedShareText = getFormattedShareText();
+  const shareTitle = `Color Lock - Daily Puzzle`;
+  const shareUrl = window.location.href;
+
+  // Handler for Web Share API
+  const handleWebShare = async () => {
+    if (typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title: shareTitle,
+          text: formattedShareText,
+        });
+        console.log('Shared successfully');
+      } catch (err) {
+        console.error('Error sharing:', err);
+      }
+    } else {
+      // Fallback for browsers that don't support Web Share API
+      handleCopyToClipboard();
+    }
   };
 
   // Handlers for sharing
-  const handleTwitterShare = () => shareToTwitter();
-  const handleFacebookShare = () => shareToFacebook();
-  const handleCopyToClipboard = () => copyToClipboard(shareText);
+  const handleTwitterShare = () => {
+    parentShareToTwitter();
+  };
+
+  const handleFacebookShare = () => {
+    parentShareToFacebook();
+  };
+
+  const handleEmailShare = () => {
+    const subject = encodeURIComponent(shareTitle);
+    const body = encodeURIComponent(formattedShareText);
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  };
+
+  const handleCopyToClipboard = () => {
+    // Use a temporary textarea element for better cross-browser compatibility
+    const textArea = document.createElement('textarea');
+    textArea.value = formattedShareText;
+    textArea.style.position = 'fixed';  // Make the textarea out of the viewport
+    textArea.style.opacity = '0';
+    document.body.appendChild(textArea);
+    textArea.select();
+    
+    try {
+      const successful = document.execCommand('copy');
+      if (successful) {
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2000);
+      }
+    } catch (err) {
+      console.error('Could not copy text: ', err);
+    }
+    
+    document.body.removeChild(textArea);
+  };
 
   return (
     <div className="modal-backdrop">
@@ -156,34 +245,55 @@ const WinModal: React.FC<WinModalProps> = ({
         </div>
         
         <div className="share-section">
-          <button className="share-button" onClick={handleShareClick}>
-            Share
-          </button>
-          
-          {showShareButtons && (
-            <div className="share-options">
-              <span className="share-on">Share on:</span>
-              <div className="social-buttons">
-                <button className="social-button twitter-button" onClick={handleTwitterShare}>
-                  <FontAwesomeIcon icon={faTwitter} />
-                </button>
-                <button className="social-button facebook-button" onClick={handleFacebookShare}>
-                  <FontAwesomeIcon icon={faFacebookF} />
-                </button>
-                <button className="social-button clipboard-button" onClick={handleCopyToClipboard}>
-                  <FontAwesomeIcon icon={faCopy} />
-                </button>
-              </div>
-            </div>
-          )}
+          <p>Share your results:</p>
+          <div className="social-buttons">
+            <button 
+              className="social-button twitter-button" 
+              onClick={handleTwitterShare}
+              aria-label="Share to Twitter"
+            >
+              <FontAwesomeIcon icon={faTwitter} />
+            </button>
+            <button 
+              className="social-button facebook-button" 
+              onClick={handleFacebookShare}
+              aria-label="Share to Facebook"
+            >
+              <FontAwesomeIcon icon={faFacebookF} />
+            </button>
+            <button 
+              className="social-button email-button" 
+              onClick={handleEmailShare}
+              aria-label="Share via Email"
+            >
+              <FontAwesomeIcon icon={faEnvelope} />
+            </button>
+            <button 
+              className="social-button clipboard-button" 
+              onClick={handleCopyToClipboard}
+              aria-label="Copy to clipboard"
+            >
+              <FontAwesomeIcon icon={faCopy} />
+              {copySuccess && <span className="copy-success-tooltip">Copied!</span>}
+            </button>
+            {isWebShareSupported && (
+              <button 
+                className="social-button web-share-button" 
+                onClick={handleWebShare}
+                aria-label="Share using device options"
+              >
+                <FontAwesomeIcon icon={faShare} />
+              </button>
+            )}
+          </div>
         </div>
         
         <div className="modal-buttons">
-          <button className="try-again-modal-button" onClick={() => {
+          <button className="share-button" onClick={() => {
             onTryAgain();
             setShowWinModal(false);
           }}>Try Again</button>
-          <button className="close-button" onClick={onClose}>Close</button>
+          <button className="inverse-share-button" onClick={onClose}>Close</button>
         </div>
       </div>
     </div>

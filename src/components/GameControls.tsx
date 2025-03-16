@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faGear, faTrophy } from '@fortawesome/free-solid-svg-icons';
+import { faGear, faTrophy, faTimes } from '@fortawesome/free-solid-svg-icons';
 import { TileColor, DailyPuzzle } from '../types';
 import { AppSettings } from '../types/settings';
 
@@ -47,13 +47,6 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
         </div>
         <button className="hint-button" onClick={onHintClick}>Get Hint</button>
       </div>
-
-      {/* If lost, show a message */}
-      {puzzle.isLost && (
-        <div className="status-message lost">
-          You locked the wrong color. Target was {puzzle.targetColor}.
-        </div>
-      )}
     </>
   );
 };

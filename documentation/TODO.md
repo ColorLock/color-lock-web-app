@@ -180,15 +180,25 @@
 
 ---
 
-## Priority Order (Suggested)
-1. Fix Failure Conditions (#11) - Critical game mechanic issue
-2. Firebase Security (#7) - Important for production use
-3. Fix Color Picker Dismissal (#10) - Simple UX improvement
-4. Enhance Win Popup (#8) - Improves user satisfaction
-5. Improve Hint System (#2) - Core gameplay improvement
-6. Sharing Functionality (#1) - Drives user acquisition
-7. Statistics Dashboard (#5) - Increases retention
-8. Settings Panel (#4) - Improves accessibility
-9. Loading Screen Branding (#6) - Visual enhancement
-10. Tutorial Evaluation (#3) - UX improvement
-11. Autocomplete Feature (#9) - Nice-to-have feature 
+# Quick To Do
+- best way to implement styling
+- unit tests
+- improve stats feature
+- stats should include:
+  - Total moves made across all games
+  - Current win streak and longest win streak
+  - Total time played (in minutes/hours)
+  - First try success rate (percentage of games won on first attempt)
+- failure modal try again button not working and x out not working. it also won't click out of modal
+- easy, medium, hard mode setting
+- tutorial feature
+- it seems like the board didn't refresh at 12, I had a session going and I had to manually refresh the page to get the new board
+- facebook share doesn't import the share text at all --> haven't been able to test twitter share
+- figure out subdomains for testing purposes
+- implement dev, test, prod environment functionalities in code
+- user authentication
+- more stats
+- how to store those stats in the db
+- purchase domain for color lock
+- add link to new color lockdomain to bananastandard website
+- what type of analytics should we have on the web app
