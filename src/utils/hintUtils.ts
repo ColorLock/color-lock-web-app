@@ -10,6 +10,7 @@ export interface HintResult {
   col: number;
   newColor: TileColor;
   valid: boolean;
+  connectedCells?: [number, number][]; // Array of [row, col] pairs for connected cells
 }
 
 /**

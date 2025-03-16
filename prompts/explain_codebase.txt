@@ -1,0 +1,1 @@
+Please review all of the code in this codebase and understand it. Please provide an overall review of the functionality of the code to start. Please then go folder by folder and file by file within the folders. Please take time to evaluate each file. Please provide a moderately detailed review of the functionality contained within that file.

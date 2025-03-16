@@ -65,26 +65,26 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     [ColorBlindMode.Protanopia]: {
       [TileColor.Red]: '#a0a0a0', // Gray instead of red
       [TileColor.Green]: '#f5f5a0', // Yellow-ish instead of green
-      [TileColor.Blue]: '#5555ff', // Keep blue
-      [TileColor.Yellow]: '#ffff55', // Keep yellow
+      [TileColor.Blue]: 'rgb(52,120,247)', // Use the new blue
+      [TileColor.Yellow]: 'rgb(247,206,69)', // Use the new yellow
       [TileColor.Purple]: '#a0a0ff', // Light blue instead of purple
       [TileColor.Orange]: '#f5f5a0', // Yellow-ish instead of orange
     },
     [ColorBlindMode.Deuteranopia]: {
-      [TileColor.Red]: '#ff5555', // Keep red
+      [TileColor.Red]: 'rgb(235,78,62)', // Use the new red
       [TileColor.Green]: '#a0a0a0', // Gray instead of green
-      [TileColor.Blue]: '#5555ff', // Keep blue
-      [TileColor.Yellow]: '#ffff55', // Keep yellow
-      [TileColor.Purple]: '#ff55ff', // Keep purple
-      [TileColor.Orange]: '#ff5555', // Red-ish instead of orange
+      [TileColor.Blue]: 'rgb(52,120,247)', // Use the new blue
+      [TileColor.Yellow]: 'rgb(247,206,69)', // Use the new yellow
+      [TileColor.Purple]: 'rgb(163,7,215)', // Use the new purple
+      [TileColor.Orange]: 'rgb(235,78,62)', // Red-ish instead of orange (using the new red)
     },
     [ColorBlindMode.Tritanopia]: {
-      [TileColor.Red]: '#ff5555', // Keep red
-      [TileColor.Green]: '#55ff55', // Keep green
+      [TileColor.Red]: 'rgb(235,78,62)', // Use the new red
+      [TileColor.Green]: 'rgb(101,196,102)', // Use the new green
       [TileColor.Blue]: '#a0a0a0', // Gray instead of blue
-      [TileColor.Yellow]: '#ff5555', // Red-ish instead of yellow
-      [TileColor.Purple]: '#ff55ff', // Keep purple
-      [TileColor.Orange]: '#ff9955', // Keep orange
+      [TileColor.Yellow]: 'rgb(235,78,62)', // Red-ish instead of yellow (using the new red)
+      [TileColor.Purple]: 'rgb(163,7,215)', // Use the new purple
+      [TileColor.Orange]: 'rgb(241,154,56)', // Use the new orange
     }
   };
 

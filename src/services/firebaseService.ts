@@ -5,7 +5,7 @@ import { getFirestore, doc, getDoc } from 'firebase/firestore';
 import { AppCheck } from 'firebase/app-check';
 import { FirestorePuzzleData } from '../types';
 // Import the Firebase configuration
-import firebaseConfig from '../firebase_config';
+import firebaseConfig from '../env/firebaseConfig';
 
 // Initialize Firebase app
 const app = initializeApp(firebaseConfig);

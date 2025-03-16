@@ -8,6 +8,15 @@ export enum TileColor {
   Orange = 'orange'
 }
 
+// can you please change the colors of the board to the following rgb:
+
+// yellow: 247,206,69
+// red: 235,78,62
+// green: 101,196,102
+// orange: 241,154,56
+// purple: 163,7,215
+// blue: 52,120,247
+
 export const allColors = [
   TileColor.Red,
   TileColor.Green,
