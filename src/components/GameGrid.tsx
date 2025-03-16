@@ -3,6 +3,7 @@ import { TileColor } from '../types';
 import { HintResult } from '../utils/hintUtils';
 import Tile from './Tile';
 import { AppSettings } from '../types/settings';
+import { tileColorToName } from '../utils/shareUtils';
 
 interface GameGridProps {
   grid: TileColor[][];
@@ -37,7 +38,7 @@ const GameGrid: React.FC<GameGridProps> = ({
   };
 
   return (
-    <div className="grid">
+    <div className="grid" style={{ position: 'relative' }}>
       {grid.map((row, rIdx) => (
         <div key={rIdx} className="grid-row">
           {row.map((color, cIdx) => {

@@ -37,6 +37,7 @@ const Tile: React.FC<TileProps> = ({
   if (isLocked) classes.push('locked');
   if (isHighlighted) classes.push('highlight-largest-region');
   if (isHinted) classes.push('hint-cell');
+  if (isPrimaryHintCell) classes.push('primary-hint-cell');
   
   // For hinted cells, set the background color explicitly and add animations
   const cellStyle = {
@@ -45,9 +46,6 @@ const Tile: React.FC<TileProps> = ({
       // All hinted cells (primary and connected) show color change animation
       '--current-color': getColorCSS(color),
       '--target-color': getColorCSS(hintCell.newColor),
-      // All hinted cells (primary and connected) get the blue border/glow
-      border: '2px solid #1e90ff', // Persistent blue border
-      boxShadow: '0 0 6px 1px rgba(30, 144, 255, 0.6)' // Persistent blue glow
     })
   };
   
@@ -56,10 +54,11 @@ const Tile: React.FC<TileProps> = ({
       className={classes.join(' ')}
       style={cellStyle}
       onClick={() => onClick(row, col)}
-      aria-label={`${colorName} tile at row ${row+1}, column ${col+1}${isLocked ? ', locked' : ''}`}
+      aria-label={`${colorName} tile at row ${row+1}, column ${col+1}${isLocked ? ', locked' : ''}${isPrimaryHintCell ? ', hint target' : ''}`}
       data-row={row}
       data-col={col}
       data-color={color}
+      data-hint-target={isPrimaryHintCell ? 'true' : undefined}
     >
       {isLocked && <MinimalWhiteLock size={16} />}
     </div>

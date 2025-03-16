@@ -3,6 +3,7 @@
 // Grid styling (5x5) with bigger tiles
 .grid {
   display: inline-block;
+  position: relative;
 }
 
 .grid-row {
@@ -35,10 +36,15 @@
     box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 8px 2px rgba(255, 255, 255, 0.7);
   }
   
-  // Hinted cell with animation
+  // Hinted cell with improved animation
   &.hint-cell {
-    animation: color-fade 3s infinite;
+    animation: color-fade 3s infinite, hint-pulsate 3s infinite;
     animation-fill-mode: both;
+    z-index: 2;
+    box-shadow: 0 0 5px 1px rgba(30, 144, 255, 0.5);
+    
+    // Add a more subtle border to mark the cell
+    border: 1px solid rgba(30, 144, 255, 0.7) !important;
   }
   
   // Neon glow effect
@@ -59,6 +65,14 @@
   .high-contrast-mode & {
     border: 2px solid $color-black;
   }
+}
+
+// Connected cells indicator (for secondary hint cells)
+.connected-cell-line {
+  position: absolute;
+  background-color: rgba(30, 144, 255, 0.6);
+  z-index: 1;
+  pointer-events: none;
 }
 
 // Locked overlay styling
