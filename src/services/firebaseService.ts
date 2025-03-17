@@ -1,24 +1,47 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, User } from 'firebase/auth';
-import { getFirestore, doc, getDoc } from 'firebase/firestore';
+import { initializeApp, FirebaseApp } from 'firebase/app';
+import { getAuth, signInAnonymously, User, Auth } from 'firebase/auth';
+import { getFirestore, doc, getDoc, Firestore } from 'firebase/firestore';
 // Import AppCheck types but we'll make it optional
 import { AppCheck } from 'firebase/app-check';
 import { FirestorePuzzleData } from '../types';
 // Import the Firebase configuration
 import firebaseConfig from '../env/firebaseConfig';
 
-// Initialize Firebase app
-const app = initializeApp(firebaseConfig);
+// Initialize Firebase with error handling
+let app: FirebaseApp | null = null;
+let auth: Auth | null = null;
+let db: Firestore | null = null;
 
-// IMPORTANT: Initialize Auth FIRST before any other Firebase service
-export const auth = getAuth(app);
+try {
+  // Initialize Firebase app
+  app = initializeApp(firebaseConfig);
+  
+  // IMPORTANT: Initialize Auth FIRST before any other Firebase service
+  auth = getAuth(app);
+  
+  // Only after Auth is initialized, initialize Firestore
+  db = getFirestore(app);
+  
+  console.log("Firebase initialized successfully");
+} catch (error) {
+  console.error("Firebase initialization error:", error);
+  // Create placeholders if initialization fails
+  app = null;
+  auth = null;
+  db = null;
+}
 
-// Only after Auth is initialized, initialize Firestore
-export const db = getFirestore(app);
+export { auth, db };
 
 // Function to ensure user is authenticated with better error handling
 export const ensureAuthenticated = async (): Promise<User | null> => {
   try {
+    // Check if Firebase is properly initialized
+    if (!auth) {
+      console.error("Firebase Auth not initialized");
+      return null;
+    }
+    
     console.log("Attempting to ensure authentication");
     
     if (!auth.currentUser) {
@@ -102,7 +125,7 @@ export const fetchPuzzleFromFirestore = async (date: string): Promise<FirestoreP
     const user = await ensureAuthenticated();
     console.log("Authentication status:", user ? "Authenticated" : "Not authenticated");
     
-    if (user) {
+    if (user && db) { // Check that db is not null
       try {
         console.log("Attempting to fetch puzzle from Firestore");
         const puzzleRef = doc(db, 'puzzles', date);
@@ -141,6 +164,10 @@ export const fetchPuzzleFromFirestore = async (date: string): Promise<FirestoreP
         console.error("Firestore access error:", firestoreError);
         throw new Error("Firestore access failed, falling back to local generation");
       }
+    } else {
+      // Handle the case where db or auth is null
+      console.error("Firebase not initialized or user not authenticated");
+      throw new Error("Firebase not initialized or authentication failed");
     }
     
     // If we get here, we need to fall back to local generation
