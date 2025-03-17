@@ -3,7 +3,7 @@ import { TileColor, DailyPuzzle, FirestorePuzzleData } from '../types';
 import { AppSettings, defaultSettings, DifficultyLevel } from '../types/settings';
 import { GameStatistics, defaultStats } from '../types/stats';
 import { HintResult } from '../utils/hintUtils';
-import { fetchPuzzleFromFirestore } from '../services/firebaseService';
+import { fetchPuzzle } from '../services/firebaseService';
 import { dateKeyForToday } from '../utils/dateUtils';
 import { findLargestRegion, generatePuzzleFromDB } from '../utils/gameLogic';
 import { applyColorChange, checkIfOnOptimalPath, getGameHint } from '../utils/gameUtils';
@@ -104,7 +104,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
           );
           
           return Promise.race([
-            fetchPuzzleFromFirestore(DATE_TO_USE),
+            fetchPuzzle(DATE_TO_USE),
             timeout
           ]) as Promise<FirestorePuzzleData>;
         };

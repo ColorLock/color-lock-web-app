@@ -41,6 +41,58 @@ export const ensureAuthenticated = async (): Promise<User | null> => {
   }
 };
 
+// Function to fetch puzzle from the HTTP Cloud Function
+export const fetchPuzzleFromCloudFunction = async (date: string): Promise<FirestorePuzzleData> => {
+  console.log(`Attempting to fetch puzzle for date: ${date} from Cloud Function`);
+  
+  // Ensure authentication to get ID token
+  const user = await ensureAuthenticated();
+  if (!user) {
+    throw new Error("Authentication required to call Cloud Function");
+  }
+  
+  // Get ID token for authorization
+  const idToken = await user.getIdToken();
+  
+  // Configure the cloud function URL
+  const isLocalDev = window.location.hostname === 'localhost';
+  
+  // Use the proxy URL in development, direct URL in production
+  let functionUrl = isLocalDev
+    ? '/api/fetch_puzzle' // This is handled by the Vite proxy
+    : 'https://us-central1-color-lock-prod.cloudfunctions.net/fetch_puzzle';
+  
+  try {
+    // Call the HTTP function directly
+    const response = await fetch(functionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}` // Authentication token
+      },
+      body: JSON.stringify({ date })
+    });
+    
+    if (!response.ok) {
+      console.error(`HTTP error: ${response.status}`);
+      throw new Error(`Failed to fetch puzzle: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      console.log("Successfully retrieved puzzle from Cloud Function");
+      return data.data as FirestorePuzzleData;
+    } else {
+      console.error("Error from Cloud Function:", data.error);
+      throw new Error(`Cloud Function error: ${data.error}`);
+    }
+  } catch (error) {
+    console.error("Error calling Cloud Function:", error);
+    throw error;
+  }
+};
+
 // Function to fetch puzzle from Firestore with better fallback
 export const fetchPuzzleFromFirestore = async (date: string): Promise<FirestorePuzzleData> => {
   console.log(`Attempting to fetch puzzle for date: ${date}`);
@@ -98,6 +150,19 @@ export const fetchPuzzleFromFirestore = async (date: string): Promise<FirestoreP
   } catch (error) {
     console.error("Error in fetchPuzzleFromFirestore:", error);
     throw error;
+  }
+};
+
+// Main puzzle fetch function - tries cloud function first, then falls back to direct Firestore
+export const fetchPuzzle = async (date: string): Promise<FirestorePuzzleData> => {
+  try {
+    // First try the Cloud Function
+    return await fetchPuzzleFromCloudFunction(date);
+  } catch (error) {
+    console.warn("Cloud Function fetch failed, falling back to direct Firestore:", error);
+    
+    // Fall back to directly accessing Firestore
+    return await fetchPuzzleFromFirestore(date);
   }
 };
 

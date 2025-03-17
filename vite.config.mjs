@@ -21,6 +21,23 @@ export default defineConfig({
   server: {
     port: 3000,
     open: true,
+    proxy: {
+      // Proxy Firebase Cloud Function requests to bypass CORS in development
+      '/api/fetch_puzzle': {
+        target: 'https://us-central1-color-lock-prod.cloudfunctions.net',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/fetch_puzzle/, '/fetch_puzzle'),
+        secure: true,
+        // Forward authorization headers
+        configure: (proxy, _options) => {
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            if (req.headers.authorization) {
+              proxyReq.setHeader('Authorization', req.headers.authorization);
+            }
+          });
+        }
+      }
+    }
   },
   test: {
     globals: true,
