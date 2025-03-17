@@ -3,7 +3,7 @@ import '../scss/main.scss';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faXmark } from '@fortawesome/free-solid-svg-icons';
 import { TileColor } from '../types';
-import { AppSettings, ColorBlindMode, defaultSettings } from '../types/settings';
+import { AppSettings, ColorBlindMode, DifficultyLevel, defaultSettings } from '../types/settings';
 
 // Define the SettingsModal props
 interface SettingsModalProps {
@@ -213,21 +213,37 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 <span className="toggle-slider"></span>
               </label>
             </div>
-            
-            <div className="setting-item">
-              <label htmlFor="show-optimal-path">
-                Show Optimal Path
-                <p className="setting-description">Show hints for optimal solution</p>
-              </label>
-              <label className="toggle-switch">
-                <input
-                  type="checkbox"
-                  id="show-optimal-path"
-                  checked={localSettings.showOptimalPath}
-                  onChange={(e) => handleToggleChange('showOptimalPath', e.target.checked)}
-                />
-                <span className="toggle-slider"></span>
-              </label>
+
+            <div className="setting-item difficulty-setting-item">
+              <div className="difficulty-header">
+                <label htmlFor="difficulty-level">
+                  Difficulty Level
+                  <p className="setting-description">Adjust game difficulty (affects goal number)</p>
+                </label>
+              </div>
+              
+              <div className="difficulty-selector">
+                <div className="difficulty-segmented-control">
+                  <button 
+                    className={`difficulty-segment ${localSettings.difficultyLevel === DifficultyLevel.Easy ? 'active' : ''}`}
+                    onClick={() => handleSelectChange('difficultyLevel', DifficultyLevel.Easy)}
+                  >
+                    Easy (+3)
+                  </button>
+                  <button 
+                    className={`difficulty-segment ${localSettings.difficultyLevel === DifficultyLevel.Medium ? 'active' : ''}`}
+                    onClick={() => handleSelectChange('difficultyLevel', DifficultyLevel.Medium)}
+                  >
+                    Medium (+1)
+                  </button>
+                  <button 
+                    className={`difficulty-segment ${localSettings.difficultyLevel === DifficultyLevel.Hard ? 'active' : ''}`}
+                    onClick={() => handleSelectChange('difficultyLevel', DifficultyLevel.Hard)}
+                  >
+                    Hard
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
         </div>

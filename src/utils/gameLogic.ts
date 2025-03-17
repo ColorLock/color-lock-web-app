@@ -1,5 +1,6 @@
 import { TileColor, FirestorePuzzleData, DailyPuzzle, PuzzleGrid } from '../types';
 import { createSwiftSeededGenerator, stableSeedForDate } from './dateUtils';
+import { AppSettings, DifficultyLevel } from '../types/settings';
 
 /**
  * Flood fill algorithm for finding connected regions of the same color
@@ -94,7 +95,11 @@ export function isBoardUnified(grid: TileColor[][]): boolean {
 /**
  * Generate a puzzle from the firestore data
  */
-export function generatePuzzleFromDB(firestoreData: FirestorePuzzleData, dateStr: string): DailyPuzzle {
+export function generatePuzzleFromDB(
+  firestoreData: FirestorePuzzleData, 
+  dateStr: string,
+  settings?: AppSettings
+): DailyPuzzle {
   // Create a specific RNG instance for today's date
   const rng = createSwiftSeededGenerator(stableSeedForDate(dateStr));
   
@@ -103,6 +108,22 @@ export function generatePuzzleFromDB(firestoreData: FirestorePuzzleData, dateStr
   
   // Create a deep copy of the initial grid for the starting grid
   const startingGrid = initialState.map(row => [...row]);
+
+  // Adjust algoScore based on difficulty level if settings are provided
+  let adjustedAlgoScore = firestoreData.algoScore;
+  if (settings) {
+    switch (settings.difficultyLevel) {
+      case DifficultyLevel.Easy:
+        adjustedAlgoScore += 3;
+        break;
+      case DifficultyLevel.Medium:
+        adjustedAlgoScore += 1;
+        break;
+      case DifficultyLevel.Hard:
+        // Use the original score
+        break;
+    }
+  }
   
   return {
     dateString: dateStr,
@@ -116,7 +137,7 @@ export function generatePuzzleFromDB(firestoreData: FirestorePuzzleData, dateStr
     bestScoreUsed: null,
     timesPlayed: 0,
     totalMovesForThisBoard: 0,
-    algoScore: firestoreData.algoScore
+    algoScore: adjustedAlgoScore
   };
 }
 

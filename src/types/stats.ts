@@ -6,17 +6,17 @@ export interface GameStatistics {
   todayStats: {
     movesUsed: number;
     bestScore: number | null;
-    timeSpent: number; // in seconds
+    timesPlayed: number; // number of times game was played/reset today
   };
   
   // All-time stats
   allTimeStats: {
     gamesPlayed: number;
-    winPercentage: number;
-    averageMovesPerSolve: number;
-    bestScoreEver: number | null;
-    streak: number; // consecutive days played
-    dailyScores: { [date: string]: number }; // For visualization
+    streak: number; // consecutive days played and won
+    daysPlayed: number; // count of unique days played
+    goalAchieved: number; // count of days beating or tying bot score
+    totalMoves: number; // total moves made across all games
+    dailyScores: { [date: string]: number }; // Used for win percentage, avg score, and streak calculations
   };
 }
 
@@ -27,14 +27,14 @@ export const defaultStats: GameStatistics = {
   todayStats: {
     movesUsed: 0,
     bestScore: null,
-    timeSpent: 0,
+    timesPlayed: 0,
   },
   allTimeStats: {
     gamesPlayed: 0,
-    winPercentage: 0,
-    averageMovesPerSolve: 0,
-    bestScoreEver: null,
     streak: 0,
+    daysPlayed: 0,
+    goalAchieved: 0,
+    totalMoves: 0,
     dailyScores: {},
   }
 }; 

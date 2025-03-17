@@ -81,4 +81,88 @@
   @include primary-button;
   border-radius: $border-radius-medium;
   padding: $spacing-sm $spacing-lg;
+}
+
+// Radio button styles for difficulty settings
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  min-width: 120px;
+  align-items: flex-end;
+}
+
+.radio-label {
+  display: flex !important;
+  align-items: center;
+  cursor: pointer;
+  font-weight: $font-weight-normal !important;
+  
+  input[type="radio"] {
+    margin-right: $spacing-xs;
+    cursor: pointer;
+  }
+}
+
+// Difficulty settings
+.difficulty-setting-item {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.difficulty-header {
+  margin-bottom: $spacing-sm;
+}
+
+// Difficulty segmented control
+.difficulty-selector {
+  padding: 0;
+  width: 100%;
+}
+
+.difficulty-segmented-control {
+  display: flex;
+  width: 100%;
+  border-radius: $border-radius-large;
+  overflow: hidden;
+  border: 1px solid $color-primary;
+  position: relative;
+  height: 36px;
+  box-shadow: $shadow-small;
+}
+
+.difficulty-segment {
+  flex: 1;
+  text-align: center;
+  padding: $spacing-xs $spacing-sm;
+  background-color: $color-white;
+  border: none;
+  cursor: pointer;
+  font-size: $font-size-small;
+  font-weight: $font-weight-medium;
+  color: $color-primary;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  
+  &.active {
+    background-color: $color-primary;
+    color: $color-white;
+    font-weight: $font-weight-bold;
+  }
+  
+  &:not(:last-child) {
+    border-right: 1px solid rgba($color-primary, 0.2);
+  }
+  
+  &:hover:not(.active) {
+    background-color: $color-gray-lighter;
+  }
+  
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba($color-primary, 0.3);
+  }
 } 

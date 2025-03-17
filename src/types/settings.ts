@@ -11,6 +11,15 @@ export enum ColorBlindMode {
 }
 
 /**
+ * Game difficulty levels
+ */
+export enum DifficultyLevel {
+  Easy = "easy",
+  Medium = "medium",
+  Hard = "hard"
+}
+
+/**
  * Application settings interface
  */
 export interface AppSettings {
@@ -27,8 +36,8 @@ export interface AppSettings {
   
   // Game settings
   enableSoundEffects: boolean;
-  showOptimalPath: boolean;
   showLockedRegionCounter: boolean;
+  difficultyLevel: DifficultyLevel;
 }
 
 /**
@@ -41,6 +50,6 @@ export const defaultSettings: AppSettings = {
   highlightLargestRegion: true,
   enableAnimations: true,
   enableSoundEffects: false,
-  showOptimalPath: false,
-  showLockedRegionCounter: true
+  showLockedRegionCounter: true,
+  difficultyLevel: DifficultyLevel.Medium
 }; 

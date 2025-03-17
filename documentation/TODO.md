@@ -181,7 +181,6 @@
 ---
 
 # Quick To Do
-- best way to implement styling
 - unit tests
 - improve stats feature
 - stats should include:
@@ -189,10 +188,7 @@
   - Current win streak and longest win streak
   - Total time played (in minutes/hours)
   - First try success rate (percentage of games won on first attempt)
-- failure modal try again button not working and x out not working. it also won't click out of modal
-- easy, medium, hard mode setting
 - tutorial feature
-- it seems like the board didn't refresh at 12, I had a session going and I had to manually refresh the page to get the new board
 - facebook share doesn't import the share text at all --> haven't been able to test twitter share
 - figure out subdomains for testing purposes
 - implement dev, test, prod environment functionalities in code

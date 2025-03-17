@@ -6,6 +6,7 @@ import { faTwitter, faFacebookF } from '@fortawesome/free-brands-svg-icons';
 import { DailyPuzzle, TileColor } from '../types';
 import { tileColorToName } from '../utils/shareUtils';
 import { SettingsContext } from '../App';
+import { useGameContext } from '../contexts/GameContext';
 
 interface WinModalProps {
   puzzle: DailyPuzzle;
@@ -38,6 +39,9 @@ const WinModal: React.FC<WinModalProps> = ({
   const [confettiActive, setConfettiActive] = useState<boolean>(true);
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
   const [isWebShareSupported, setIsWebShareSupported] = useState<boolean>(false);
+  
+  // Get game context to access stats
+  const { gameStats } = useGameContext();
 
   // Check if Web Share API is supported
   useEffect(() => {
@@ -224,10 +228,10 @@ ${boardRows}`;
         <div className="win-stats">
           <div className="stat-item">
             <div className="stat-value">{puzzle.algoScore}</div>
-            <div className="stat-label">Optimal Moves</div>
+            <div className="stat-label">Bot Moves</div>
           </div>
           <div className="stat-item">
-            <div className="stat-value">{puzzle.timesPlayed}</div>
+            <div className="stat-value">{gameStats.todayStats.timesPlayed}</div>
             <div className="stat-label">Times Played</div>
           </div>
         </div>

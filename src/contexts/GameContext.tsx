@@ -1,6 +1,6 @@
 import React, { createContext, useState, useEffect, useContext, ReactNode } from 'react';
 import { TileColor, DailyPuzzle, FirestorePuzzleData } from '../types';
-import { AppSettings, defaultSettings } from '../types/settings';
+import { AppSettings, defaultSettings, DifficultyLevel } from '../types/settings';
 import { GameStatistics, defaultStats } from '../types/stats';
 import { HintResult } from '../utils/hintUtils';
 import { fetchPuzzleFromFirestore } from '../services/firebaseService';
@@ -89,7 +89,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const { settings, updateSettings } = useSettings();
-  const { gameStats, updateGameStats } = useGameStats(defaultStats);
+  const { gameStats, updateGameStats, incrementTimesPlayed, generateShareableStats, updateTotalMoves } = useGameStats(defaultStats);
 
   // Generate the puzzle for the fixed date on first render
   useEffect(() => {
@@ -112,7 +112,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         try {
           const firestoreData = await fetchPuzzleWithTimeout();
           setFirestoreData(firestoreData);
-          const newPuzzle = generatePuzzleFromDB(firestoreData, DATE_TO_USE);
+          const newPuzzle = generatePuzzleFromDB(firestoreData, DATE_TO_USE, settings);
           setPuzzle(newPuzzle);
           setError(null);
         } catch (err) {
@@ -185,6 +185,15 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       return;
     }
 
+    // If this is the first move on a board, increment timesPlayed and potentially daysPlayed
+    if (puzzle.userMovesUsed === 0) {
+      // This will handle incrementing both timesPlayed and daysPlayed if this is the first game of the day
+      incrementTimesPlayed();
+    }
+    
+    // Each color change counts as 1 move in total moves
+    updateTotalMoves(1);
+
     // Apply the color change
     const updatedPuzzle = applyColorChange(puzzle, row, col, newColor);
     setPuzzle(updatedPuzzle);
@@ -200,7 +209,9 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     closeColorPicker();
 
     if (updatedPuzzle.isSolved) {
-      handlePuzzleSolved();
+      // Since updatedPuzzle already has the incremented userMovesUsed value,
+      // we pass it directly to handlePuzzleSolved
+      handlePuzzleSolved(updatedPuzzle);
     }
     
     // Check for autocomplete conditions after every move
@@ -238,45 +249,55 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   };
 
   // Handle puzzle solved
-  const handlePuzzleSolved = () => {
+  const handlePuzzleSolved = (solvedPuzzle = puzzle) => {
     // Update statistics when puzzle is solved
-    const timeSpent = gameStartTime ? Math.floor((new Date().getTime() - gameStartTime.getTime()) / 1000) : 0;
-    updateGameStats(true, puzzle!.userMovesUsed, timeSpent);
-    setShowWinModal(true);
+    if (solvedPuzzle) {
+      // Use the moves from the solvedPuzzle which includes the final move
+      // Also pass the bot's score (algoScore) for goal achievement tracking
+      // And pass the puzzle date string to track achievements by specific puzzle
+      updateGameStats(
+        true, 
+        solvedPuzzle.userMovesUsed, 
+        solvedPuzzle.algoScore,
+        solvedPuzzle.dateString
+      );
+      setShowWinModal(true);
+    }
   };
 
   // Try again (reset the game)
   const handleTryAgain = async () => {
     try {
-      // If the player resets and doesn't solve the puzzle, count it as a played game
-      if (puzzle && !puzzle.isSolved) {
-        const timeSpent = gameStartTime ? Math.floor((new Date().getTime() - gameStartTime.getTime()) / 1000) : 0;
-        updateGameStats(false, puzzle.userMovesUsed, timeSpent);
+      // No longer increment times played here - it will be incremented on first move instead
+      
+      setLoading(true);
+      
+      // Reset the puzzle state
+      if (firestoreData) {
+        const newPuzzle = generatePuzzleFromDB(firestoreData, DATE_TO_USE, settings);
+        setPuzzle(newPuzzle);
+        
+        // Reset the game start time
+        setGameStartTime(new Date());
+        
+        // Reset the hint and autocomplete state
+        setHintCell(null);
+        setShowAutocompleteModal(false);
+        setHasDeclinedAutocomplete(false);
+        
+        // Close any open modals
+        setShowWinModal(false);
+        
+        // Reset the optimal path flag
+        setIsOnOptimalPath(true);
+      } else {
+        setError("Cannot reset the game in offline mode");
       }
-      
-      // Clear any active hints
-      setHintCell(null);
-      
-      // Reset autocomplete declined state when starting a new game
-      setHasDeclinedAutocomplete(false);
-      
-      let puzzleData = firestoreData;
-      // If we don't have the data cached, fetch it
-      if (!puzzleData) {
-        puzzleData = await fetchPuzzleFromFirestore(DATE_TO_USE);
-        setFirestoreData(puzzleData);
-      }
-      
-      // Reset the game
-      const newPuzzle = generatePuzzleFromDB(puzzleData, DATE_TO_USE);
-      setPuzzle(newPuzzle);
-      setIsOnOptimalPath(true);
-      setGameStartTime(new Date()); // Reset start time
     } catch (error) {
-      console.error("Error in try again:", error);
-      setError("Couldn't load new puzzle. Please refresh the page.");
+      console.error("Failed to reset the game", error);
+      setError("Failed to reset the game");
     } finally {
-      setShowWinModal(false);
+      setLoading(false);
     }
   };
 
@@ -292,7 +313,57 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   // Handle settings change
   const handleSettingsChange = (newSettings: AppSettings) => {
+    // Check if difficulty level has changed
+    const difficultyChanged = newSettings.difficultyLevel !== settings.difficultyLevel;
+    
+    // Update settings
     updateSettings(newSettings);
+    
+    // If difficulty changed and we have firestore data, recreate the puzzle with the new difficulty
+    if (difficultyChanged && firestoreData && puzzle) {
+      // Calculate new algoScore based on the updated difficulty
+      const newAlgoScore = adjustAlgoScoreForDifficulty(firestoreData.algoScore, newSettings.difficultyLevel);
+      
+      // If the puzzle is already solved, check if the user has achieved the goal with the new difficulty
+      if (puzzle.isSolved) {
+        console.log('Difficulty changed - checking goal achievement with new difficulty', {
+          userMovesUsed: puzzle.userMovesUsed,
+          newAlgoScore,
+          dateString: puzzle.dateString
+        });
+        
+        // Check if the user has achieved the goal with the new difficulty setting
+        // Pass the puzzle date string to track achievements per puzzle
+        updateGameStats(
+          true, 
+          puzzle.userMovesUsed, 
+          newAlgoScore,
+          puzzle.dateString
+        );
+      }
+      
+      // Preserve current state but update algoScore
+      const updatedPuzzle = {
+        ...puzzle,
+        algoScore: newAlgoScore
+      };
+      
+      setPuzzle(updatedPuzzle);
+    }
+  };
+
+  // Helper function to adjust algoScore based on difficulty
+  const adjustAlgoScoreForDifficulty = (baseScore: number, difficultyLevel: DifficultyLevel): number => {
+    switch (difficultyLevel) {
+      case DifficultyLevel.Easy:
+        return baseScore + 3;
+      case DifficultyLevel.Medium:
+        return baseScore + 1;
+      case DifficultyLevel.Hard:
+        return baseScore;
+      default:
+        return baseScore;
+    }
   };
 
   // Get the size of the locked region
@@ -313,37 +384,35 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   // Share game statistics
   const shareGameStats = () => {
-    const { todayStats, allTimeStats } = gameStats;
+    const shareText = generateShareableStats();
     
-    let shareText = `🔒 Color Lock Stats 🔒\n\n`;
-    shareText += `Today's Game:\n`;
-    shareText += `Moves: ${todayStats.movesUsed}\n`;
-    shareText += `Best Score: ${todayStats.bestScore !== null ? todayStats.bestScore : '-'}\n`;
-    shareText += `Time: ${Math.floor(todayStats.timeSpent / 60)}:${(todayStats.timeSpent % 60).toString().padStart(2, '0')}\n\n`;
-    
-    shareText += `All-time Stats:\n`;
-    shareText += `Games: ${allTimeStats.gamesPlayed}\n`;
-    shareText += `Win Rate: ${allTimeStats.winPercentage.toFixed(0)}%\n`;
-    shareText += `Avg Moves: ${allTimeStats.averageMovesPerSolve.toFixed(1)}\n`;
-    shareText += `Best Ever: ${allTimeStats.bestScoreEver !== null ? allTimeStats.bestScoreEver : '-'}\n`;
-    shareText += `Streak: ${allTimeStats.streak}\n\n`;
-    
-    shareText += `Play at: https://colorlock.game`;
-    
-    // Use the copyToClipboard function from shareUtils.ts
-    navigator.clipboard.writeText(shareText)
-      .then(() => {
-        // Show toast or notification
-        console.log('Stats copied to clipboard!');
-      })
-      .catch((err) => {
-        console.error('Failed to copy stats: ', err);
-      });
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(shareText)
+        .then(() => {
+          console.log('Stats copied to clipboard');
+          alert('Game stats copied to clipboard!');
+        })
+        .catch(err => {
+          console.error('Failed to copy stats: ', err);
+          alert('Failed to copy stats to clipboard');
+        });
+    } else {
+      console.error('Clipboard API not available');
+      alert('Clipboard feature not available on your device');
+    }
   };
 
   // Handle autocomplete
   const handleAutoComplete = () => {
     if (!puzzle) return;
+    
+    // If this is the first interaction with the puzzle, increment timesPlayed
+    if (puzzle.userMovesUsed === 0) {
+      incrementTimesPlayed();
+    }
+    
+    // Count this as a move in total moves
+    updateTotalMoves(1);
     
     // Apply autocomplete to update all non-locked tiles to target color
     const completedPuzzle = autoCompletePuzzle(puzzle);
@@ -353,7 +422,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setShowAutocompleteModal(false);
     
     // Show win modal
-    handlePuzzleSolved();
+    handlePuzzleSolved(completedPuzzle);
   };
 
   // Modified setShowAutocompleteModal function to handle declining
