@@ -13,17 +13,31 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+button, 
+.button, 
+[class*="-button"], 
+[role="button"], 
+input[type="button"], 
+input[type="submit"] {
+  cursor: pointer !important;
+}
+
 button, input, select, textarea {
   font-family: inherit;
   font-size: 100%;
   margin: 0;
 }
 
-button {
-  cursor: pointer;
-}
-
 img {
   max-width: 100%;
   height: auto;
+}
+
+/* Ensure clickable elements have pointer cursor */
+div[onClick],
+div[role="button"],
+span[onClick],
+span[role="button"],
+a {
+  cursor: pointer;
 } 

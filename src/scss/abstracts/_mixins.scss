@@ -1,4 +1,5 @@
 @use 'variables' as *;
+@use 'sass:color';
 
 // Flexbox mixins
 @mixin flex-center {

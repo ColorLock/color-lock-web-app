@@ -7,6 +7,7 @@ import { DailyPuzzle, TileColor } from '../types';
 import { tileColorToName } from '../utils/shareUtils';
 import { SettingsContext } from '../App';
 import { useGameContext } from '../contexts/GameContext';
+import { useTutorialContext } from '../contexts/TutorialContext';
 
 interface WinModalProps {
   puzzle: DailyPuzzle;
@@ -39,6 +40,9 @@ const WinModal: React.FC<WinModalProps> = ({
   const [confettiActive, setConfettiActive] = useState<boolean>(true);
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
   const [isWebShareSupported, setIsWebShareSupported] = useState<boolean>(false);
+  
+  // Get tutorial context
+  const { isTutorialMode, nextStep, endTutorial } = useTutorialContext();
   
   // Get game context to access stats
   const { gameStats } = useGameContext();
@@ -205,6 +209,18 @@ ${boardRows}`;
     document.body.removeChild(textArea);
   };
 
+  // Handle try again button
+  const handleTryAgain = () => {
+    if (isTutorialMode) {
+      // In tutorial mode, end the tutorial
+      endTutorial();
+      onClose();
+    } else {
+      // In regular mode, just try again
+      onTryAgain();
+    }
+  };
+
   return (
     <div className="modal-backdrop">
       {confettiActive && (
@@ -292,12 +308,15 @@ ${boardRows}`;
           </div>
         </div>
         
-        <div className="modal-buttons">
-          <button className="share-button" onClick={() => {
-            onTryAgain();
-            setShowWinModal(false);
-          }}>Try Again</button>
-          <button className="inverse-share-button" onClick={onClose}>Close</button>
+        <div className="win-actions">
+          <button 
+            className="try-again-button"
+            onClick={handleTryAgain}
+          >
+            {isTutorialMode ? "Take me to today's game" : "Try Again"}
+          </button>
+          
+          <button className="close-button" onClick={onClose}>Close</button>
         </div>
       </div>
     </div>

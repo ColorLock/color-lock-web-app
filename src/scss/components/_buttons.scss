@@ -108,18 +108,19 @@
 
 // Icon buttons
 .settings-button,
-.stats-button {
+.stats-button,
+.info-button {
   @include icon-button;
   position: absolute;
   width: 40px;
   height: 40px;
   border-radius: $border-radius-circle;
   z-index: 10;
+  right: 15px;
 }
 
 .settings-button {
   top: 15px;
-  right: 15px;
   
   &:hover {
     background-color: $color-secondary-dark;
@@ -129,7 +130,14 @@
 
 .stats-button {
   top: 65px;
-  right: 15px;
+  
+  &:hover {
+    background-color: $color-secondary-dark;
+  }
+}
+
+.info-button {
+  top: 115px;
   
   &:hover {
     background-color: $color-secondary-dark;
@@ -193,4 +201,22 @@
     background-color: $color-secondary-dark;
     transform: scale(1.05);
   }
+}
+
+// Game tiles
+.tile, 
+.game-tile, 
+div[class*="tile"],
+[data-tile],
+.board-tile {
+  cursor: pointer; /* Ensure tiles have pointer cursor */
+}
+
+// Tutorial elements
+.tutorial-continue-button,
+button[class*="tutorial"],
+[class*="tutorial"][onClick],
+.tutorial-cell-highlight,
+.tutorial-overlay [role="button"] {
+  cursor: pointer !important; /* Ensure tutorial elements have pointer cursor */
 } 

@@ -1,8 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faGear, faTrophy, faTimes } from '@fortawesome/free-solid-svg-icons';
+import { faGear, faTrophy, faTimes, faInfoCircle } from '@fortawesome/free-solid-svg-icons';
 import { TileColor, DailyPuzzle } from '../types';
 import { AppSettings } from '../types/settings';
+import { useTutorialContext } from '../contexts/TutorialContext';
 
 interface GameHeaderProps {
   puzzle: DailyPuzzle;
@@ -10,6 +11,7 @@ interface GameHeaderProps {
   onSettingsClick: () => void;
   onStatsClick: () => void;
   onHintClick: () => void;
+  onInfoClick: () => void;
 }
 
 export const GameHeader: React.FC<GameHeaderProps> = ({
@@ -17,8 +19,11 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
   getColorCSS,
   onSettingsClick,
   onStatsClick,
-  onHintClick
+  onHintClick,
+  onInfoClick
 }) => {
+  const { isTutorialMode, showHintButton } = useTutorialContext();
+  
   return (
     <>
       {/* Settings Button */}
@@ -31,9 +36,16 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
         <FontAwesomeIcon icon={faTrophy} />
       </button>
 
+      {/* Info Button */}
+      <button className="info-button" onClick={onInfoClick} aria-label="Tutorial">
+        <FontAwesomeIcon icon={faInfoCircle} />
+      </button>
+
       {/* Top info card */}
       <div className="top-card">
-        <h1>Color Lock</h1>
+        <h1 style={{ color: isTutorialMode ? 'red' : 'inherit' }}>
+          {isTutorialMode ? 'Tutorial' : 'Color Lock'}
+        </h1>
         <div className="target-row">
           <span>Target:</span>
           <div 
@@ -45,7 +57,10 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
           <span>Goal: {puzzle.algoScore}</span>
           <span>Moves: {puzzle.userMovesUsed}</span>
         </div>
-        <button className="hint-button" onClick={onHintClick}>Get Hint</button>
+        {/* Only show hint button if not in tutorial mode or if showHintButton is true */}
+        {(!isTutorialMode || showHintButton) && (
+          <button className="hint-button" onClick={onHintClick}>Get Hint</button>
+        )}
       </div>
     </>
   );
@@ -66,6 +81,8 @@ export const GameFooter: React.FC<GameFooterProps> = ({
   getLockedRegionSize,
   onTryAgain
 }) => {
+  const { isTutorialMode, showTryAgainButton } = useTutorialContext();
+  
   return (
     <div className="controls-container">
       <div className="controls-inner">
@@ -86,13 +103,15 @@ export const GameFooter: React.FC<GameFooterProps> = ({
           </div>
         )}
         
-        {/* Try Again button */}
-        <button 
-          className="try-again-button" 
-          onClick={onTryAgain}
-        >
-          Try Again
-        </button>
+        {/* Try Again button - only show if not in tutorial mode or if showTryAgainButton is true */}
+        {(!isTutorialMode || showTryAgainButton) && (
+          <button 
+            className="try-again-button" 
+            onClick={onTryAgain}
+          >
+            Try Again
+          </button>
+        )}
       </div>
     </div>
   );
@@ -109,6 +128,7 @@ interface GameControlsProps {
   onSettingsClick: () => void;
   onStatsClick: () => void;
   onHintClick: () => void;
+  onInfoClick: () => void;
 }
 
 const GameControls: React.FC<GameControlsProps> = (props) => {
@@ -120,6 +140,7 @@ const GameControls: React.FC<GameControlsProps> = (props) => {
         onSettingsClick={props.onSettingsClick}
         onStatsClick={props.onStatsClick}
         onHintClick={props.onHintClick}
+        onInfoClick={props.onInfoClick}
       />
       <GameFooter
         puzzle={props.puzzle}

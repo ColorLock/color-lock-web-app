@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTimes } from '@fortawesome/free-solid-svg-icons';
 import { TileColor } from '../types';
+import { useTutorialContext } from '../contexts/TutorialContext';
 
 interface LostGameModalProps {
   isOpen: boolean;
@@ -18,6 +19,7 @@ const LostGameModal: React.FC<LostGameModalProps> = ({
   onClose,
   onTryAgain
 }) => {
+  const { isTutorialMode, nextStep } = useTutorialContext();
   const modalRef = useRef<HTMLDivElement>(null);
   
   useEffect(() => {
@@ -36,6 +38,16 @@ const LostGameModal: React.FC<LostGameModalProps> = ({
     };
   }, [isOpen, onClose]);
   
+  // Handle the continue button in tutorial mode
+  const handleContinue = () => {
+    onClose();
+    if (isTutorialMode) {
+      nextStep();
+    } else {
+      onTryAgain();
+    }
+  };
+  
   if (!isOpen) return null;
   
   return (
@@ -52,8 +64,8 @@ const LostGameModal: React.FC<LostGameModalProps> = ({
             fontWeight: 'bold'
           }}>{targetColor}</span></p>
           <div className="modal-buttons">
-            <button className="share-button" onClick={onTryAgain}>
-              Try Again
+            <button className="share-button" onClick={handleContinue}>
+              {isTutorialMode ? "Continue" : "Try Again"}
             </button>
           </div>
         </div>

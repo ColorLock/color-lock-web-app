@@ -1,9 +1,10 @@
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
 import './scss/main.scss';
 import ReactConfetti from 'react-confetti';
 
 // Types
 import { AppSettings } from './types/settings';
+import { TileColor } from './types';
 
 // Components
 import ColorPickerModal from './components/ColorPickerModal';
@@ -14,12 +15,18 @@ import GameGrid from './components/GameGrid';
 import { GameHeader, GameFooter } from './components/GameControls';
 import AutocompleteModal from './components/AutocompleteModal';
 import LostGameModal from './components/LostGameModal';
+import TutorialModal from './components/TutorialModal';
+import TutorialOverlay from './components/TutorialOverlay';
+import TutorialHighlight from './components/TutorialHighlight';
+import TutorialWarningModal from './components/TutorialWarningModal';
 
 // Utils
 import { generateShareText, shareToTwitter, shareToFacebook, copyToClipboard } from './utils/shareUtils';
+import { getLockedColorCSS } from './utils/colorUtils';
 
 // Context
 import { GameProvider, useGameContext } from './contexts/GameContext';
+import { TutorialProvider, useTutorialContext, TutorialStep } from './contexts/TutorialContext';
 
 // Extend CSSProperties to include our custom properties
 declare module 'react' {
@@ -63,6 +70,27 @@ const GameContainer = () => {
     setShowAutocompleteModal,
     handleAutoComplete
   } = useGameContext();
+
+  // Tutorial context
+  const {
+    isTutorialMode,
+    currentStep,
+    tutorialBoard,
+    isBoardFading,
+    waitingForUserAction,
+    showTutorialModal,
+    setShowTutorialModal,
+    handleTileClick: handleTutorialTileClick,
+    handleColorSelect: handleTutorialColorSelect,
+    closeColorPicker: closeTutorialColorPicker,
+    showColorPicker: showTutorialColorPicker,
+    suggestedTile,
+    lockedCells: tutorialLockedCells,
+    getCurrentStepConfig,
+    showWarningModal,
+    closeWarningModal,
+    currentMoveIndex
+  } = useTutorialContext();
 
   const [windowDimensions, setWindowDimensions] = useState<{width: number, height: number}>({
     width: window.innerWidth,
@@ -147,6 +175,37 @@ const GameContainer = () => {
   if (!settings.enableAnimations) {
     containerClasses.push('no-animations');
   }
+  if (isBoardFading) {
+    containerClasses.push('board-fading');
+  }
+  if (isTutorialMode) {
+    containerClasses.push('tutorial-mode');
+  }
+
+  // Get tutorial step configuration
+  const tutorialConfig = isTutorialMode ? getCurrentStepConfig() : { overlayElements: [] };
+  console.log("Tutorial Config: ", tutorialConfig);
+
+  // Determine which board to display (tutorial board or regular board)
+  const currentBoard = isTutorialMode && tutorialBoard ? tutorialBoard : puzzle.grid;
+
+  // Handle tile click based on mode
+  const onTileClick = (row: number, col: number) => {
+    if (isTutorialMode) {
+      handleTutorialTileClick(row, col);
+    } else {
+      handleTileClick(row, col);
+    }
+  };
+
+  // Handle color selection based on mode
+  const onColorSelect = (color: TileColor) => {
+    if (isTutorialMode) {
+      handleTutorialColorSelect(color);
+    } else {
+      handleColorSelect(color);
+    }
+  };
 
   return (
     <div className={containerClasses.join(' ')}>
@@ -162,41 +221,140 @@ const GameContainer = () => {
 
       {/* Game Header */}
       <GameHeader 
-        puzzle={puzzle}
+        puzzle={isTutorialMode ? {
+          ...puzzle,
+          targetColor: 'red' as TileColor,
+          algoScore: 7,
+          userMovesUsed: currentMoveIndex
+        } : puzzle}
         getColorCSS={getColorCSSWithSettings}
         onSettingsClick={() => setShowSettings(true)}
         onStatsClick={() => setShowStats(true)}
         onHintClick={handleHint}
+        onInfoClick={() => setShowTutorialModal(true)}
       />
 
       {/* Game Grid */}
-      <GameGrid 
-        grid={puzzle.grid}
-        lockedCells={puzzle.lockedCells}
-        hintCell={hintCell}
-        settings={settings}
-        onTileClick={handleTileClick}
-        getColorCSS={getColorCSSWithSettings}
-      />
+      <div className="grid-container" style={{ position: 'relative' }}>
+        <GameGrid 
+          grid={currentBoard}
+          lockedCells={isTutorialMode ? tutorialLockedCells : puzzle.lockedCells}
+          hintCell={hintCell}
+          settings={settings}
+          onTileClick={onTileClick}
+          getColorCSS={getColorCSSWithSettings}
+        />
+        
+        {/* Tutorial Highlight for connected tiles */}
+        {isTutorialMode && (
+          <TutorialHighlight />
+        )}
+      </div>
 
       {/* Game Footer (now below the grid) */}
       <GameFooter
         puzzle={puzzle}
         settings={settings}
-        getLockedColorCSS={getLockedColorCSSWithSettings}
-        getLockedRegionSize={getLockedRegionSize}
+        getLockedColorCSS={() => {
+          if (isTutorialMode && tutorialBoard) {
+            return getLockedColorCSS(tutorialBoard, tutorialLockedCells, settings);
+          }
+          return getLockedColorCSSWithSettings();
+        }}
+        getLockedRegionSize={() => isTutorialMode ? tutorialLockedCells.size : getLockedRegionSize()}
         onTryAgain={handleTryAgain}
       />
 
-      {/* Color Picker Modal */}
-      {showColorPicker && selectedTile && (
-        <ColorPickerModal 
-          onSelect={handleColorSelect} 
-          onCancel={closeColorPicker} 
-          getColorCSS={getColorCSSWithSettings}
-          currentColor={puzzle.grid[selectedTile.row][selectedTile.col]} 
+      {/* Tutorial Modal - For intro */}
+      <TutorialModal 
+        isOpen={showTutorialModal} 
+        onClose={() => setShowTutorialModal(false)} 
+        type="intro"
+      />
+
+      {/* Tutorial Step Modal - For regular tutorial steps */}
+      {isTutorialMode && (
+        <TutorialModal
+          isOpen={true}
+          onClose={() => {}} // No close option for tutorial steps
+          type="step"
         />
       )}
+
+      {/* Tutorial Overlay */}
+      {isTutorialMode && tutorialConfig.overlayElements.length > 0 && (
+        <TutorialOverlay overlayElements={tutorialConfig.overlayElements} />
+      )}
+
+      {/* Tutorial Warning Modal */}
+      {isTutorialMode && (
+        <TutorialWarningModal 
+          isOpen={showWarningModal} 
+          onClose={closeWarningModal} 
+        />
+      )}
+
+      {/* Color Picker Modal */}
+      {(() => {
+        const showTutorialPicker = isTutorialMode && (
+          (showTutorialColorPicker && (suggestedTile || selectedTile))
+          || currentStep === TutorialStep.COLOR_SELECTION
+        );
+        const showGamePicker = showColorPicker && selectedTile && !isTutorialMode;
+        
+        // Determine the current color to mark in the picker
+        let currentPickerColor: TileColor | undefined = undefined;
+        if (isTutorialMode && tutorialBoard) {
+          if (currentStep === TutorialStep.COLOR_SELECTION) {
+            // For COLOR_SELECTION step, explicitly use green as the current color
+            // Note: we don't check for selectedTile here as we want to show green regardless
+            currentPickerColor = TileColor.Green;
+          } else if (suggestedTile) {
+            currentPickerColor = tutorialBoard[suggestedTile.row][suggestedTile.col];
+          }
+        } else if (selectedTile && puzzle?.grid) {
+          currentPickerColor = puzzle.grid[selectedTile.row][selectedTile.col];
+        }
+        
+        console.log("App: Tutorial color picker conditions:", {
+          showTutorialColorPicker,
+          suggestedTile,
+          selectedTile,
+          currentStep: isTutorialMode ? TutorialStep[currentStep] : 'N/A',
+          isTutorialMode,
+          shouldShow: showTutorialPicker,
+          currentPickerColor
+        });
+        
+        return (showGamePicker || showTutorialPicker) && (
+          <ColorPickerModal 
+            onSelect={(color) => {
+              console.log("DEBUG App: Color selected in modal:", color, 
+                "isTutorialMode:", isTutorialMode, 
+                "currentStep:", isTutorialMode ? TutorialStep[currentStep] : 'N/A',
+                "showTutorialPicker:", showTutorialPicker,
+                "showGamePicker:", showGamePicker);
+              if (isTutorialMode) {
+                console.log("DEBUG App: Calling handleTutorialColorSelect");
+                handleTutorialColorSelect(color);
+              } else {
+                console.log("DEBUG App: Calling regular handleColorSelect");
+                handleColorSelect(color);
+              }
+            }}
+            onCancel={() => {
+              console.log("App: Color picker cancelled, isTutorialMode:", isTutorialMode);
+              if (isTutorialMode) {
+                closeTutorialColorPicker();
+              } else {
+                closeColorPicker();
+              }
+            }}
+            getColorCSS={getColorCSSWithSettings}
+            currentColor={currentPickerColor}
+          />
+        );
+      })()}
 
       {/* Autocomplete Modal */}
       {showAutocompleteModal && puzzle && (
@@ -264,7 +422,11 @@ const GameContainer = () => {
 const App: React.FC = () => {
   return (
     <GameProvider>
-      <GameContainer />
+      <TutorialProvider>
+        <SettingsContext.Provider value={null}>
+          <GameContainer />
+        </SettingsContext.Provider>
+      </TutorialProvider>
     </GameProvider>
   );
 };
