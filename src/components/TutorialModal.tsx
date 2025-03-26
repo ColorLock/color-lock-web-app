@@ -23,7 +23,7 @@ interface TutorialModalProps {
  * @param text The text to process
  * @returns React nodes with colored spans for color names
  */
-const colorizeText = (text: string): React.ReactNode => {
+const colorizeText = (text: string): string => {
   // Define color mappings (color name to CSS color)
   const colorMap: Record<string, string> = {
     'red': '#e74c3c',
@@ -39,46 +39,34 @@ const colorizeText = (text: string): React.ReactNode => {
   // Case-insensitive regex to match color names with word boundaries
   const colorPattern = `\\b(${Object.keys(colorMap).join('|')})\\b`;
   
-  // Split text by color names and create an array of text and colored spans
-  const parts: Array<string | React.ReactNode> = [];
-  let lastIndex = 0;
-  
-  // Use a safe approach to match all occurrences without relying on regex.exec state
-  const matches = [...text.matchAll(new RegExp(colorPattern, 'gi'))];
-  
-  for (const match of matches) {
-    // Add text before the match
-    if (match.index! > lastIndex) {
-      parts.push(text.substring(lastIndex, match.index));
-    }
-    
-    // Add the colored span
-    const colorName = match[0].toLowerCase();
+  // Replace color names with styled spans
+  return text.replace(new RegExp(colorPattern, 'gi'), (match) => {
+    const colorName = match.toLowerCase();
     const color = colorMap[colorName];
+    const textShadow = color === '#f1c40f' || color === '#ffffff' 
+      ? '0.5px 0.5px 1px rgba(0,0,0,0.5)' 
+      : 'none';
     
-    parts.push(
-      <span 
-        key={`${colorName}-${match.index}`} 
-        style={{ 
-          color: color, 
-          fontWeight: 'bold',
-          textShadow: color === '#f1c40f' || color === '#ffffff' ? '0.5px 0.5px 1px rgba(0,0,0,0.5)' : 'none'
-        }}
-      >
-        {match[0]}
-      </span>
-    );
-    
-    // Update last index
-    lastIndex = match.index! + match[0].length;
+    return `<span style="color: ${color}; font-weight: bold; text-shadow: ${textShadow}">${match}</span>`;
+  });
+};
+
+/**
+ * Helper function to render text with line breaks
+ * @param text The text to process
+ * @returns React nodes with proper line breaks
+ */
+const renderTextWithLineBreaks = (text: string | React.ReactNode): React.ReactNode => {
+  if (typeof text !== 'string') {
+    return text;
   }
   
-  // Add remaining text
-  if (lastIndex < text.length) {
-    parts.push(text.substring(lastIndex));
-  }
-  
-  return <>{parts}</>;
+  return text.split('\n').map((line, i) => (
+    <React.Fragment key={i}>
+      {i > 0 && <br />}
+      {line}
+    </React.Fragment>
+  ));
 };
 
 /**
@@ -95,7 +83,8 @@ const TutorialModal: React.FC<TutorialModalProps> = ({ isOpen, onClose, type = '
     currentStep, 
     getCurrentStepConfig,
     showColorPicker,
-    endTutorial
+    endTutorial,
+    demonstrationMessage
   } = useTutorialContext();
   
   // Calculate the total number of steps in the tutorial
@@ -117,7 +106,8 @@ const TutorialModal: React.FC<TutorialModalProps> = ({ isOpen, onClose, type = '
     // Determine if we should show a continue button based on step
     const shouldShowContinueButton = ![
       TutorialStep.FIRST_MOVE_SELECTION,
-      TutorialStep.COLOR_SELECTION
+      TutorialStep.COLOR_SELECTION,
+      TutorialStep.SOLUTION_DEMONSTRATION
     ].includes(currentStep);
     
     // Position at the top when color picker is visible
@@ -142,6 +132,14 @@ const TutorialModal: React.FC<TutorialModalProps> = ({ isOpen, onClose, type = '
       }
     };
     
+    // Choose which message to display - use the dynamic message during solution demonstration
+    const displayMessage = currentStep === TutorialStep.SOLUTION_DEMONSTRATION && demonstrationMessage 
+      ? demonstrationMessage
+      : message;
+    
+    // Process the message text with color highlighting
+    const processedMessage = colorizeText(displayMessage);
+    
     return (
       <div className={`tutorial-step-modal ${positionClass} ${stepSpecificClass}`}>
         <div className="tutorial-step-content" ref={modalRef}>
@@ -149,7 +147,10 @@ const TutorialModal: React.FC<TutorialModalProps> = ({ isOpen, onClose, type = '
             <h3 className="tutorial-step-title">{title}</h3>
             <span className="tutorial-step-counter">Step {currentStepNumber} of {totalSteps}</span>
           </div>
-          <p className="tutorial-step-message">{colorizeText(message)}</p>
+          <p 
+            className="tutorial-step-message"
+            dangerouslySetInnerHTML={{ __html: processedMessage }}
+          />
           
           {shouldShowContinueButton && (
             <button 

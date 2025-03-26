@@ -62,7 +62,7 @@ export const getStepConfig = (
     case TutorialStep.INTRO:
       return {
         title: 'Color Lock Tutorial',
-        message: 'Every day, Color Lock provides a new puzzle for you to solve. To win, you must turn every tile on the board into the target color.',
+        message: 'Every day, Color Lock provides a new puzzle for you to solve. To win, you must turn every tile on the board into the target color.<br /><br />Clicking on the outlined items above provides more information about each item.',
         overlayElements: [
           {
             type: 'highlight',
@@ -76,7 +76,7 @@ export const getStepConfig = (
             target: '.goal-row span:first-child',
             color: '#e74c3c',
             position: 'left',
-            description: 'Goal: Minimum moves needed'
+            description: 'Number of moves our bot needed to solve this puzzle'
           },
           {
             type: 'highlight',
@@ -104,7 +104,7 @@ export const getStepConfig = (
     
     case TutorialStep.FIRST_MOVE_SELECTION:
       return {
-        title: 'Select a Tile',
+        title: 'Let\'s Practice: Select a Tile',
         message: 'Make your first move by clicking on the green tile that is flashing with a red border.',
         overlayElements: []
       };
@@ -123,81 +123,12 @@ export const getStepConfig = (
         overlayElements: []
       };
     
-    case TutorialStep.ALGORITHM_MOVE_2:
+    case TutorialStep.SOLUTION_DEMONSTRATION:
       return {
-        title: 'Move 2',
-        message: 'Let\'s keep going. Click continue to change the two purple tiles to yellow. Once tiles of the same color are connected they cannot be broken up. Changing one of the connected tiles to a new color will change all connected tiles to that color.',
+        title: 'Automatic Solution',
+        message: 'Now that we\'ve seen how to change a tile and how the lock functionality works, let\'s take you through the rest of the solution for this puzzle.',
         overlayElements: []
       };
-
-      case TutorialStep.CRITICAL_MOVE:
-        return {
-          title: 'Critical Move',
-          message: 'By creating a new group of a larger size we unlocked the orange tiles! We are now going to change those newly freed up tiles from orange to yellow.',
-          overlayElements: []
-        };
-      
-      case TutorialStep.LOSING_SCENARIO:
-        return {
-          title: 'Losing Scenario',
-          message: 'Uh Oh! Changing those tiles to yellow resulted in a losing scenario. Since there are only 25 total tiles and the yellow group has 13 tiles we can never unlock this group to change it to the target color! Click continue to revert the board back to its previous state so we can make a better move.',
-          overlayElements: []
-        };
-    
-    case TutorialStep.ALGORITHM_MOVE_3:
-      if (solutionMoves.length > 2) {
-        const move = solutionMoves[2];
-        return {
-          title: 'Move 3',
-          message: `Instead of changing orange to yellow, let's change the group to blue.`,
-          overlayElements: []
-        };
-      }
-      return defaultConfig;
-    
-    case TutorialStep.ALGORITHM_MOVE_4:
-      if (solutionMoves.length > 3) {
-        const move = solutionMoves[3];
-        return {
-          title: 'Move 4',
-          message: `Let's continue solving the puzzle by changing ${move.oldColor} to ${move.newColor}.`,
-          overlayElements: []
-        };
-      }
-      return defaultConfig;
-    
-    case TutorialStep.ALGORITHM_MOVE_5:
-      if (solutionMoves.length > 4) {
-        const move = solutionMoves[4];
-        return {
-          title: 'Move 5',
-          message: `Next we will change the other group of ${move.oldColor}s to ${move.newColor}.`,
-          overlayElements: []
-        };
-      }
-      return defaultConfig;
-    
-    case TutorialStep.ALGORITHM_MOVE_6:
-      if (solutionMoves.length > 5) {
-        const move = solutionMoves[5];
-        return {
-          title: 'Move 6',
-          message: `For our sixth move, let's change ${move.oldColor} to ${move.newColor}. This will again create a new largest group of connected cells, unlocking the blue and allowing us to solve the puzzle.`,
-          overlayElements: []
-        };
-      }
-      return defaultConfig;
-    
-    case TutorialStep.ALGORITHM_MOVE_7:
-      if (solutionMoves.length > 6) {
-        const move = solutionMoves[6];
-        return {
-          title: 'Move 7',
-          message: `Finally, let's change ${move.oldColor} to ${move.newColor} and solve the puzzle!`,
-          overlayElements: []
-        };
-      }
-      return defaultConfig;
     
     case TutorialStep.WINNING_COMPLETION:
       return {

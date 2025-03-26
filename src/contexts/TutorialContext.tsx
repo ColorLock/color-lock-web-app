@@ -18,15 +18,8 @@ export enum TutorialStep {
   FIRST_MOVE_SELECTION = 1,
   COLOR_SELECTION = 2,
   LOCKED_REGIONS = 3,
-  ALGORITHM_MOVE_2 = 4,
-  CRITICAL_MOVE = 5,
-  LOSING_SCENARIO = 6,
-  ALGORITHM_MOVE_3 = 7,
-  ALGORITHM_MOVE_4 = 8,
-  ALGORITHM_MOVE_5 = 9,
-  ALGORITHM_MOVE_6 = 10,
-  ALGORITHM_MOVE_7 = 11,
-  WINNING_COMPLETION = 12
+  SOLUTION_DEMONSTRATION = 4,
+  WINNING_COMPLETION = 5
 }
 
 /**
@@ -34,16 +27,8 @@ export enum TutorialStep {
  * Returns -1 for steps that don't correspond to a move
  */
 const getMoveIndexForStep = (step: TutorialStep): number => {
-  switch (step) {
-    // First move is handled manually through user interaction
-    case TutorialStep.ALGORITHM_MOVE_2: return 1;
-    case TutorialStep.ALGORITHM_MOVE_3: return 2;
-    case TutorialStep.ALGORITHM_MOVE_4: return 3;
-    case TutorialStep.ALGORITHM_MOVE_5: return 4;
-    case TutorialStep.ALGORITHM_MOVE_6: return 5;
-    case TutorialStep.ALGORITHM_MOVE_7: return 6;
-    default: return -1;
-  }
+  // In the new flow, steps don't directly map to move indices
+  return -1;
 };
 
 // Define a type for tutorial moves
@@ -85,6 +70,8 @@ interface TutorialContextValue {
   selectedTile: { row: number; col: number } | null;
   showHintButton: boolean;
   showTryAgainButton: boolean;
+  demonstrationMessage: string; // Add this new field for the dynamic message during demonstration
+  recentlyChangedTile: { row: number; col: number } | null;
   
   // Functions
   startTutorial: () => void;
@@ -144,6 +131,8 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
   const [warningMessage, setWarningMessage] = useState<string>('');
   const [currentMoveIndex, setCurrentMoveIndex] = useState<number>(0);
   const [selectedTile, setSelectedTile] = useState<{ row: number; col: number } | null>(null);
+  const [demonstrationMessage, setDemonstrationMessage] = useState<string>('');
+  const [recentlyChangedTile, setRecentlyChangedTile] = useState<{ row: number; col: number } | null>(null);
   const showHintButton = false;
   const showTryAgainButton = false;
   
@@ -158,8 +147,7 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
   
   // Store solution moves separately for demonstration
   const [solutionMoves, setSolutionMoves] = useState<TutorialMove[]>([]);
-  const [isShowingLostScenario, setIsShowingLostScenario] = useState<boolean>(false);
-  const [preLostScenarioBoard, setPreLostScenarioBoard] = useState<TileColor[][] | null>(null);
+  const [activeDemonstrationIndex, setActiveDemonstrationIndex] = useState<number>(1); // Start from move index 1
   const [lockedCells, setLockedCells] = useState<Set<string>>(new Set());
   
   // Debug color picker state changes
@@ -197,104 +185,118 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
   }, [isTutorialMode, tutorialBoard, solutionMoves.length]);
   
   /**
-   * Handle automatic tutorial progression for algorithm solution demonstration
+   * Handle automatic tutorial progression in SOLUTION_DEMONSTRATION step
    */
   useEffect(() => {
     if (!isTutorialMode || !tutorialBoard || solutionMoves.length === 0) return;
     
-    // Helper function to determine if a step is an algorithm move step
-    const isRegularAlgorithmMove = (step: TutorialStep): boolean => {
-      return step >= TutorialStep.ALGORITHM_MOVE_2 && 
-             step <= TutorialStep.ALGORITHM_MOVE_7 &&
-             step !== TutorialStep.CRITICAL_MOVE && 
-             step !== TutorialStep.LOSING_SCENARIO;
-    };
-    
-    // For algorithm move steps, highlight the tile that will be changed
-    if (isRegularAlgorithmMove(currentStep)) {
-      // Get the move index directly from the helper function
-      const moveIndex = getMoveIndexForStep(currentStep);
+    if (currentStep === TutorialStep.SOLUTION_DEMONSTRATION) {
+      debugLog('tutorial', `Solution demonstration active, current index: ${activeDemonstrationIndex}`);
       
-      debugLog('tutorial', `Highlight effect for algorithm step ${currentStep}:`, {
-        currentStep,
-        moveIndex,
-        currentMoveIndex,
-        solutionMovesLength: solutionMoves.length
-      });
+      // If we've completed all the solution moves, advance to winning completion
+      if (activeDemonstrationIndex >= solutionMoves.length) {
+        debugLog('tutorial', "All solution moves demonstrated, advancing to WINNING_COMPLETION");
+        setCurrentStep(TutorialStep.WINNING_COMPLETION);
+        setSuggestedTile(null);
+        setRecentlyChangedTile(null);
+        return;
+      }
       
-      // Clear any existing suggested tile first
-      debugLog('tutorial', `Clearing suggested tile before algorithm move ${moveIndex}`);
-      setSuggestedTile(null);
+      // Get the current move to demonstrate
+      const currentMove = solutionMoves[activeDemonstrationIndex];
       
-      // Set a timeout to ensure state has settled before setting the suggested tile
-      const HIGHLIGHT_DELAY = 500; // Standardized highlight delay
+      // Set the demonstration message
+      // For the first move, show the introductory message
+      if (activeDemonstrationIndex === 1) {
+        setDemonstrationMessage('Now that we\'ve seen how to change a tile and how the lock functionality works, let\'s take you through the rest of the solution for this puzzle. First we\'ll change purple to yellow.');
+      } else if (activeDemonstrationIndex === 2) {
+        // For move index 2 (second move being demonstrated), changing orange to blue
+        setDemonstrationMessage(`Changing orange to ${currentMove.newColor}.`);
+      } else if (activeDemonstrationIndex === 4) {
+        // For the fourth move - moved from index 5 to index 4
+        setDemonstrationMessage(`Now we'll change the other group of yellow to red.`);
+      } else if (activeDemonstrationIndex === 5) {
+        // For the fifth move - changed message to refer to green instead of yellow
+        setDemonstrationMessage(`Changing green to red.`);
+      } else {
+        // Default message for other moves
+        setDemonstrationMessage(`Changing ${currentMove.oldColor} to ${currentMove.newColor}.`);
+      }
       
-      setTimeout(() => {
-        if (moveIndex >= 0 && moveIndex < solutionMoves.length) {
-          const moveToHighlight = solutionMoves[moveIndex];
-          debugLog('tutorial', `Setting suggested tile for algorithm move ${moveIndex}`, {
-            step: currentStep,
-            moveIndex,
-            currentMoveIndex: currentMoveIndex,
-            tile: { row: moveToHighlight.row, col: moveToHighlight.col },
-            color: moveToHighlight.oldColor
-          });
-          setSuggestedTile({row: moveToHighlight.row, col: moveToHighlight.col });
-        } else {
-          debugLog('tutorial', `No move found for algorithm step ${currentStep}, moveIndex ${moveIndex}`, null, LogLevel.WARN);
-        }
-      }, HIGHLIGHT_DELAY);
-    }
-    
-    // For the critical move step, highlight an orange tile
-    if (currentStep === TutorialStep.CRITICAL_MOVE) {
-      // Just highlight the tile that will be changed to blue
-      const orangePositions: {row: number, col: number}[] = [];
+      // First highlight the tile that will be changed (only if it's not a recently changed tile)
+      if (!recentlyChangedTile || 
+          recentlyChangedTile.row !== currentMove.row || 
+          recentlyChangedTile.col !== currentMove.col) {
+        setSuggestedTile({row: currentMove.row, col: currentMove.col});
+      }
       
-      // Find all orange tiles to highlight one
-      if (tutorialBoard) {
-        for (let r = 0; r < tutorialBoard.length; r++) {
-          for (let c = 0; c < tutorialBoard[r].length; c++) {
-            if (tutorialBoard[r][c] === 'orange') {
-              orangePositions.push({row: r, col: c});
+      // After a timeout, apply the move - 15 seconds for first message, 7 seconds for others
+      const timeoutDuration = activeDemonstrationIndex === 1 ? 15000 : 7000;
+      const timeoutId = setTimeout(() => {
+        debugLog('tutorial', `Applying demonstration move ${activeDemonstrationIndex}`, currentMove);
+        
+        // Clear the highlight before applying the move
+        setSuggestedTile(null);
+        
+        // Store the tile we're about to change to prevent re-highlighting
+        setRecentlyChangedTile({row: currentMove.row, col: currentMove.col});
+        
+        // Apply the move to the board
+        const newBoard = applyTutorialMove(tutorialBoard, currentMove);
+        setTutorialBoard(newBoard);
+        
+        // Update locked cells after the move
+        const newLockedCells = findLargestRegion(newBoard);
+        setLockedCells(newLockedCells);
+        
+        // Increment the move counter
+        setCurrentMoveIndex(prev => prev + 1);
+        
+        // After a brief pause, move to the next demonstration move
+        setTimeout(() => {
+          // Increment the demonstration index first
+          const nextIndex = activeDemonstrationIndex + 1;
+          setActiveDemonstrationIndex(nextIndex);
+          
+          // If there's another move to show, immediately highlight the next tile
+          // but only if it's different from the one we just changed
+          if (nextIndex < solutionMoves.length) {
+            const nextMove = solutionMoves[nextIndex];
+            
+            // Only set the suggested tile if it's not the one we just changed
+            if (!recentlyChangedTile || 
+                recentlyChangedTile.row !== nextMove.row || 
+                recentlyChangedTile.col !== nextMove.col) {
+              setSuggestedTile({row: nextMove.row, col: nextMove.col});
+            }
+            
+            // Update the message for the next move
+            if (nextIndex === 2) {
+              setDemonstrationMessage(`Changing orange to ${nextMove.newColor}.`);
+            } else if (nextIndex === 4) {
+              // Update index from 5 to 4 for the "other yellow to red" message
+              setDemonstrationMessage(`Now we'll change the other group of yellow to red.`);
+            } else if (nextIndex === 5) {
+              // Change message to refer to green instead of yellow
+              setDemonstrationMessage(`Changing green to red.`);
+            } else if (nextIndex === 1) {
+              setDemonstrationMessage('Now that we\'ve seen how to change a tile and how the lock functionality works, let\'s take you through the rest of the solution for this puzzle. First we\'ll change purple to yellow.');
+            } else {
+              setDemonstrationMessage(`Changing ${nextMove.oldColor} to ${nextMove.newColor}.`);
             }
           }
-        }
-        
-        // If we found any orange tiles, highlight the first one
-        if (orangePositions.length > 0) {
-          setTimeout(() => {
-            setSuggestedTile(orangePositions[0]);
-          }, 500);
-        }
-      }
-    }
-    
-    // For losing scenario, clear any highlighted tile
-    if (currentStep === TutorialStep.LOSING_SCENARIO) {
-      setSuggestedTile(null);
-    }
-    
-    // For the winning completion step, apply remaining moves to complete the puzzle
-    if (currentStep === TutorialStep.WINNING_COMPLETION && currentMoveIndex < solutionMoves.length) {
-      // Reset the lost scenario flag
-      setIsShowingLostScenario(false);
+        }, 500); // Shorter pause before showing the next highlight
+      }, timeoutDuration); // Dynamic timeout: 15 seconds for first message, 7 seconds for others
       
-      // Apply remaining moves automatically (starting from move 7)
-      const timer = setTimeout(() => {
-        setCurrentStep(TutorialStep.WINNING_COMPLETION);
-      }, 1500);
-      
-      return () => clearTimeout(timer);
+      return () => clearTimeout(timeoutId);
     }
   }, [
     isTutorialMode,
     currentStep,
-    currentMoveIndex,
+    activeDemonstrationIndex,
     tutorialBoard,
     solutionMoves,
-    isShowingLostScenario,
-    preLostScenarioBoard
+    recentlyChangedTile
   ]);
   
   /**
@@ -364,6 +366,7 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
       setIsTutorialMode(false);
       setCurrentStep(TutorialStep.INTRO);
       setIsBoardFading(false);
+      setRecentlyChangedTile(null);
     }, 500); // Match this with CSS animation duration
   };
   
@@ -383,7 +386,6 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
       }
       
       // Set move counter based on which step we're moving FROM
-      // Hardcoded values for each step
       switch (prev) {
         case TutorialStep.COLOR_SELECTION:
           if (!waitingForUserAction) {
@@ -392,142 +394,11 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
           }
           break;
           
-        case TutorialStep.ALGORITHM_MOVE_2:
-          debugLog('tutorial', "Setting move counter to 2 after ALGORITHM_MOVE_2");
-          setCurrentMoveIndex(2);
+        case TutorialStep.LOCKED_REGIONS:
+          // When moving from LOCKED_REGIONS to SOLUTION_DEMONSTRATION,
+          // reset the demonstration index to start from move 1
+          setActiveDemonstrationIndex(1);
           break;
-          
-        case TutorialStep.CRITICAL_MOVE:
-          debugLog('tutorial', "Setting move counter to 3 after CRITICAL_MOVE");
-          setCurrentMoveIndex(3);
-          break;
-          
-        case TutorialStep.LOSING_SCENARIO:
-          debugLog('tutorial', "Setting move counter to 2 after LOSING_SCENARIO");
-          setCurrentMoveIndex(2);
-          
-          // Restore board to the state before critical move with orange cells
-          if (preLostScenarioBoard) {
-            setTutorialBoard(preLostScenarioBoard.map(row => [...row]));
-            
-            // Recalculate locked cells for the restored board
-            const newLockedCells = findLargestRegion(preLostScenarioBoard);
-            setLockedCells(newLockedCells);
-            
-            // Clear any existing suggested tile
-            setSuggestedTile(null);
-          }
-          
-          // Go to ALGORITHM_MOVE_3
-          next = TutorialStep.ALGORITHM_MOVE_3;
-          return next;
-          
-        case TutorialStep.ALGORITHM_MOVE_3:
-          debugLog('tutorial', "Setting move counter to 3 after ALGORITHM_MOVE_3");
-          setCurrentMoveIndex(3);
-          break;
-          
-        case TutorialStep.ALGORITHM_MOVE_4:
-          debugLog('tutorial', "Setting move counter to 4 after ALGORITHM_MOVE_4");
-          setCurrentMoveIndex(4);
-          break;
-          
-        case TutorialStep.ALGORITHM_MOVE_5:
-          debugLog('tutorial', "Setting move counter to 5 after ALGORITHM_MOVE_5");
-          setCurrentMoveIndex(5);
-          break;
-          
-        case TutorialStep.ALGORITHM_MOVE_6:
-          debugLog('tutorial', "Setting move counter to 6 after ALGORITHM_MOVE_6");
-          setCurrentMoveIndex(6);
-          break;
-          
-        case TutorialStep.ALGORITHM_MOVE_7:
-          debugLog('tutorial', "Setting move counter to 7 after ALGORITHM_MOVE_7");
-          setCurrentMoveIndex(7);
-          
-          // Apply the final move before proceeding to win
-          if (tutorialBoard && solutionMoves.length > 6) {
-            const finalMove = solutionMoves[6];
-            const newBoard = applyTutorialMove(tutorialBoard, finalMove);
-            setTutorialBoard(newBoard);
-            
-            // Update locked cells after the move
-            const newLockedCells = findLargestRegion(newBoard);
-            setLockedCells(newLockedCells);
-            
-            // Clear suggested tile
-            setSuggestedTile(null);
-          }
-          
-          next = TutorialStep.WINNING_COMPLETION;
-          return next;
-      }
-
-      // Apply move logic based on which step we're moving FROM
-      if (prev === TutorialStep.CRITICAL_MOVE && tutorialBoard) {
-        // Save the board state before the critical move for the losing scenario
-        setPreLostScenarioBoard(tutorialBoard.map(row => [...row]));
-        
-        // Create a losing move (turning orange to yellow)
-        const criticalMove = { ...solutionMoves[2] }; // Use move index 2
-        criticalMove.newColor = 'yellow' as TileColor;
-        
-        // Apply the losing move
-        const newBoard = applyTutorialMove(tutorialBoard, criticalMove);
-        setTutorialBoard(newBoard);
-        
-        // Update locked cells after the critical move
-        const newLockedCells = findLargestRegion(newBoard);
-        setLockedCells(newLockedCells);
-        
-        // Clear the highlighted tile
-        setSuggestedTile(null);
-      }
-      
-      // For steps ALGORITHM_MOVE_2 through ALGORITHM_MOVE_7 (excluding special cases)
-      const isRegularAlgorithmMove = (step: TutorialStep): boolean => {
-        return step >= TutorialStep.ALGORITHM_MOVE_2 && 
-               step <= TutorialStep.ALGORITHM_MOVE_7 &&
-               step !== TutorialStep.CRITICAL_MOVE && 
-               step !== TutorialStep.LOSING_SCENARIO;
-      };
-      
-      if (isRegularAlgorithmMove(prev) && tutorialBoard) {
-        // Get the move index directly from the helper function
-        const moveIndex = getMoveIndexForStep(prev);
-        
-        // Apply the move if valid
-        if (moveIndex >= 0 && moveIndex < solutionMoves.length) {
-          const move = {...solutionMoves[moveIndex]};
-          
-          const newBoard = applyTutorialMove(tutorialBoard, move);
-          
-          if (newBoard) {
-            setTutorialBoard(newBoard);
-            
-            // Update locked cells after the move
-            const newLockedCells = findLargestRegion(newBoard);
-            setLockedCells(newLockedCells);
-            
-            // Clear suggested tile
-            setSuggestedTile(null);
-          }
-        }
-      }
-
-      if (prev === TutorialStep.LOCKED_REGIONS) {
-        setSuggestedTile(null);
-            
-        // Highlight the tile for algorithm move 2
-        const HIGHLIGHT_DELAY = 500; // Match the standardized highlight delay
-        
-        setTimeout(() => {
-          const moveIndex = 1; // Move index for ALGORITHM_MOVE_2
-          const nextMove = solutionMoves[moveIndex];
-          debugLog('tutorial', "Highlighting second tile for algorithm demo", nextMove);
-          setSuggestedTile({row: nextMove.row, col: nextMove.col});
-        }, HIGHLIGHT_DELAY);
       }
       
       // For steps that require user action, set waiting flag
@@ -544,40 +415,6 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
         }
       } else {
         setWaitingForUserAction(false);
-      }
-      
-      // Prepare for the next step by setting up highlighted tiles where needed
-      if (isRegularAlgorithmMove(next)) {
-        // Use timeout to ensure the board state has updated before highlighting
-        const HIGHLIGHT_DELAY = 500; // Match the standardized highlight delay
-        
-        setTimeout(() => {
-          // Special handling for algorithm moves after special scenarios
-          if (next === TutorialStep.ALGORITHM_MOVE_3 && 
-              preLostScenarioBoard !== null && 
-              prev + 1 === TutorialStep.ALGORITHM_MOVE_3) {
-            // For move 3 after the losing scenario, highlight the orange cell at (1,2)
-            debugLog('tutorial', 'Preparing highlight for ALGORITHM_MOVE_3 after losing scenario - orange cell at (1,2)');
-            setSuggestedTile({row: 1, col: 2});
-          }
-          else if (next === TutorialStep.ALGORITHM_MOVE_4) {
-            // Highlight the yellow cell at position 3,4 - this is the move that will turn yellow to red
-            debugLog('tutorial', 'Preparing highlight for ALGORITHM_MOVE_4 - yellow cell at (3,4)');
-            setSuggestedTile({row: 3, col: 4});
-          }
-          else {
-            const moveIndex = getMoveIndexForStep(next);
-            if (moveIndex >= 0 && moveIndex < solutionMoves.length) {
-              const moveToHighlight = solutionMoves[moveIndex];
-              debugLog('tutorial', `Setting up highlight for next algorithm step ${next}, move ${moveIndex}`, {
-                row: moveToHighlight.row,
-                col: moveToHighlight.col,
-                color: moveToHighlight.oldColor
-              });
-              setSuggestedTile({row: moveToHighlight.row, col: moveToHighlight.col});
-            }
-          }
-        }, HIGHLIGHT_DELAY);
       }
       
       return next;
@@ -755,10 +592,9 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
     if (isTutorialMode) {
       // Helper function to determine if a step is an algorithm move step
       const isRegularAlgorithmMove = (step: TutorialStep): boolean => {
-        return step >= TutorialStep.ALGORITHM_MOVE_2 && 
-              step <= TutorialStep.ALGORITHM_MOVE_7 &&
-              step !== TutorialStep.CRITICAL_MOVE && 
-              step !== TutorialStep.LOSING_SCENARIO;
+        return step >= TutorialStep.FIRST_MOVE_SELECTION && 
+              step <= TutorialStep.SOLUTION_DEMONSTRATION &&
+              step !== TutorialStep.WINNING_COMPLETION;
       };
       
       // Clear any suggested tile first to avoid stale highlights
@@ -774,25 +610,48 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
           const moveIndex = getMoveIndexForStep(currentStep);
           
           // Special handling for specific algorithm moves
-          if (currentStep === TutorialStep.ALGORITHM_MOVE_3 && preLostScenarioBoard) {
-            // For move 3 after the losing scenario, highlight the orange cell at (1,2)
-            // This is the one that will turn blue
-            debugLog('tutorial', 'Specifically highlighting the orange cell at (1,2) for ALGORITHM_MOVE_3');
-            setSuggestedTile({row: 1, col: 2});
-          }
-          else if (currentStep === TutorialStep.ALGORITHM_MOVE_4) {
-            // Highlight the yellow cell at position 3,4 - this is the move that will turn yellow to red
-            debugLog('tutorial', 'Specifically highlighting the yellow cell at (3,4) for ALGORITHM_MOVE_4');
-            setSuggestedTile({row: 3, col: 4});
-          } 
-          else if (moveIndex >= 0 && moveIndex < solutionMoves.length) {
+          if (currentStep === TutorialStep.FIRST_MOVE_SELECTION) {
+            // For first move, highlight the green tile to click
+            setSuggestedTile({ row: 1, col: 2 });
+          } else if (currentStep === TutorialStep.SOLUTION_DEMONSTRATION) {
+            // For solution demonstration, highlight the current move that will be applied
+            if (activeDemonstrationIndex < solutionMoves.length) {
+              const currentMove = solutionMoves[activeDemonstrationIndex];
+              
+              // Only highlight if not recently changed
+              if (!recentlyChangedTile || 
+                  recentlyChangedTile.row !== currentMove.row || 
+                  recentlyChangedTile.col !== currentMove.col) {
+                setSuggestedTile({row: currentMove.row, col: currentMove.col});
+              }
+            }
+          } else if (currentStep === TutorialStep.LOCKED_REGIONS) {
+            // In the LOCKED_REGIONS step, highlight the locked orange region
+            if (tutorialBoard) {
+              // Find and highlight the first orange tile (which should be part of the locked region)
+              for (let r = 0; r < tutorialBoard.length; r++) {
+                for (let c = 0; c < tutorialBoard[r].length; c++) {
+                  if (tutorialBoard[r][c] === 'orange') {
+                    setSuggestedTile({row: r, col: c});
+                    return; // Exit after finding the first orange tile
+                  }
+                }
+              }
+            }
+          } else {
             const move = solutionMoves[moveIndex];
             debugLog('tutorial', `Setting highlight for algorithm step ${currentStep}, move ${moveIndex}`, {
               row: move.row,
               col: move.col,
               color: move.oldColor
             });
-            setSuggestedTile({row: move.row, col: move.col});
+            
+            // Only highlight if not recently changed
+            if (!recentlyChangedTile || 
+                recentlyChangedTile.row !== move.row || 
+                recentlyChangedTile.col !== move.col) {
+              setSuggestedTile({row: move.row, col: move.col});
+            }
           }
         } else {
           // Handle special steps with specific tile highlights
@@ -802,9 +661,24 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
               setSuggestedTile({ row: 1, col: 2 });
               break;
               
-            case TutorialStep.CRITICAL_MOVE:
-              // For critical move, find and highlight an orange tile
+            case TutorialStep.SOLUTION_DEMONSTRATION:
+              // For solution demonstration, highlight the current move that will be applied
+              if (activeDemonstrationIndex < solutionMoves.length) {
+                const currentMove = solutionMoves[activeDemonstrationIndex];
+                
+                // Only highlight if not recently changed
+                if (!recentlyChangedTile || 
+                    recentlyChangedTile.row !== currentMove.row || 
+                    recentlyChangedTile.col !== currentMove.col) {
+                  setSuggestedTile({row: currentMove.row, col: currentMove.col});
+                }
+              }
+              break;
+              
+            case TutorialStep.LOCKED_REGIONS:
+              // For locked regions step, highlight the locked orange region
               if (tutorialBoard) {
+                // Find and highlight the first orange tile (which should be part of the locked region)
                 for (let r = 0; r < tutorialBoard.length; r++) {
                   for (let c = 0; c < tutorialBoard[r].length; c++) {
                     if (tutorialBoard[r][c] === 'orange') {
@@ -816,18 +690,15 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
               }
               break;
               
-            // Specifically do not highlight tiles for these steps
-            case TutorialStep.LOSING_SCENARIO:
-            case TutorialStep.INTRO:
             case TutorialStep.WINNING_COMPLETION:
-              // No tile highlighting for these steps
+              // No tile highlighting for winning completion
               setSuggestedTile(null);
               break;
           }
         }
       }, HIGHLIGHT_DELAY);
     }
-  }, [currentStep, isTutorialMode, solutionMoves, tutorialBoard, preLostScenarioBoard]);
+  }, [currentStep, isTutorialMode, solutionMoves, tutorialBoard, activeDemonstrationIndex, recentlyChangedTile]);
   
   // Value for the context provider
   const value: TutorialContextValue = {
@@ -850,6 +721,8 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
     selectedTile,
     showHintButton,
     showTryAgainButton,
+    demonstrationMessage,
+    recentlyChangedTile,
     startTutorial,
     endTutorial,
     nextStep,

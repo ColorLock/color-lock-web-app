@@ -34,9 +34,13 @@ const TutorialHighlight: React.FC = () => {
       return true;
     }
     
-    // For algorithm move steps
-    if (currentStep >= TutorialStep.ALGORITHM_MOVE_2 && 
-        currentStep <= TutorialStep.ALGORITHM_MOVE_7) {
+    // For locked regions explanation
+    if (currentStep === TutorialStep.LOCKED_REGIONS) {
+      return true;
+    }
+    
+    // For solution demonstration step
+    if (currentStep === TutorialStep.SOLUTION_DEMONSTRATION) {
       return true;
     }
     
@@ -61,11 +65,11 @@ const TutorialHighlight: React.FC = () => {
         const tileColor = tutorialBoard[row][col];
         debugLog('tutorialHighlight', "Highlighting tile", { row, col, tileColor });
         
-        // For user action steps, show all connected tiles
+        // For all steps that need highlighting, show all connected tiles of the same color
         if (currentStep === TutorialStep.FIRST_MOVE_SELECTION || 
             currentStep === TutorialStep.COLOR_SELECTION ||
-            (currentStep >= TutorialStep.ALGORITHM_MOVE_2 && 
-             currentStep <= TutorialStep.ALGORITHM_MOVE_7)) {
+            currentStep === TutorialStep.SOLUTION_DEMONSTRATION ||
+            currentStep === TutorialStep.LOCKED_REGIONS) {
           // Use flood fill to find all connected tiles of the same color
           const [rowIndices, colIndices] = floodFill(tutorialBoard, row, col, tileColor);
           
@@ -83,9 +87,9 @@ const TutorialHighlight: React.FC = () => {
             debugLog('tutorialHighlight', `FloodFill returned no cells, falling back to single cell highlighting for (${row},${col})`, null, LogLevel.WARN);
             cells = [{ row, col }];
             
-            // Also check adjacent cells manually for algorithm steps (for purple)
-            if (currentStep >= TutorialStep.ALGORITHM_MOVE_2 && 
-                currentStep <= TutorialStep.ALGORITHM_MOVE_7) {
+            // Also check adjacent cells manually for algorithm steps
+            if (currentStep === TutorialStep.SOLUTION_DEMONSTRATION || 
+                currentStep === TutorialStep.LOCKED_REGIONS) {
               
               // Check right
               if (col + 1 < tutorialBoard[0].length && 
@@ -179,9 +183,9 @@ const TutorialHighlight: React.FC = () => {
         // Determine if this is the originally suggested tile (center of the highlight)
         const isOriginalTile = row === suggestedTile?.row && col === suggestedTile?.col;
         
-        // Use a different style for algorithm move highlights vs. user action highlights
-        const isAlgorithmStep = currentStep >= TutorialStep.ALGORITHM_MOVE_2 && 
-                                currentStep <= TutorialStep.ALGORITHM_MOVE_7;
+        // Determine the highlight style based on step
+        const isLockedRegionStep = currentStep === TutorialStep.LOCKED_REGIONS;
+        const isSolutionDemonstration = currentStep === TutorialStep.SOLUTION_DEMONSTRATION;
         
         // Apply different styles based on the step type
         const highlightStyle: React.CSSProperties = {
@@ -192,16 +196,25 @@ const TutorialHighlight: React.FC = () => {
           height: `${tileRect.height}px`,
           zIndex: 20,
           border: isOriginalTile ? '3px solid white' : 'none',
-          boxShadow: isAlgorithmStep 
-            ? 'inset 0 0 15px 5px rgba(255, 255, 255, 0.7)'  // Brighter glow for algorithm steps
-            : 'inset 0 0 10px 3px rgba(255, 255, 255, 0.5)', // Subtle glow for user steps
+          boxShadow: isSolutionDemonstration 
+            ? 'inset 0 0 15px 5px rgba(255, 255, 255, 0.7)'  // Brighter glow for solution demonstration
+            : isLockedRegionStep
+              ? 'inset 0 0 15px 5px rgba(255, 215, 0, 0.5)'  // Golden glow for locked regions
+              : 'inset 0 0 10px 3px rgba(255, 255, 255, 0.5)', // Subtle glow for user steps
           borderRadius: '2px'
         };
+        
+        // Determine CSS class based on step
+        const highlightClass = isLockedRegionStep 
+          ? 'locked-region-highlight' 
+          : isSolutionDemonstration 
+            ? 'solution-highlight' 
+            : 'user-highlight';
         
         return (
           <div 
             key={`highlight-${row}-${col}`} 
-            className={`tutorial-cell-highlight ${isAlgorithmStep ? 'algorithm-highlight' : 'user-highlight'}`}
+            className={`tutorial-cell-highlight ${highlightClass}`}
             style={highlightStyle}
           />
         );

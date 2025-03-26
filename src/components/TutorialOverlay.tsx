@@ -33,6 +33,7 @@ interface PositionedElement extends OverlayElement {
  */
 const TutorialOverlay: React.FC<TutorialOverlayProps> = ({ overlayElements }) => {
   const [positionedElements, setPositionedElements] = useState<PositionedElement[]>([]);
+  const [activeTooltipIndex, setActiveTooltipIndex] = useState<number | null>(null);
   
   // Calculate positions for all overlay elements
   useEffect(() => {
@@ -65,9 +66,10 @@ const TutorialOverlay: React.FC<TutorialOverlayProps> = ({ overlayElements }) =>
               height: `${rect.height + 8}px`,
               border: `3px solid ${element.color || 'red'}`,
               borderRadius: '6px',
-              pointerEvents: 'none',
+              pointerEvents: 'auto', // Changed from 'none' to allow clicks
               zIndex: 1000,
-              boxShadow: `0 0 0 2px rgba(255,255,255,0.5), 0 0 10px 2px ${element.color || 'red'}40`
+              boxShadow: `0 0 0 2px rgba(255,255,255,0.5), 0 0 10px 2px ${element.color || 'red'}40`,
+              cursor: 'pointer' // Add cursor pointer to indicate clickability
             };
             
             // If description is provided, position a tooltip
@@ -200,6 +202,11 @@ const TutorialOverlay: React.FC<TutorialOverlayProps> = ({ overlayElements }) =>
       window.removeEventListener('scroll', throttledCalculate);
     };
   }, [overlayElements]);
+
+  // Handle clicking on a highlight to show/hide tooltip
+  const handleHighlightClick = (index: number) => {
+    setActiveTooltipIndex(prevIndex => prevIndex === index ? null : index);
+  };
   
   return (
     <div className="tutorial-overlay">
@@ -211,11 +218,12 @@ const TutorialOverlay: React.FC<TutorialOverlayProps> = ({ overlayElements }) =>
               className="tutorial-highlight"
               style={element.highlightStyle}
               data-color={element.color || '#333'}
+              onClick={() => handleHighlightClick(index)}
             />
           )}
           
-          {/* Render tooltip if element has a description */}
-          {element.description && element.tooltipStyle && (
+          {/* Render tooltip only if this element is active and has a description */}
+          {activeTooltipIndex === index && element.description && element.tooltipStyle && (
             <div 
               className="tutorial-tooltip"
               style={element.tooltipStyle}
