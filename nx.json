@@ -16,5 +16,14 @@
       }
     }
   ],
-  "nxCloudId": "67d7412707103806e3e633e8"
+  "nxCloudId": "67d7412707103806e3e633e8",
+  "tasksRunnerOptions": {
+    "default": {
+      "runner": "nx/tasks-runners/default",
+      "options": {
+        "cacheableOperations": ["build", "test"],
+        "useCloud": false
+      }
+    }
+  }
 }
