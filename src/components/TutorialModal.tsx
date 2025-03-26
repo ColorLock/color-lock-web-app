@@ -4,6 +4,7 @@ import { faTimes } from '@fortawesome/free-solid-svg-icons';
 import { useTutorialContext, TutorialStep } from '../contexts/TutorialContext';
 import { useModalClickOutside } from '../utils/modalUtils';
 import { debugLog, LogLevel } from '../utils/debugUtils';
+import { TileColor } from '../types';
 
 /**
  * Props for the TutorialModal component
@@ -16,6 +17,69 @@ interface TutorialModalProps {
   /** Type of modal to display - intro shows the initial tutorial prompt, step shows tutorial instructions */
   type?: 'intro' | 'step';
 }
+
+/**
+ * Helper function to colorize color names in text
+ * @param text The text to process
+ * @returns React nodes with colored spans for color names
+ */
+const colorizeText = (text: string): React.ReactNode => {
+  // Define color mappings (color name to CSS color)
+  const colorMap: Record<string, string> = {
+    'red': '#e74c3c',
+    'orange': '#e67e22',
+    'yellow': '#f1c40f',
+    'green': '#2ecc71',
+    'blue': '#3498db',
+    'purple': '#9b59b6',
+    'white': '#ffffff',
+    'black': '#000000'
+  };
+  
+  // Case-insensitive regex to match color names with word boundaries
+  const colorPattern = `\\b(${Object.keys(colorMap).join('|')})\\b`;
+  
+  // Split text by color names and create an array of text and colored spans
+  const parts: Array<string | React.ReactNode> = [];
+  let lastIndex = 0;
+  
+  // Use a safe approach to match all occurrences without relying on regex.exec state
+  const matches = [...text.matchAll(new RegExp(colorPattern, 'gi'))];
+  
+  for (const match of matches) {
+    // Add text before the match
+    if (match.index! > lastIndex) {
+      parts.push(text.substring(lastIndex, match.index));
+    }
+    
+    // Add the colored span
+    const colorName = match[0].toLowerCase();
+    const color = colorMap[colorName];
+    
+    parts.push(
+      <span 
+        key={`${colorName}-${match.index}`} 
+        style={{ 
+          color: color, 
+          fontWeight: 'bold',
+          textShadow: color === '#f1c40f' || color === '#ffffff' ? '0.5px 0.5px 1px rgba(0,0,0,0.5)' : 'none'
+        }}
+      >
+        {match[0]}
+      </span>
+    );
+    
+    // Update last index
+    lastIndex = match.index! + match[0].length;
+  }
+  
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.substring(lastIndex));
+  }
+  
+  return <>{parts}</>;
+};
 
 /**
  * Modal component that displays tutorial information
@@ -33,6 +97,12 @@ const TutorialModal: React.FC<TutorialModalProps> = ({ isOpen, onClose, type = '
     showColorPicker,
     endTutorial
   } = useTutorialContext();
+  
+  // Calculate the total number of steps in the tutorial
+  const totalSteps = Object.keys(TutorialStep).length / 2; // Divide by 2 because enum creates both key->value and value->key mappings
+  
+  // Get the current step number (starting from 1 for user-friendly display)
+  const currentStepNumber = currentStep + 1;
   
   // Use the custom hook for handling click outside
   const modalRef = useModalClickOutside(onClose, isOpen);
@@ -75,8 +145,11 @@ const TutorialModal: React.FC<TutorialModalProps> = ({ isOpen, onClose, type = '
     return (
       <div className={`tutorial-step-modal ${positionClass} ${stepSpecificClass}`}>
         <div className="tutorial-step-content" ref={modalRef}>
-          <h3 className="tutorial-step-title">{title}</h3>
-          <p className="tutorial-step-message">{message}</p>
+          <div className="tutorial-step-header">
+            <h3 className="tutorial-step-title">{title}</h3>
+            <span className="tutorial-step-counter">Step {currentStepNumber} of {totalSteps}</span>
+          </div>
+          <p className="tutorial-step-message">{colorizeText(message)}</p>
           
           {shouldShowContinueButton && (
             <button 
@@ -101,6 +174,7 @@ const TutorialModal: React.FC<TutorialModalProps> = ({ isOpen, onClose, type = '
         <div className="modal-body">
           <h2>Color Lock Tutorial</h2>
           <p>Would you like to see the Color Lock Tutorial?</p>
+          <p className="tutorial-steps-info">This tutorial will take you through an example game</p>
           <div className="modal-buttons">
             <button 
               className="inverse-share-button"

@@ -11,3 +11,256 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+/* Tutorial tooltip styles */
+.tutorial-tooltip {
+  position: fixed;
+  z-index: 1050;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.2));
+}
+
+.tutorial-tooltip-content {
+  background-color: white;
+  color: #333;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+  max-width: 200px;
+  position: relative;
+  border: 2px solid; /* Thicker border */
+  border-color: inherit; /* Ensure border color is inherited properly */
+}
+
+/* Color-specific borders for tooltips */
+.tutorial-tooltip[data-color="#3498db"] .tutorial-tooltip-content {
+  border-color: #3498db;
+}
+
+.tutorial-tooltip[data-color="#e74c3c"] .tutorial-tooltip-content {
+  border-color: #e74c3c;
+}
+
+.tutorial-tooltip[data-color="#2ecc71"] .tutorial-tooltip-content {
+  border-color: #2ecc71;
+}
+
+.tutorial-tooltip[data-color="#9b59b6"] .tutorial-tooltip-content {
+  border-color: #9b59b6;
+}
+
+.tutorial-tooltip[data-color="#e67e22"] .tutorial-tooltip-content {
+  border-color: #e67e22;
+}
+
+.tutorial-tooltip-content::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: white;
+  transform: rotate(45deg);
+  z-index: 1;
+}
+
+/* Position tooltip arrows based on tooltip position */
+.tutorial-tooltip[data-position="top"] .tutorial-tooltip-content::after {
+  bottom: -6px;
+  left: calc(50% - 6px);
+  border-right: 2px solid;
+  border-bottom: 2px solid;
+  border-top: none;
+  border-left: none;
+  margin-bottom: -1px;
+  box-shadow: none;
+}
+
+.tutorial-tooltip[data-position="bottom"] .tutorial-tooltip-content::after {
+  top: -6px;
+  left: calc(50% - 6px);
+  border-left: 2px solid;
+  border-top: 2px solid;
+  border-right: none;
+  border-bottom: none;
+  margin-top: -1px;
+  box-shadow: none;
+}
+
+.tutorial-tooltip[data-position="left"] .tutorial-tooltip-content::after {
+  right: -6px;
+  top: calc(50% - 6px);
+  border-top: 2px solid;
+  border-right: 2px solid;
+  border-bottom: none;
+  border-left: none;
+  margin-right: -1px;
+  box-shadow: none;
+}
+
+.tutorial-tooltip[data-position="right"] .tutorial-tooltip-content::after {
+  left: -6px;
+  top: calc(50% - 6px);
+  border-bottom: 2px solid;
+  border-left: 2px solid;
+  border-top: none;
+  border-right: none;
+  margin-left: -1px;
+  box-shadow: none;
+}
+
+/* Update tooltip arrow styling with proper colors */
+.tutorial-tooltip[data-color="#3498db"] .tutorial-tooltip-content::after {
+  border-color: #3498db;
+}
+
+.tutorial-tooltip[data-color="#e74c3c"] .tutorial-tooltip-content::after {
+  border-color: #e74c3c;
+}
+
+.tutorial-tooltip[data-color="#2ecc71"] .tutorial-tooltip-content::after {
+  border-color: #2ecc71;
+}
+
+.tutorial-tooltip[data-color="#9b59b6"] .tutorial-tooltip-content::after {
+  border-color: #9b59b6;
+}
+
+.tutorial-tooltip[data-color="#e67e22"] .tutorial-tooltip-content::after {
+  border-color: #e67e22;
+}
+
+/* Tutorial tooltip content paragraph */
+.tutorial-tooltip-content p {
+  margin: 0;
+}
+
+.tutorial-highlight {
+  animation: pulse 2s infinite;
+  pointer-events: none;
+  border: 1px solid !important; /* Thinner border */
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 2px 2px rgba(255, 255, 255, 0);
+  }
+  50% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 4px 3px rgba(255, 255, 255, 0.2);
+  }
+  100% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 2px 2px rgba(255, 255, 255, 0);
+  }
+}
+
+/* Color-specific highlight animations */
+.tutorial-highlight[data-color="#3498db"] {
+  animation: pulse-blue 2s infinite;
+  border-color: #3498db !important;
+}
+
+.tutorial-highlight[data-color="#e74c3c"] {
+  animation: pulse-red 2s infinite;
+  border-color: #e74c3c !important;
+}
+
+.tutorial-highlight[data-color="#2ecc71"] {
+  animation: pulse-green 2s infinite;
+  border-color: #2ecc71 !important;
+}
+
+.tutorial-highlight[data-color="#9b59b6"] {
+  animation: pulse-purple 2s infinite;
+  border-color: #9b59b6 !important;
+}
+
+.tutorial-highlight[data-color="#e67e22"] {
+  animation: pulse-orange 2s infinite;
+  border-color: #e67e22 !important;
+}
+
+@keyframes pulse-blue {
+  0% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 2px 2px rgba(52, 152, 219, 0);
+  }
+  50% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 4px 3px rgba(52, 152, 219, 0.2);
+  }
+  100% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 2px 2px rgba(52, 152, 219, 0);
+  }
+}
+
+@keyframes pulse-red {
+  0% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 2px 2px rgba(231, 76, 60, 0);
+  }
+  50% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 4px 3px rgba(231, 76, 60, 0.2);
+  }
+  100% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 2px 2px rgba(231, 76, 60, 0);
+  }
+}
+
+@keyframes pulse-green {
+  0% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 2px 2px rgba(46, 204, 113, 0);
+  }
+  50% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 4px 3px rgba(46, 204, 113, 0.2);
+  }
+  100% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 2px 2px rgba(46, 204, 113, 0);
+  }
+}
+
+@keyframes pulse-purple {
+  0% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 2px 2px rgba(155, 89, 182, 0);
+  }
+  50% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 4px 3px rgba(155, 89, 182, 0.2);
+  }
+  100% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 2px 2px rgba(155, 89, 182, 0);
+  }
+}
+
+@keyframes pulse-orange {
+  0% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 2px 2px rgba(230, 126, 34, 0);
+  }
+  50% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 4px 3px rgba(230, 126, 34, 0.2);
+  }
+  100% {
+    box-shadow: 0 0 1px 1px rgba(255, 255, 255, 0.5), 0 0 2px 2px rgba(230, 126, 34, 0);
+  }
+}
+
+/* Tutorial step header and counter */
+.tutorial-step-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.tutorial-step-counter {
+  font-size: 14px;
+  color: #666;
+  font-weight: 500;
+  background-color: #f5f5f5;
+  padding: 3px 8px;
+  border-radius: 12px;
+}
+
+.tutorial-steps-info {
+  color: #555;
+  font-size: 15px;
+  font-style: italic;
+  margin-top: 5px;
+  margin-bottom: 20px;
+}

@@ -63,33 +63,41 @@ export const getStepConfig = (
       return {
         title: 'Color Lock Tutorial',
         message: 'Every day, Color Lock provides a new puzzle for you to solve. To win, you must turn every tile on the board into the target color.',
-        overlayElements: []
-      };
-    
-      case TutorialStep.ALGORITHM_INTRO:
-      return {
-        title: 'Algorithm Solution',
-        message: 'The Goal, highlighted above in red, is the amount of moves our algorithm needed to solve the puzzle.',
         overlayElements: [
+          {
+            type: 'highlight',
+            target: '.target-row',
+            color: '#3498db',
+            position: 'top',
+            description: 'Turn all tiles to this target color'
+          },
           {
             type: 'highlight',
             target: '.goal-row span:first-child',
-            color: 'red',
-            position: 'bottom'
-          }
-        ]
-      };
-
-    case TutorialStep.MOVES_EXPLANATION:
-      return {
-        title: 'Moves Counter',
-        message: 'The moves counter shows how many moves you\'ve made in your current game.',
-        overlayElements: [
+            color: '#e74c3c',
+            position: 'left',
+            description: 'Goal: Minimum moves needed'
+          },
           {
             type: 'highlight',
             target: '.goal-row span:last-child',
-            color: 'red',
-            position: 'bottom'
+            color: '#2ecc71',
+            position: 'bottom',
+            description: 'Your current move count'
+          },
+          {
+            type: 'highlight',
+            target: '.settings-button',
+            color: '#9b59b6',
+            position: 'left',
+            description: 'Game settings'
+          },
+          {
+            type: 'highlight',
+            target: '.stats-button',
+            color: '#e67e22',
+            position: 'left',
+            description: 'View your stats'
           }
         ]
       };
@@ -104,7 +112,7 @@ export const getStepConfig = (
     case TutorialStep.COLOR_SELECTION:
       return {
         title: 'Select a Color',
-        message: 'Now, click the orange square on the color picker that just appeared on the bottom of the screen. This changes the green tile we clicked to orange.',
+        message: 'Click the orange square in the modal that just appeared on the bottom of the screen. This changes the green tile to orange.',
         overlayElements: []
       };
     
@@ -118,14 +126,14 @@ export const getStepConfig = (
     case TutorialStep.ALGORITHM_MOVE_2:
       return {
         title: 'Move 2',
-        message: 'Let\'s keep going. Click continue to change the two purple tiles to yellow. Notice, the two purple tiles are connected by a side. Once tiles of the same color are connected they cannot be broken up, and changing one of the connected tiles to a new color will change all connected tiles to that color.',
+        message: 'Let\'s keep going. Click continue to change the two purple tiles to yellow. Once tiles of the same color are connected they cannot be broken up. Changing one of the connected tiles to a new color will change all connected tiles to that color.',
         overlayElements: []
       };
 
       case TutorialStep.CRITICAL_MOVE:
         return {
           title: 'Critical Move',
-          message: 'You can see that we freed up the orange tiles by creating a new group of a larger size! We are now going to change those newly freed up tiles from orange to yellow.',
+          message: 'By creating a new group of a larger size we unlocked the orange tiles! We are now going to change those newly freed up tiles from orange to yellow.',
           overlayElements: []
         };
       

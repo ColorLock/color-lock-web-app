@@ -15,20 +15,18 @@ import {
 // Define tutorial step type
 export enum TutorialStep {
   INTRO = 0,
-  ALGORITHM_INTRO = 1,
-  MOVES_EXPLANATION = 2,
-  FIRST_MOVE_SELECTION = 3,
-  COLOR_SELECTION = 4,
-  LOCKED_REGIONS = 5,
-  ALGORITHM_MOVE_2 = 6,
-  CRITICAL_MOVE = 7,
-  LOSING_SCENARIO = 8,
-  ALGORITHM_MOVE_3 = 9,
-  ALGORITHM_MOVE_4 = 10,
-  ALGORITHM_MOVE_5 = 11,
-  ALGORITHM_MOVE_6 = 12,
-  ALGORITHM_MOVE_7 = 13,
-  WINNING_COMPLETION = 14
+  FIRST_MOVE_SELECTION = 1,
+  COLOR_SELECTION = 2,
+  LOCKED_REGIONS = 3,
+  ALGORITHM_MOVE_2 = 4,
+  CRITICAL_MOVE = 5,
+  LOSING_SCENARIO = 6,
+  ALGORITHM_MOVE_3 = 7,
+  ALGORITHM_MOVE_4 = 8,
+  ALGORITHM_MOVE_5 = 9,
+  ALGORITHM_MOVE_6 = 10,
+  ALGORITHM_MOVE_7 = 11,
+  WINNING_COMPLETION = 12
 }
 
 /**
@@ -62,6 +60,7 @@ export interface OverlayElement {
   target: string; // CSS selector or element ID
   color?: string;
   position: 'top' | 'bottom' | 'left' | 'right';
+  description?: string; // Optional description for tooltips
 }
 
 // Interface for the tutorial context value
@@ -820,8 +819,6 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
             // Specifically do not highlight tiles for these steps
             case TutorialStep.LOSING_SCENARIO:
             case TutorialStep.INTRO:
-            case TutorialStep.ALGORITHM_INTRO:
-            case TutorialStep.MOVES_EXPLANATION:
             case TutorialStep.WINNING_COMPLETION:
               // No tile highlighting for these steps
               setSuggestedTile(null);
