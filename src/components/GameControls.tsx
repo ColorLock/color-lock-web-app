@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faGear, faTrophy, faTimes, faInfoCircle } from '@fortawesome/free-solid-svg-icons';
+import { faGear, faTrophy, faTimes, faInfoCircle, faHome } from '@fortawesome/free-solid-svg-icons';
 import { TileColor, DailyPuzzle } from '../types';
 import { AppSettings } from '../types/settings';
 import { useTutorialContext } from '../contexts/TutorialContext';
@@ -12,6 +12,7 @@ interface GameHeaderProps {
   onStatsClick: () => void;
   onHintClick: () => void;
   onInfoClick: () => void;
+  onHomeClick: () => void;
 }
 
 export const GameHeader: React.FC<GameHeaderProps> = ({
@@ -20,12 +21,18 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
   onSettingsClick,
   onStatsClick,
   onHintClick,
-  onInfoClick
+  onInfoClick,
+  onHomeClick
 }) => {
   const { isTutorialMode, showHintButton } = useTutorialContext();
   
   return (
     <>
+      {/* Home Button */}
+      <button className="home-button" onClick={onHomeClick} aria-label="Home">
+        <FontAwesomeIcon icon={faHome} />
+      </button>
+
       {/* Settings Button */}
       <button className="settings-button" onClick={onSettingsClick} aria-label="Settings">
         <FontAwesomeIcon icon={faGear} />
@@ -129,6 +136,7 @@ interface GameControlsProps {
   onStatsClick: () => void;
   onHintClick: () => void;
   onInfoClick: () => void;
+  onHomeClick: () => void;
 }
 
 const GameControls: React.FC<GameControlsProps> = (props) => {
@@ -141,6 +149,7 @@ const GameControls: React.FC<GameControlsProps> = (props) => {
         onStatsClick={props.onStatsClick}
         onHintClick={props.onHintClick}
         onInfoClick={props.onInfoClick}
+        onHomeClick={props.onHomeClick}
       />
       <GameFooter
         puzzle={props.puzzle}

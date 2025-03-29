@@ -23,6 +23,19 @@
   }
 }
 
+// Guest signup container
+.guest-signup-container {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  z-index: 10;
+  
+  &.left-side {
+    right: auto;
+    left: 15px;
+  }
+}
+
 // Tutorial step modal
 .tutorial-step-modal {
   position: fixed;
@@ -237,4 +250,323 @@
       }
     }
   }
+}
+
+/* Landing Screen Styles */
+.landing-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 100vh;
+  padding: 2rem 1rem;
+  background-color: #ffffff;
+  color: #333;
+}
+
+.landing-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.landing-logo {
+  width: 180px;
+  height: auto;
+  margin-bottom: 1rem;
+}
+
+.landing-title {
+  font-size: 4.2rem;
+  font-weight: bold;
+  margin: 0;
+  display: flex;
+  justify-content: center;
+}
+
+/* Gradient title styling */
+.title-word {
+  display: inline-block;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  position: relative;
+}
+
+.color-word-1 {
+  background-image: linear-gradient(to right, 
+    #ff0000, 
+    #ff6600, 
+    #ffcc00, 
+    #00cc00, 
+    #0066ff
+  );
+}
+
+.color-word-2 {
+  background-image: linear-gradient(to right, 
+    #6600ff, 
+    #9900cc, 
+    #cc0099, 
+    #ff0066
+  );
+}
+
+/* Remove old color classes */
+.title-letter,
+.color-red, 
+.color-orange, 
+.color-green, 
+.color-blue, 
+.color-purple, 
+.color-yellow,
+.text-red, 
+.text-orange, 
+.text-green, 
+.text-blue, 
+.text-yellow, 
+.text-purple,
+.color-blue-purple {
+  display: none;
+}
+
+.title-space {
+  margin: 0 0.1em;
+}
+
+.global-stats-container {
+  background-color: #f7f7f7;
+  border-radius: 12px;
+  padding: 1.2rem;
+  width: 100%;
+  max-width: 400px;
+  margin-bottom: 2rem;
+  text-align: center;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+.global-stats-container h2 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  font-size: 1.3rem;
+  color: #333;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+}
+
+.stat-card {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 0.8rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.stat-value {
+  font-size: 2.5rem;
+  font-weight: bold;
+  margin-bottom: 0.3rem;
+  color: #3478F6;
+}
+
+.stat-label {
+  font-size: 1.1rem;
+  color: #666;
+}
+
+.stats-highlight {
+  font-size: 0.9rem;
+  margin: 0;
+  padding: 0.6rem;
+  background-color: #fff;
+  border-radius: 8px;
+  color: #333;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.landing-auth-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 1rem;
+}
+
+.landing-lock-container {
+  margin-bottom: 1.5rem;
+}
+
+.landing-signin-button {
+  background-color: #3478F6;
+  color: white;
+  border: none;
+  border-radius: 12px;
+  padding: 0.75rem 2rem;
+  font-size: 1.1rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  width: 200px;
+  margin-bottom: 1rem;
+}
+
+.landing-signin-button:hover {
+  background-color: #2861d6;
+}
+
+.landing-guest-button {
+  background-color: white;
+  color: #3478F6;
+  border: 2px solid #3478F6;
+  border-radius: 12px;
+  padding: 0.75rem 2rem;
+  font-size: 1.1rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  width: 200px;
+}
+
+.landing-guest-button:hover {
+  background-color: rgba(52, 120, 246, 0.1);
+}
+
+/* Logo Animation Styles */
+.loading-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #fff;
+  z-index: 1000;
+}
+
+.spinner {
+  width: 50px;
+  height: 50px;
+  border: 5px solid rgba(52, 120, 246, 0.3);
+  border-radius: 50%;
+  border-top-color: #3478F6;
+  animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.app-fade-in-placeholder {
+  width: 100%;
+  height: 100%;
+}
+
+.logo-animation {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation: fadeInAndScale 2s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+  
+  &.fade-out {
+    animation: pauseAndGrowAndFadeOut 2.5s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+  }
+}
+
+@keyframes fadeInAndScale {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes pauseAndGrowAndFadeOut {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  40% { /* Hold at full opacity for a moment */
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.5); /* Grow larger while fading out */
+  }
+}
+
+.app-fade-in {
+  animation: appFadeIn 1.5s ease forwards;
+}
+
+@keyframes appFadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.auth-modal {
+  background-color: #fff;
+  border-radius: 12px;
+  padding: 2rem;
+  width: 90%;
+  max-width: 400px;
+  position: relative;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.modal-close {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  background-color: #f0f0f0;
+  border: none;
+  color: #333;
+  font-size: 22px;
+  cursor: pointer;
+  padding: 4px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.modal-close:hover {
+  background-color: #e0e0e0;
+  transform: scale(1.05);
 } 

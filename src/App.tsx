@@ -19,6 +19,8 @@ import TutorialModal from './components/TutorialModal';
 import TutorialOverlay from './components/TutorialOverlay';
 import TutorialHighlight from './components/TutorialHighlight';
 import TutorialWarningModal from './components/TutorialWarningModal';
+import LandingScreen from './components/LandingScreen';
+import SignUpButton from './components/SignUpButton';
 
 // Utils
 import { generateShareText, shareToTwitter, shareToFacebook, copyToClipboard } from './utils/shareUtils';
@@ -27,6 +29,7 @@ import { getLockedColorCSS } from './utils/colorUtils';
 // Context
 import { GameProvider, useGameContext } from './contexts/GameContext';
 import { TutorialProvider, useTutorialContext, TutorialStep } from './contexts/TutorialContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 // Extend CSSProperties to include our custom properties
 declare module 'react' {
@@ -91,6 +94,9 @@ const GameContainer = () => {
     closeWarningModal,
     currentMoveIndex
   } = useTutorialContext();
+
+  // Auth context
+  const { isGuest } = useAuth();
 
   const [windowDimensions, setWindowDimensions] = useState<{width: number, height: number}>({
     width: window.innerWidth,
@@ -232,7 +238,15 @@ const GameContainer = () => {
         onStatsClick={() => setShowStats(true)}
         onHintClick={handleHint}
         onInfoClick={() => setShowTutorialModal(true)}
+        onHomeClick={() => window.location.href = '/'}
       />
+
+      {/* Sign Up Button for Guest Users */}
+      {isGuest && (
+        <div className="guest-signup-container left-side">
+          <SignUpButton />
+        </div>
+      )}
 
       {/* Game Grid */}
       <div className="grid-container" style={{ position: 'relative' }}>
@@ -421,6 +435,28 @@ const GameContainer = () => {
 
 const App: React.FC = () => {
   return (
+    <AuthProvider>
+      <AuthenticatedApp />
+    </AuthProvider>
+  );
+};
+
+const AuthenticatedApp: React.FC = () => {
+  const { isAuthenticated, isLoading } = useAuth();
+  
+  // Show loading indicator while checking authentication
+  if (isLoading) {
+    return (
+      <div className="loading-container">
+        <div className="logo-animation">
+          <img src="/tbs_logo.png" alt="The Banana Standard" className="loading-logo" />
+        </div>
+      </div>
+    );
+  }
+  
+  // Render LandingScreen or GameContainer based on authentication state
+  return isAuthenticated ? (
     <GameProvider>
       <TutorialProvider>
         <SettingsContext.Provider value={null}>
@@ -428,6 +464,8 @@ const App: React.FC = () => {
         </SettingsContext.Provider>
       </TutorialProvider>
     </GameProvider>
+  ) : (
+    <LandingScreen />
   );
 };
 
