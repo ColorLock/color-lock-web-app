@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useNavigation } from '../App';
 import '../scss/main.scss';
 
 interface LandingScreenProps {
@@ -7,7 +8,8 @@ interface LandingScreenProps {
 }
 
 const LandingScreen: React.FC<LandingScreenProps> = () => {
-  const { signIn, signUp, playAsGuest } = useAuth();
+  const { signIn, signUp, playAsGuest, logOut, currentUser, isGuest, isAuthenticated } = useAuth();
+  const { setShowLandingPage } = useNavigation();
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
@@ -15,6 +17,9 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showAppContent, setShowAppContent] = useState(false);
+
+  // Check if user is authenticated as a regular user (not guest)
+  const isRegularUser = isAuthenticated && !isGuest;
 
   // Hard-coded global stats
   const globalStats = {
@@ -71,6 +76,8 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
     
     try {
       await playAsGuest();
+      // Navigate to the game screen after successful guest login
+      setShowLandingPage(false);
     } catch (err: any) {
       console.error('Guest mode error:', err);
       setError(err.message || 'An error occurred while entering guest mode');
@@ -79,10 +86,32 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
     }
   };
   
+  const handleSignOut = async () => {
+    setError(null);
+    setLoading(true);
+    
+    try {
+      await logOut();
+      console.log("User signed out successfully");
+    } catch (err: any) {
+      console.error('Sign out error:', err);
+      setError(err.message || 'An error occurred while signing out');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const handlePlayGame = () => {
+    // Update the navigation context to show the game
+    setShowLandingPage(false);
+  };
+  
   const toggleAuthMode = () => {
     setAuthMode(prevMode => (prevMode === 'signin' ? 'signup' : 'signin'));
     setError(null);
   };
+
+  console.log("Auth state:", { isAuthenticated, isGuest, isRegularUser });
 
   return (
     <div className="landing-container app-fade-in">
@@ -111,18 +140,37 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
       </div>
 
       <div className="landing-auth-container">
-        <button 
-          className="landing-signin-button"
-          onClick={() => setShowAuthModal(true)}
-        >
-          Sign In / Sign Up
-        </button>
-        <button 
-          className="landing-guest-button"
-          onClick={handleGuestMode}
-        >
-          Play as Guest
-        </button>
+        {isRegularUser ? (
+          <>
+            <button 
+              className="landing-signin-button"
+              onClick={handlePlayGame}
+            >
+              Play Color Lock
+            </button>
+            <button 
+              className="landing-guest-button"
+              onClick={handleSignOut}
+            >
+              Sign Out
+            </button>
+          </>
+        ) : (
+          <>
+            <button 
+              className="landing-signin-button"
+              onClick={() => setShowAuthModal(true)}
+            >
+              Sign In / Sign Up
+            </button>
+            <button 
+              className="landing-guest-button"
+              onClick={handleGuestMode}
+            >
+              Play as Guest
+            </button>
+          </>
+        )}
       </div>
 
       {showAuthModal && (

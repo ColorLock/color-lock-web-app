@@ -11,6 +11,7 @@ import useSettings from '../hooks/useSettings';
 import useGameStats from '../hooks/useGameStats';
 import { getColorCSS, getLockedColorCSS, getLockedSquaresColor } from '../utils/colorUtils';
 import { shouldShowAutocomplete, autoCompletePuzzle } from '../utils/autocompleteUtils';
+import { useNavigation } from '../App';
 
 // Interface for the context value
 interface GameContextValue {
@@ -47,6 +48,7 @@ interface GameContextValue {
   shareGameStats: () => void;
   handleAutoComplete: () => void;
   setShowAutocompleteModal: (show: boolean) => void;
+  navigateToHome: () => void;
 }
 
 // Create the context with a default undefined value
@@ -70,6 +72,7 @@ interface GameProviderProps {
 export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const GRID_SIZE = 5;
   const DATE_TO_USE = dateKeyForToday();
+  const { setShowLandingPage } = useNavigation();
 
   // Game state
   const [puzzle, setPuzzle] = useState<DailyPuzzle | null>(null);
@@ -90,6 +93,19 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [showStats, setShowStats] = useState(false);
   const { settings, updateSettings } = useSettings();
   const { gameStats, updateGameStats, incrementTimesPlayed, generateShareableStats, updateTotalMoves } = useGameStats(defaultStats);
+
+  // Function to navigate to the landing screen
+  const navigateToHome = () => {
+    // Close any open modals
+    setShowColorPicker(false);
+    setShowWinModal(false);
+    setShowSettings(false);
+    setShowStats(false);
+    setShowAutocompleteModal(false);
+    
+    // Navigate to the landing screen using navigation context
+    setShowLandingPage(true);
+  };
 
   // Generate the puzzle for the fixed date on first render
   useEffect(() => {
@@ -468,7 +484,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setShowWinModal,
     shareGameStats,
     handleAutoComplete,
-    setShowAutocompleteModal: handleSetShowAutocompleteModal
+    setShowAutocompleteModal: handleSetShowAutocompleteModal,
+    navigateToHome
   };
 
   return (

@@ -31,6 +31,22 @@ import { GameProvider, useGameContext } from './contexts/GameContext';
 import { TutorialProvider, useTutorialContext, TutorialStep } from './contexts/TutorialContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
+// Create a context for navigating between screens
+interface NavigationContextType {
+  showLandingPage: boolean;
+  setShowLandingPage: (show: boolean) => void;
+}
+
+const NavigationContext = createContext<NavigationContextType | undefined>(undefined);
+
+export const useNavigation = () => {
+  const context = useContext(NavigationContext);
+  if (!context) {
+    throw new Error('useNavigation must be used within a NavigationProvider');
+  }
+  return context;
+};
+
 // Extend CSSProperties to include our custom properties
 declare module 'react' {
   interface CSSProperties {
@@ -43,6 +59,8 @@ declare module 'react' {
 export const SettingsContext = createContext<AppSettings | null>(null);
 
 const GameContainer = () => {
+  const { showLandingPage, setShowLandingPage } = useNavigation();
+
   const {
     puzzle,
     settings,
@@ -71,7 +89,8 @@ const GameContainer = () => {
     shareGameStats,
     showAutocompleteModal,
     setShowAutocompleteModal,
-    handleAutoComplete
+    handleAutoComplete,
+    navigateToHome
   } = useGameContext();
 
   // Tutorial context
@@ -160,6 +179,11 @@ const GameContainer = () => {
     return undefined;
   }, [loading, puzzle]);
 
+  // Handle home navigation - modify to use context
+  const handleHomeClick = () => {
+    setShowLandingPage(true);
+  };
+
   if (loading || !showAppContent || !puzzle) {
     return (
       <div className="loading-container">
@@ -238,7 +262,7 @@ const GameContainer = () => {
         onStatsClick={() => setShowStats(true)}
         onHintClick={handleHint}
         onInfoClick={() => setShowTutorialModal(true)}
-        onHomeClick={() => window.location.href = '/'}
+        onHomeClick={handleHomeClick}
       />
 
       {/* Sign Up Button for Guest Users */}
@@ -434,15 +458,27 @@ const GameContainer = () => {
 };
 
 const App: React.FC = () => {
+  const [showLandingPage, setShowLandingPage] = useState(false);
+
   return (
-    <AuthProvider>
-      <AuthenticatedApp />
-    </AuthProvider>
+    <NavigationContext.Provider value={{ showLandingPage, setShowLandingPage }}>
+      <AuthProvider>
+        <AuthenticatedApp />
+      </AuthProvider>
+    </NavigationContext.Provider>
   );
 };
 
 const AuthenticatedApp: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
+  const { showLandingPage, setShowLandingPage } = useNavigation();
+  
+  // Reset showLandingPage when authentication state changes
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setShowLandingPage(true);
+    }
+  }, [isAuthenticated, setShowLandingPage]);
   
   // Show loading indicator while checking authentication
   if (isLoading) {
@@ -454,8 +490,16 @@ const AuthenticatedApp: React.FC = () => {
       </div>
     );
   }
+
+  // If user has clicked on the Home button, show the landing page
+  // regardless of authentication status
+  if (showLandingPage) {
+    return (
+      <LandingScreen />
+    );
+  }
   
-  // Render LandingScreen or GameContainer based on authentication state
+  // Otherwise, render LandingScreen or GameContainer based on authentication state
   return isAuthenticated ? (
     <GameProvider>
       <TutorialProvider>
