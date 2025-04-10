@@ -1,355 +1,148 @@
 import { useState, useCallback, useEffect } from 'react';
-import { GameStatistics } from '../types/stats';
+import { GameStatistics, defaultStats } from '../types/stats';
 import { loadGameStats, saveGameStats } from '../utils/storageUtils';
 import { dateKeyForToday } from '../utils/dateUtils';
 
 /**
- * Custom hook for managing game statistics
+ * Custom hook for managing the *display* state of game statistics.
+ * Actual stat updates are handled by the backend Cloud Function.
+ * This hook loads an initial state (possibly cached) and provides a way
+ * for the GameContext to update the state with fresh data fetched from Firestore.
  */
-export default function useGameStats(defaultStats: GameStatistics) {
-  const [gameStats, setGameStats] = useState<GameStatistics>(() => {
-    // Check if it's a new day when loading stats
-    const storedStats = loadGameStats(defaultStats);
-    const lastPlayedDate = localStorage.getItem('lastPlayedDate');
-    const currentDate = dateKeyForToday();
-    
-    // Initialize days played if this is the first time the app is used
-    const isFirstTimeEver = !lastPlayedDate;
-    
-    // If it's a new day or first time ever, reset daily stats
-    if (lastPlayedDate !== currentDate) {
-      // Store yesterday's best score in dailyScores if it exists
-      if (lastPlayedDate && storedStats.todayStats.bestScore !== null) {
-        storedStats.allTimeStats.dailyScores[lastPlayedDate] = storedStats.todayStats.bestScore;
-      }
-      
-      // Reset today's stats
-      storedStats.todayStats = {
-        movesUsed: 0,
-        bestScore: null,
-        timesPlayed: 0
-      };
-      
-      // Clear the streak update flag for the new day
-      const oldStreakKey = `streak-updated-${lastPlayedDate}`;
-      localStorage.removeItem(oldStreakKey);
-      
-      // If this is the very first time using the app, initialize stats
-      if (isFirstTimeEver) {
-        console.log('First time ever using the app, initializing stats');
-        storedStats.allTimeStats = {
-          ...storedStats.allTimeStats,
-          daysPlayed: 0,  // Will be incremented on first move
-          totalMoves: 0,
-          goalAchieved: 0,
-          streak: 0,
-          gamesPlayed: 0,
-          dailyScores: {}
-        };
-      } else {
-        // Check if we missed a day and need to reset streak
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayKey = yesterday.toISOString().split('T')[0];
-        
-        if (lastPlayedDate !== yesterdayKey && !storedStats.allTimeStats.dailyScores[yesterdayKey]) {
-          console.log('Day skipped, resetting streak');
-          storedStats.allTimeStats.streak = 0;
-        }
-      }
-      
-      // Don't set lastPlayedDate here - it will be set when first move is made
-      saveGameStats(storedStats);
-    }
-    
-    // Initialize stats if they don't exist or are NaN
-    if (!storedStats.allTimeStats.totalMoves || isNaN(storedStats.allTimeStats.totalMoves)) {
-      storedStats.allTimeStats.totalMoves = 0;
-    }
-    
-    if (!storedStats.allTimeStats.daysPlayed || isNaN(storedStats.allTimeStats.daysPlayed)) {
-      storedStats.allTimeStats.daysPlayed = 0;
-    }
-    
-    if (!storedStats.allTimeStats.goalAchieved || isNaN(storedStats.allTimeStats.goalAchieved)) {
-      storedStats.allTimeStats.goalAchieved = 0;
-    }
-    
-    if (!storedStats.allTimeStats.streak || isNaN(storedStats.allTimeStats.streak)) {
-      storedStats.allTimeStats.streak = 0;
-    }
-    
-    console.log('Initialized stats:', { 
-      currentDate, 
-      lastPlayedDate,
-      isFirstTimeEver,
-      daysPlayed: storedStats.allTimeStats.daysPlayed,
-      totalMoves: storedStats.allTimeStats.totalMoves,
-      streak: storedStats.allTimeStats.streak
-    });
-    
-    return storedStats;
-  });
-  
+export default function useGameStats(initialDefaultStats: GameStatistics) {
+  // State holds the stats for display. Initialized from cache or defaults.
+  const [gameStats, setGameStats] = useState<GameStatistics>(initialDefaultStats);
+  // State to indicate if fresh stats are currently being fetched.
+  const [isLoadingStats, setIsLoadingStats] = useState(true);
+
   /**
-   * Increment the times played counter and track first game of the day
+   * Load initial stats from local storage. This provides a quick display
+   * while potentially fresher data is fetched from the backend.
+   * It also handles resetting the client-side 'todayStats' if it's a new day.
    */
-  const incrementTimesPlayed = useCallback(() => {
-    const currentStats = { ...gameStats };
-    const currentDate = dateKeyForToday();
-    
-    // Get the actual lastPlayed date from localStorage for most accurate comparison
-    const lastPlayedDate = localStorage.getItem('lastPlayedDate');
-    
-    // Check if this is the first game of the day by comparing dates
-    // If lastPlayedDate doesn't exist or is different from current date
-    const isFirstGameOfDay = !lastPlayedDate || lastPlayedDate !== currentDate;
-    
-    console.log('incrementTimesPlayed:', { 
-      currentDate, 
-      lastPlayedDate, 
-      isFirstGameOfDay,
-      timesPlayed: currentStats.todayStats.timesPlayed,
-      daysPlayed: currentStats.allTimeStats.daysPlayed
-    });
-    
-    // Increment times played
-    currentStats.todayStats.timesPlayed += 1;
-    currentStats.allTimeStats.gamesPlayed += 1;
-    
-    // If this is the first game of the day, increment days played
-    if (isFirstGameOfDay) {
-      // Ensure daysPlayed is initialized
-      if (!currentStats.allTimeStats.daysPlayed || isNaN(currentStats.allTimeStats.daysPlayed)) {
-        currentStats.allTimeStats.daysPlayed = 0;
+  const loadInitialStats = useCallback(() => {
+    setIsLoadingStats(true); // Start loading
+    console.log("useGameStats: Loading initial stats from storage...");
+    try {
+      const storedStats = loadGameStats(initialDefaultStats); // Use the utility
+      const lastPlayedDate = localStorage.getItem('lastPlayedDate'); // Get last *saved* date
+      const currentDate = dateKeyForToday();
+
+      // Reset client-side todayStats if it's a new day compared to the last save date
+      if (lastPlayedDate !== currentDate) {
+          console.log(`useGameStats: New day detected (Current: ${currentDate}, Last Played: ${lastPlayedDate}). Resetting todayStats for display.`);
+          // Reset only the todayStats part for the display state
+          storedStats.todayStats = {
+              bestScore: null,
+              timesPlayed: 0, // Reset client-side attempt counter
+          };
+          // Update the last played date marker in storage
+          localStorage.setItem('lastPlayedDate', currentDate);
+          // Save the potentially modified stats (with reset todayStats) back to storage
+          // This ensures the reset todayStats persists if the app is reloaded before backend sync
+          saveGameStats(storedStats);
+      }
+
+      console.log("useGameStats: Loaded initial stats state:", storedStats);
+      setGameStats(storedStats);
+
+    } catch (error) {
+      console.error("useGameStats: Error loading initial stats:", error);
+      setGameStats(initialDefaultStats); // Fallback to defaults
+    } finally {
+      // Don't set isLoadingStats to false here, let the fetch control it
+      // setIsLoadingStats(false);
+    }
+  }, [initialDefaultStats]);
+
+  /**
+   * Function to update the gameStats state with fresh data fetched from the backend.
+   * Now accepts just the allTimeStats object returned by the backend function.
+   */
+  const setFreshStats = useCallback((freshAllTimeStats: Record<string, any>) => {
+      console.log("useGameStats: Updating state with fresh allTimeStats:", freshAllTimeStats);
+      
+      // Validate and extract the correct data
+      if (!freshAllTimeStats || typeof freshAllTimeStats !== 'object') {
+          console.error("useGameStats: Invalid data received in setFreshStats:", freshAllTimeStats);
+          setIsLoadingStats(false);
+          return;
       }
       
-      currentStats.allTimeStats.daysPlayed += 1;
-      
-      // Important: Update the last played date in localStorage right away
-      localStorage.setItem('lastPlayedDate', currentDate);
-      console.log('Incrementing days played to:', currentStats.allTimeStats.daysPlayed);
-      
-      // Reset today's stats since it's a new day
-      currentStats.todayStats = {
-        movesUsed: 0,
-        bestScore: null,
-        timesPlayed: 1  // Set to 1 since we're incrementing now
-      };
-    }
-    
-    // Save the updated stats
-    saveGameStats(currentStats);
-    setGameStats(currentStats);
-    
-    // Return whether this was the first game of the day
-    return isFirstGameOfDay;
-  }, [gameStats]);
-  
-  /**
-   * Update total moves counter
-   */
-  const updateTotalMoves = useCallback((moveCount: number) => {
-    if (!moveCount || isNaN(moveCount) || moveCount <= 0) return;
-    
-    const currentStats = { ...gameStats };
-    
-    // Ensure totalMoves is initialized
-    if (!currentStats.allTimeStats.totalMoves || isNaN(currentStats.allTimeStats.totalMoves)) {
-      currentStats.allTimeStats.totalMoves = 0;
-    }
-    
-    // Add current move count to total moves
-    currentStats.allTimeStats.totalMoves += moveCount;
-    
-    saveGameStats(currentStats);
-    setGameStats(currentStats);
-    
-    return currentStats;
-  }, [gameStats]);
-  
-  // Force a check for new day on component mount
-  useEffect(() => {
-    const currentDate = dateKeyForToday();
-    const lastPlayedDate = localStorage.getItem('lastPlayedDate');
-    
-    // If it's a new day and we haven't played yet, update lastPlayedDate
-    // but don't increment daysPlayed until the first move
-    if (lastPlayedDate !== currentDate && gameStats.todayStats.timesPlayed === 0) {
-      console.log('New day detected on mount:', {
-        currentDate,
-        lastPlayedDate,
-        daysPlayed: gameStats.allTimeStats.daysPlayed
+      // Handle the case where we might receive {todayStats, allTimeStats} structure
+      // instead of just the allTimeStats object
+      const actualAllTimeStats = 
+          ('allTimeStats' in freshAllTimeStats && freshAllTimeStats.allTimeStats) 
+              ? freshAllTimeStats.allTimeStats 
+              : freshAllTimeStats;
+              
+      setGameStats(prevStats => {
+          // Create a new state object, preserving the existing todayStats
+          // and updating the allTimeStats
+          const newState = {
+              ...prevStats, // Keep existing structure (includes todayStats)
+              allTimeStats: {
+                  ...defaultStats.allTimeStats, // Start with defaults to ensure all keys
+                  ...actualAllTimeStats // Overwrite with fresh data from backend
+              }
+          };
+          console.log("useGameStats: Constructed new gameStats state:", newState);
+          // Optionally save the updated stats back to local storage as a cache
+          // saveGameStats(newState); // Be cautious if todayStats shouldn't be cached this way
+          return newState;
       });
-      
-      // Reset today's stats for the new day
-      const updatedStats = {
-        ...gameStats,
-        todayStats: {
-          movesUsed: 0,
-          bestScore: null,
-          timesPlayed: 0
-        }
-      };
-      
-      saveGameStats(updatedStats);
-      setGameStats(updatedStats);
-    }
-  }, [gameStats.todayStats.timesPlayed]);
-  
+      setIsLoadingStats(false); // Mark loading as complete when fresh stats arrive
+  }, [setIsLoadingStats]);
+
   /**
-   * Update goal achieved counter if user beat or tied the bot score based on current difficulty
-   */
-  const updateGoalAchieved = useCallback((
-    userScore: number, 
-    botScore: number, 
-    puzzleDateString: string
-  ) => {
-    const currentStats = { ...gameStats };
-    const currentDate = dateKeyForToday();
-    
-    // Use puzzle-specific key to track achievements by date AND puzzle
-    // This way if the puzzle changes, the achievement can be earned again
-    // We also add the bot score to the key, so that different difficulty levels
-    // for the same puzzle can each earn a separate achievement
-    const achievementKey = `goal-achieved-${puzzleDateString}-difficulty-${botScore}`;
-    
-    // Check if this achievement was already recorded for this puzzle at this difficulty
-    const alreadyAchievedForPuzzle = localStorage.getItem(achievementKey) === 'true';
-    
-    console.log('Checking goal achievement:', {
-      userScore,
-      botScore,
-      puzzleDateString,
-      achievementKey,
-      alreadyAchievedForPuzzle
-    });
-    
-    // If user beat or tied the bot score and this hasn't been recorded for this puzzle at this difficulty
-    if (userScore <= botScore && !alreadyAchievedForPuzzle) {
-      // Ensure goalAchieved is initialized
-      if (!currentStats.allTimeStats.goalAchieved || isNaN(currentStats.allTimeStats.goalAchieved)) {
-        currentStats.allTimeStats.goalAchieved = 0;
-      }
-      
-      currentStats.allTimeStats.goalAchieved += 1;
-      localStorage.setItem(achievementKey, 'true');
-      
-      console.log('Goal achieved! New count:', currentStats.allTimeStats.goalAchieved);
-      
-      saveGameStats(currentStats);
-      setGameStats(currentStats);
-    }
-    
-    return currentStats;
-  }, [gameStats]);
-  
-  /**
-   * Update the game statistics when a puzzle is solved or the player gives up
-   */
-  const updateGameStats = useCallback((
-    isSolved: boolean, 
-    moveCount: number,
-    botScore?: number,
-    puzzleDateString?: string
-  ) => {
-    const currentDate = dateKeyForToday();
-    const currentStats = { ...gameStats };
-    
-    // Update today's stats
-    currentStats.todayStats.movesUsed = moveCount;
-    
-    // Update best score if this is better than previous best
-    if (isSolved && (currentStats.todayStats.bestScore === null || 
-                    moveCount < currentStats.todayStats.bestScore)) {
-      currentStats.todayStats.bestScore = moveCount;
-    }
-    
-    // Store move in dailyScores if solved
-    if (isSolved) {
-      currentStats.allTimeStats.dailyScores[currentDate] = moveCount;
-      
-      // Handle streak updates
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayKey = yesterday.toISOString().split('T')[0];
-      
-      // Check if we already updated the streak today
-      const streakKey = `streak-updated-${currentDate}`;
-      const streakAlreadyUpdated = localStorage.getItem(streakKey) === 'true';
-      
-      if (!streakAlreadyUpdated) {
-        // Ensure streak is initialized
-        if (!currentStats.allTimeStats.streak || isNaN(currentStats.allTimeStats.streak)) {
-          currentStats.allTimeStats.streak = 0;
-        }
-        
-        // If yesterday is in our records, increment streak, otherwise reset to 1
-        if (currentStats.allTimeStats.dailyScores[yesterdayKey] !== undefined) {
-          currentStats.allTimeStats.streak += 1;
-        } else {
-          currentStats.allTimeStats.streak = 1;
-        }
-        
-        // Mark that we've updated the streak for today
-        localStorage.setItem(streakKey, 'true');
-        
-        console.log('Updated streak:', {
-          currentDate,
-          yesterdayKey,
-          hasYesterday: currentStats.allTimeStats.dailyScores[yesterdayKey] !== undefined,
-          newStreak: currentStats.allTimeStats.streak
-        });
-      }
-    }
-    
-    // Check if goal was achieved (user beat or tied bot score)
-    if (isSolved && botScore !== undefined) {
-      // Use the provided puzzle date string, or fall back to current date
-      const puzzleDate = puzzleDateString || currentDate;
-      updateGoalAchieved(moveCount, botScore, puzzleDate);
-    }
-    
-    // Save updated stats
-    saveGameStats(currentStats);
-    setGameStats(currentStats);
-    
-    return currentStats;
-  }, [gameStats, updateGoalAchieved]);
-  
-  /**
-   * Generate shareable text for game statistics
+   * Generate shareable text based on the current gameStats state.
+   * This remains client-side as it's purely for display/sharing formatting.
    */
   const generateShareableStats = useCallback(() => {
+    // Keep the existing logic from useGameStats.ts for formatting share text
+    // based on the current `gameStats` state.
     const { todayStats, allTimeStats } = gameStats;
-    
-    // Safety checks for NaN values
-    const safeTotalMoves = !allTimeStats.totalMoves || isNaN(allTimeStats.totalMoves) ? 0 : allTimeStats.totalMoves;
-    const safeDaysPlayed = !allTimeStats.daysPlayed || isNaN(allTimeStats.daysPlayed) ? 0 : allTimeStats.daysPlayed;
-    const safeGoalAchieved = !allTimeStats.goalAchieved || isNaN(allTimeStats.goalAchieved) ? 0 : allTimeStats.goalAchieved;
-    const safeStreak = !allTimeStats.streak || isNaN(allTimeStats.streak) ? 0 : allTimeStats.streak;
-    
+    const safeNum = (val: number | null | undefined) => (typeof val === 'number' && !isNaN(val) ? val : 0);
+
     let shareText = `🔒 Color Lock Stats 🔒\n\n`;
     shareText += `Today's Game:\n`;
-    shareText += `Best Score: ${todayStats.bestScore !== null ? todayStats.bestScore : 'n/a'}\n`;
-    shareText += `Times Played: ${todayStats.timesPlayed}\n\n`;
-    
+    // Use bestScoresByDay for today's best score if available, otherwise fallback
+    const todayKey = dateKeyForToday();
+    const bestToday = allTimeStats?.bestScoresByDay?.[todayKey] ?? null;
+    shareText += `Best Score: ${bestToday !== null ? bestToday : 'N/A'}\n`;
+    // Use attemptsPerDay for today's plays if available
+    const attemptsToday = allTimeStats?.attemptsPerDay?.[todayKey] ?? 0;
+    shareText += `Times Played Today: ${attemptsToday}\n\n`;
+
     shareText += `All-time Stats:\n`;
-    shareText += `Streak: ${safeStreak}\n`;
-    shareText += `Days Played: ${safeDaysPlayed}\n`;
-    shareText += `Goals Achieved: ${safeGoalAchieved}\n`;
-    shareText += `Total Moves: ${safeTotalMoves}\n\n`;
-    
-    shareText += `Play at: https://colorlock.game`;
-    
+    shareText += `Current Streak: ${safeNum(allTimeStats?.currentStreak)}\n`;
+    shareText += `Longest Streak: ${safeNum(allTimeStats?.longestStreak)}\n`;
+    shareText += `Days Played: ${safeNum(allTimeStats?.playedDays?.length)}\n`; // Use length of array
+    shareText += `Goals Achieved: ${safeNum(allTimeStats?.goalAchievedDays?.length)}\n`; // Use length of array
+    shareText += `Total Wins: ${safeNum(allTimeStats?.totalWins)}\n`;
+    shareText += `Total Games Played: ${safeNum(allTimeStats?.totalGamesPlayed)}\n`;
+    shareText += `Total Moves: ${safeNum(allTimeStats?.totalMovesUsed)}\n`;
+    shareText += `Total Hints: ${safeNum(allTimeStats?.totalHintsUsed)}\n\n`;
+    shareText += `First Try Streak: ${safeNum(allTimeStats?.firstTryStreak)}\n`;
+    shareText += `Longest First Try: ${safeNum(allTimeStats?.longestFirstTryStreak)}\n\n`;
+
+    shareText += `Play at: ${window.location.origin}`;
+
     return shareText;
   }, [gameStats]);
-  
+
+  // Effect to load initial stats on mount (runs only once)
+  useEffect(() => {
+    loadInitialStats();
+    // Note: A subsequent fetch might be triggered by GameContext after puzzle load
+  }, [loadInitialStats]);
+
   return {
     gameStats,
-    updateGameStats,
-    incrementTimesPlayed,
-    updateTotalMoves,
+    isLoadingStats,
+    setIsLoadingStats, // Expose setter for GameContext
+    loadInitialStats, // Expose loader if needed elsewhere
+    setFreshStats,    // Expose setter for GameContext
     generateShareableStats
   };
 } 

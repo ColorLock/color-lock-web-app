@@ -2,142 +2,88 @@ import { DailyPuzzle } from '../types';
 import { GameStatistics, defaultStats } from '../types/stats';
 import { AppSettings } from '../types/settings';
 
+const STATS_STORAGE_KEY = 'colorLockStats'; // Use a consistent key
+const LAST_PLAYED_DATE_KEY = 'lastPlayedDate'; // Keep for client-side new day check
+
+// Constants for tracking abandoned moves
+export const PENDING_MOVES_PUZZLE_ID_KEY = 'pendingMovesPuzzleId';
+export const PENDING_MOVES_COUNT_KEY = 'pendingMovesCount';
+export const PENDING_MOVES_TIMESTAMP_KEY = 'pendingMovesTimestamp';
+
 /**
  * Load a daily puzzle from localStorage if it exists
+ * (Keep this as is for saving game progress within a day)
  */
 export function loadDailyPuzzleIfExists(key: string): DailyPuzzle | null {
   const savedPuzzleStr = localStorage.getItem(`puzzle_${key}`);
   if (!savedPuzzleStr) return null;
-  
+
   try {
     const puzzleData = JSON.parse(savedPuzzleStr);
-    // Convert the lockedCells array back to a Set
-    if (puzzleData && puzzleData.lockedCells) {
+    if (puzzleData && puzzleData.lockedCells && Array.isArray(puzzleData.lockedCells)) {
       puzzleData.lockedCells = new Set(puzzleData.lockedCells);
     }
-    return puzzleData;
+    // Add basic validation if needed
+    if (puzzleData && puzzleData.grid && puzzleData.targetColor) {
+        return puzzleData as DailyPuzzle;
+    }
+    return null;
   } catch (e) {
     console.error('Failed to parse saved puzzle', e);
+    localStorage.removeItem(`puzzle_${key}`); // Clear invalid data
     return null;
   }
 }
 
 /**
  * Save a daily puzzle to localStorage
+ * (Keep this as is for saving game progress within a day)
  */
 export function saveDailyPuzzle(puzzle: DailyPuzzle) {
-  // Convert Set to array for serialization
-  const serializedPuzzle = {
-    ...puzzle,
-    lockedCells: [...puzzle.lockedCells]
-  };
-  
   try {
-    localStorage.setItem(`puzzle_${puzzle.dateString}`, JSON.stringify(serializedPuzzle));
+      // Convert Set to array for serialization
+      const serializedPuzzle = {
+        ...puzzle,
+        lockedCells: Array.from(puzzle.lockedCells) // Convert Set to Array
+      };
+      localStorage.setItem(`puzzle_${puzzle.dateString}`, JSON.stringify(serializedPuzzle));
   } catch (e) {
-    console.error('Failed to save puzzle to localStorage', e);
+      console.error('Failed to save puzzle to localStorage', e);
+      // Consider clearing space if quota exceeded
   }
 }
 
 /**
- * Load game statistics from localStorage
+ * Load game statistics from localStorage (used for initial state / cache)
  */
-export function loadGameStats(defaultStats: GameStatistics): GameStatistics {
-  const savedStats = localStorage.getItem('colorLockStats');
+export function loadGameStats(fallbackStats: GameStatistics): GameStatistics {
+  const savedStats = localStorage.getItem(STATS_STORAGE_KEY);
   if (savedStats) {
     try {
       const parsedStats = JSON.parse(savedStats);
-      
-      // Validate and fix the stats if necessary
-      return sanitizeGameStats(parsedStats, defaultStats);
+      // Merge with defaults to ensure all fields exist, prioritizing saved data
+      return mergeWithDefaults(parsedStats, fallbackStats);
     } catch (e) {
-      console.error('Failed to parse saved stats', e);
-      return { ...defaultStats };
+      console.error('Failed to parse saved stats, using defaults.', e);
+      return { ...fallbackStats }; // Return a fresh copy of defaults
     }
   }
-  return { ...defaultStats };
+  return { ...fallbackStats }; // Return a fresh copy of defaults
 }
 
 /**
- * Sanitize game statistics to ensure all values are valid
- */
-function sanitizeGameStats(stats: GameStatistics, defaultStats: GameStatistics): GameStatistics {
-  // Create a copy of the stats
-  const sanitizedStats = { ...stats };
-  
-  // Ensure todayStats has valid values
-  if (!sanitizedStats.todayStats) {
-    sanitizedStats.todayStats = { ...defaultStats.todayStats };
-  }
-  
-  // Ensure timesPlayed is a valid number
-  if (sanitizedStats.todayStats.timesPlayed === undefined || 
-      sanitizedStats.todayStats.timesPlayed === null || 
-      isNaN(sanitizedStats.todayStats.timesPlayed)) {
-    sanitizedStats.todayStats.timesPlayed = 0;
-  }
-  
-  // Ensure allTimeStats has valid values
-  if (!sanitizedStats.allTimeStats) {
-    sanitizedStats.allTimeStats = { ...defaultStats.allTimeStats };
-  }
-  
-  // Ensure streak is a valid number
-  if (sanitizedStats.allTimeStats.streak === undefined || 
-      sanitizedStats.allTimeStats.streak === null || 
-      isNaN(sanitizedStats.allTimeStats.streak)) {
-    sanitizedStats.allTimeStats.streak = 0;
-  }
-  
-  // Ensure daysPlayed is a valid number
-  if (sanitizedStats.allTimeStats.daysPlayed === undefined || 
-      sanitizedStats.allTimeStats.daysPlayed === null || 
-      isNaN(sanitizedStats.allTimeStats.daysPlayed)) {
-    sanitizedStats.allTimeStats.daysPlayed = 0;
-  }
-  
-  // Make sure lastPlayedDate is set for proper day tracking
-  const currentDate = new Date().toISOString().split('T')[0];
-  if (!localStorage.getItem('lastPlayedDate')) {
-    localStorage.setItem('lastPlayedDate', currentDate);
-  }
-  
-  // Ensure goalAchieved is a valid number
-  if (sanitizedStats.allTimeStats.goalAchieved === undefined || 
-      sanitizedStats.allTimeStats.goalAchieved === null || 
-      isNaN(sanitizedStats.allTimeStats.goalAchieved)) {
-    sanitizedStats.allTimeStats.goalAchieved = 0;
-  }
-  
-  // Ensure totalMoves is a valid number
-  if (sanitizedStats.allTimeStats.totalMoves === undefined || 
-      sanitizedStats.allTimeStats.totalMoves === null || 
-      isNaN(sanitizedStats.allTimeStats.totalMoves)) {
-    sanitizedStats.allTimeStats.totalMoves = 0;
-  }
-  
-  // Ensure gamesPlayed is a valid number
-  if (sanitizedStats.allTimeStats.gamesPlayed === undefined || 
-      sanitizedStats.allTimeStats.gamesPlayed === null || 
-      isNaN(sanitizedStats.allTimeStats.gamesPlayed)) {
-    sanitizedStats.allTimeStats.gamesPlayed = 0;
-  }
-  
-  // Ensure dailyScores is valid
-  if (!sanitizedStats.allTimeStats.dailyScores) {
-    sanitizedStats.allTimeStats.dailyScores = {};
-  }
-  
-  return sanitizedStats;
-}
-
-/**
- * Save game statistics to localStorage
+ * Save game statistics to localStorage (used as a cache)
  */
 export function saveGameStats(stats: GameStatistics): void {
-  // Sanitize the stats before saving
-  const sanitizedStats = sanitizeGameStats(stats, defaultStats);
-  localStorage.setItem('colorLockStats', JSON.stringify(sanitizedStats));
+  try {
+      // Ensure stats object is valid before saving
+      const statsToSave = mergeWithDefaults(stats, defaultStats);
+      localStorage.setItem(STATS_STORAGE_KEY, JSON.stringify(statsToSave));
+      // Update last played date marker when saving stats
+      localStorage.setItem(LAST_PLAYED_DATE_KEY, new Date().toISOString().split('T')[0]);
+  } catch (e) {
+      console.error('Failed to save stats to localStorage', e);
+  }
 }
 
 /**
@@ -147,9 +93,11 @@ export function loadSettings(defaultSettings: AppSettings): AppSettings {
   const savedSettings = localStorage.getItem('colorLockSettings');
   if (savedSettings) {
     try {
-      return JSON.parse(savedSettings);
+      const parsed = JSON.parse(savedSettings);
+       // Merge with defaults to ensure all keys are present
+      return { ...defaultSettings, ...parsed };
     } catch (e) {
-      console.error('Failed to parse saved settings', e);
+      console.error('Failed to parse saved settings, using defaults.', e);
       return { ...defaultSettings };
     }
   }
@@ -160,5 +108,32 @@ export function loadSettings(defaultSettings: AppSettings): AppSettings {
  * Save settings to localStorage
  */
 export function saveSettings(settings: AppSettings): void {
-  localStorage.setItem('colorLockSettings', JSON.stringify(settings));
+   try {
+       localStorage.setItem('colorLockSettings', JSON.stringify(settings));
+   } catch (e) {
+       console.error('Failed to save settings to localStorage', e);
+   }
+}
+
+// Helper function to merge loaded stats with defaults, ensuring all keys exist
+function mergeWithDefaults(loaded: any, defaults: GameStatistics): GameStatistics {
+    const merged: GameStatistics = JSON.parse(JSON.stringify(defaults)); // Deep clone defaults
+
+    // Merge todayStats
+    if (loaded.todayStats) {
+        merged.todayStats.bestScore = loaded.todayStats.bestScore ?? defaults.todayStats.bestScore;
+        merged.todayStats.timesPlayed = loaded.todayStats.timesPlayed ?? defaults.todayStats.timesPlayed;
+    }
+
+    // Merge allTimeStats
+    if (loaded.allTimeStats) {
+        for (const key in defaults.allTimeStats) {
+            if (Object.prototype.hasOwnProperty.call(defaults.allTimeStats, key)) {
+                const k = key as keyof GameStatistics['allTimeStats'];
+                (merged.allTimeStats as any)[k] = loaded.allTimeStats[k] ?? (defaults.allTimeStats as any)[k];
+            }
+        }
+    }
+
+    return merged;
 } 

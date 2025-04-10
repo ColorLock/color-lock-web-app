@@ -90,7 +90,8 @@ const GameContainer = () => {
     showAutocompleteModal,
     setShowAutocompleteModal,
     handleAutoComplete,
-    navigateToHome
+    navigateToHome,
+    isLoadingStats
   } = useGameContext();
 
   // Tutorial context
@@ -445,6 +446,7 @@ const GameContainer = () => {
         onClose={() => setShowStats(false)}
         stats={gameStats}
         onShareStats={shareGameStats}
+        isLoading={isLoadingStats}
       />
 
       {/* Error display */}

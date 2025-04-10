@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useContext } from 'react';
 import ReactConfetti from 'react-confetti';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faXmark, faCopy, faEnvelope, faShare, faShareAlt } from '@fortawesome/free-solid-svg-icons';
+import { faXmark, faCopy, faEnvelope, faShare } from '@fortawesome/free-solid-svg-icons';
 import { faTwitter, faFacebookF } from '@fortawesome/free-brands-svg-icons';
 import { DailyPuzzle, TileColor } from '../types';
 import { tileColorToName } from '../utils/shareUtils';
 import { SettingsContext } from '../App';
 import { useGameContext } from '../contexts/GameContext';
 import { useTutorialContext } from '../contexts/TutorialContext';
+import { dateKeyForToday } from '../utils/dateUtils';
+import { defaultStats } from '../types/stats';
 
 interface WinModalProps {
   puzzle: DailyPuzzle;
@@ -47,15 +49,25 @@ const WinModal: React.FC<WinModalProps> = ({
   // Get game context to access stats
   const { gameStats } = useGameContext();
 
+  // Get settings for sound playback
+  const settings = useContext(SettingsContext);
+  const soundEnabled = settings?.enableSoundEffects || false;
+
+  // Use defaultStats if gameStats is somehow null/undefined
+  const currentStats = gameStats || defaultStats;
+  const allTimeStats = currentStats.allTimeStats || defaultStats.allTimeStats;
+  
+  // Get today's date key
+  const todayKey = dateKeyForToday();
+  
+  // Get attempts for today from allTimeStats
+  const attemptsToday = allTimeStats.attemptsPerDay?.[todayKey] ?? 1; // Default to 1 if not found
+
   // Check if Web Share API is supported
   useEffect(() => {
     setIsWebShareSupported(typeof navigator.share === 'function');
   }, []);
 
-  // Get settings for sound playback
-  const settings = useContext(SettingsContext);
-  const soundEnabled = settings?.enableSoundEffects || false;
-  
   // Play celebration sound once
   useEffect(() => {
     if (soundEnabled) {
@@ -97,15 +109,12 @@ const WinModal: React.FC<WinModalProps> = ({
       const mins = Math.floor((secs % 3600) / 60);
       const s = secs % 60;
       setTimeLeft(`${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
-      if (secs <= 0) {
-        onTryAgain();
-      }
     };
 
     updateTime();
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
-  }, [onTryAgain]);
+  }, []);
 
   // Get color name for display
   const colorName = tileColorToName(puzzle.targetColor);
@@ -210,7 +219,7 @@ ${boardRows}`;
   };
 
   // Handle try again button
-  const handleTryAgain = () => {
+  const handleTryAgainOrContinue = () => {
     if (isTutorialMode) {
       // In tutorial mode, end the tutorial
       endTutorial();
@@ -227,8 +236,10 @@ ${boardRows}`;
         <ReactConfetti
           width={windowDimensions.width}
           height={windowDimensions.height}
-          recycle={true}
-          numberOfPieces={250}
+          recycle={false}
+          numberOfPieces={350}
+          gravity={0.15}
+          initialVelocityY={20}
           colors={['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff']}
         />
       )}
@@ -247,22 +258,24 @@ ${boardRows}`;
             <div className="stat-label">Bot Moves</div>
           </div>
           <div className="stat-item">
-            <div className="stat-value">{gameStats.todayStats.timesPlayed}</div>
+            <div className="stat-value">{attemptsToday}</div>
             <div className="stat-label">Times Played</div>
           </div>
         </div>
         
-        <div className="next-puzzle-timer">
-          <p>New Puzzle in:</p>
-          <div className="timer">
-            {timeLeft.split(':').map((unit, index) => (
-              <React.Fragment key={index}>
-                {index > 0 && <span className="time-separator">:</span>}
-                <span className="time-unit">{unit}</span>
-              </React.Fragment>
-            ))}
+        {!isTutorialMode && (
+          <div className="next-puzzle-timer">
+            <p>New Puzzle in:</p>
+            <div className="timer">
+              {timeLeft.split(':').map((unit, index) => (
+                <React.Fragment key={index}>
+                  {index > 0 && <span className="time-separator">:</span>}
+                  <span className="time-unit">{unit}</span>
+                </React.Fragment>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
         
         <div className="share-section">
           <p>Share your results:</p>
@@ -311,9 +324,9 @@ ${boardRows}`;
         <div className="win-actions">
           <button 
             className="try-again-button"
-            onClick={handleTryAgain}
+            onClick={handleTryAgainOrContinue}
           >
-            {isTutorialMode ? "Take me to today's game" : "Try Again"}
+            {isTutorialMode ? "Play Today's Puzzle" : "Play Again"}
           </button>
           
           <button className="close-button" onClick={onClose}>Close</button>

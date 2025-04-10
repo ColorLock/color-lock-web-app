@@ -1,11 +1,17 @@
 /**
  * Returns the date key for today in YYYY-MM-DD format
+ * Uses local date, not UTC date
  */
 export function dateKeyForToday(): string {
   const today = new Date();
+  // Using local date components (not UTC)
   const year = today.getFullYear();
   const month = String(today.getMonth() + 1).padStart(2, '0');
   const day = String(today.getDate()).padStart(2, '0');
+  
+  // For debugging
+  console.log(`Generated date key using local time: ${year}-${month}-${day}`);
+  
   return `${year}-${month}-${day}`;
 }
 

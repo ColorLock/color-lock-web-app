@@ -1,0 +1,31 @@
+attemptsPerDay: This is the total amount of games the user plays each day. The count should increase when the user finishes a game, loses a game, or tries again
+
+bestScoresByDay: This is the best score the user achieved in a single day. If the user posts their first score, it becomes their best score that day. If they achieve a lower score, than that score replaces the old best score for that day
+
+currentStreak: This counts how many days in a row the user has tied or beaten the goal score, which is the algoScore in the puzzles collection. It the user does not beat the bot in a given day, the next day this number resets to 0.
+
+goalAchievedDays: If the user ties or gets lower than the algo score, the current day is added to this list
+
+hintUsageByDay: This is a count for the amount of hints the user uses each day.
+
+lastStreakDate: This is the most recent date that continued the users streak of beating the algoScore
+
+longestStreak: This is the longest string of days the user ever had beating the algoScore. If the user achieves a higher number with their currentStreak this number is replaced by the higher number
+
+playedDays: This is every day the user starts a game by making a move.
+
+totalGamesPlayed: This is every time the user completes a game, be that wins, loses, or starts over early
+
+totalHintsUsed: This is a counter for the total amount of hints used by the player
+
+totalMovesUsed: This is a counter for the total amount of moves by a player. A move is any time they change a tile color.
+
+totalWins: This is a counter for the total amount of times the user has tied or beaten the algoScore
+
+winsPerDay: This is the total number of times the user tied or beat the bot in a day
+
+firstTryStreak: This is the current number of days in a row that the user beat the bot on their first attempt. For this to be valid the user must tie or beat the algoScore on their first attempt.
+
+longestFirstTryStreak: This is the users longest number of days in a row where they tied or beat the algoScore
+
+attemptsToAchieveBotScore: This is the amount of attempts it took the user to tie or beat the bot score in a given day. 

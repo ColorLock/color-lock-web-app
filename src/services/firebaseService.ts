@@ -1,6 +1,7 @@
 import { initializeApp, FirebaseApp } from 'firebase/app';
-import { getAuth, signInAnonymously, User, Auth } from 'firebase/auth';
-import { getFirestore, doc, getDoc, Firestore } from 'firebase/firestore';
+import { getAuth, signInAnonymously, User, Auth, connectAuthEmulator } from 'firebase/auth';
+import { getFirestore, Firestore, connectFirestoreEmulator } from 'firebase/firestore';
+import { getFunctions, connectFunctionsEmulator, Functions } from 'firebase/functions';
 // Import AppCheck types but we'll make it optional
 import { AppCheck } from 'firebase/app-check';
 import { FirestorePuzzleData } from '../types';
@@ -11,6 +12,14 @@ import firebaseConfig from '../env/firebaseConfig';
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 let db: Firestore | null = null;
+let functions: Functions | null = null;
+
+// Check if we're in development mode
+const isDevelopment = process.env.NODE_ENV === 'development' || 
+                      window.location.hostname === 'localhost';
+
+// Flag to enable/disable emulator usage
+const useEmulators = isDevelopment;
 
 try {
   // Initialize Firebase app
@@ -22,16 +31,37 @@ try {
   // Only after Auth is initialized, initialize Firestore
   db = getFirestore(app);
   
-  console.log("Firebase initialized successfully");
+  // Initialize Functions
+  functions = getFunctions(app);
+  
+  // Connect to emulators if in development
+  if (useEmulators) {
+    console.log("Connecting to Firebase emulators");
+    connectAuthEmulator(auth, "http://localhost:9099");
+    connectFirestoreEmulator(db, "localhost", 8080);
+    
+    // Ensure Functions connection uses correct project and region for emulator
+    const projectId = firebaseConfig.projectId || 'color-lock-prod';
+    const region = 'us-central1'; // Match your function deployment region
+    
+    // Re-initialize functions with the correct region for consistency
+    functions = getFunctions(app, region);
+    // Connect to emulator
+    connectFunctionsEmulator(functions, "localhost", 5001);
+    console.log(`Functions emulator connected: http://localhost:5001 for project ${projectId} in region ${region}`);
+  }
+  
+  console.log("Firebase initialized successfully", isDevelopment ? "(development mode)" : "(production mode)");
 } catch (error) {
   console.error("Firebase initialization error:", error);
   // Create placeholders if initialization fails
   app = null;
   auth = null;
   db = null;
+  functions = null;
 }
 
-export { auth, db };
+export { auth, db, functions, useEmulators };
 
 // Function to ensure user is authenticated with better error handling
 export const ensureAuthenticated = async (): Promise<User | null> => {
@@ -46,20 +76,50 @@ export const ensureAuthenticated = async (): Promise<User | null> => {
     
     if (!auth.currentUser) {
       console.log("No current user, attempting anonymous sign-in");
-      try {
-        const userCredential = await signInAnonymously(auth);
+      
+      // Add timeout protection to anonymous sign-in
+      const signInPromise = signInAnonymously(auth).then(userCredential => {
         console.log("Anonymous sign-in successful");
         return userCredential.user;
+      });
+      
+      // Create a timeout promise
+      const timeoutPromise = new Promise<null>((resolve, reject) => {
+        setTimeout(() => {
+          console.error("Anonymous sign-in timed out after 8 seconds");
+          reject(new Error("Authentication timed out"));
+        }, 8000);
+      });
+      
+      try {
+        // Race the sign-in against the timeout
+        const user = await Promise.race([signInPromise, timeoutPromise]);
+        return user;
       } catch (error) {
         console.error("Anonymous authentication error:", error);
+        
+        // Check if there's a user despite the error (race condition)
+        if (auth.currentUser) {
+          console.warn("Found user despite authentication error");
+          return auth.currentUser;
+        }
+        
         // Return null instead of throwing to allow graceful fallback
         return null;
       }
     }
+    
     console.log("User already authenticated");
     return auth.currentUser;
   } catch (error) {
     console.error("Error in ensureAuthenticated:", error);
+    
+    // Even if we hit an error, check if we have a user (race condition)
+    if (auth?.currentUser) {
+      console.warn("Found user despite error in ensureAuthenticated");
+      return auth.currentUser;
+    }
+    
     return null;
   }
 };
@@ -71,126 +131,105 @@ export const fetchPuzzleFromCloudFunction = async (date: string): Promise<Firest
   // Ensure authentication to get ID token
   const user = await ensureAuthenticated();
   if (!user) {
+    console.error("Authentication failed - no user available");
     throw new Error("Authentication required to call Cloud Function");
   }
   
-  // Get ID token for authorization
-  const idToken = await user.getIdToken();
+  // Get ID token for authorization with timeout protection
+  let idToken: string;
+  try {
+    const tokenPromise = user.getIdToken();
+    const timeoutPromise = new Promise<never>((_, reject) => 
+      setTimeout(() => reject(new Error("Getting ID token timed out after 5 seconds")), 5000)
+    );
+    
+    idToken = await Promise.race([tokenPromise, timeoutPromise]);
+  } catch (tokenError) {
+    console.error("Failed to get ID token:", tokenError);
+    
+    // In development/emulator environment, allow an empty token as a fallback
+    if (process.env.NODE_ENV === 'development' || 
+        window.location.hostname === 'localhost' || 
+        window.location.hostname === '127.0.0.1') {
+      console.warn("In development environment - proceeding with empty token");
+      idToken = "emulator-bypass-token";
+    } else {
+      throw new Error("Failed to get authentication token");
+    }
+  }
   
-  // Configure the cloud function URL
-  const isLocalDev = window.location.hostname === 'localhost';
-  
-  // Use the proxy URL in development, direct URL in production
-  let functionUrl = isLocalDev
-    ? '/api/fetch_puzzle' // This is handled by the Vite proxy
-    : 'https://us-central1-color-lock-prod.cloudfunctions.net/fetch_puzzle';
+  // Determine the correct function URL
+  const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  // IMPORTANT: Ensure project ID and region match emulator/deployment
+  const projectId = firebaseConfig.projectId || 'color-lock-prod'; // Get from config or default
+  const region = 'us-central1'; // Assuming us-central1
+
+  let functionUrl: string;
+  if (isLocalDev && useEmulators) {
+    // Use direct emulator URL when running locally with emulators
+    // Ensure the port (5001) matches your firebase.json emulator config
+    functionUrl = `http://localhost:5001/${projectId}/${region}/fetchPuzzle`;
+    console.log(`Using Emulator URL: ${functionUrl}`);
+  } else {
+    // Use production URL otherwise
+    functionUrl = `https://${region}-${projectId}.cloudfunctions.net/fetchPuzzle`;
+    console.log(`Using Production URL: ${functionUrl}`);
+  }
   
   try {
+    // Prepare headers
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+    
+    // Add authorization header if we have a token
+    if (idToken) {
+      headers['Authorization'] = `Bearer ${idToken}`;
+    }
+    
+    // For emulator use, add X-Emulator-User-Id header as fallback
+    if (isLocalDev && useEmulators && user.uid) {
+      headers['X-Emulator-User-Id'] = user.uid;
+    }
+    
     // Call the HTTP function directly
     const response = await fetch(functionUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${idToken}` // Authentication token
-      },
+      headers,
       body: JSON.stringify({ date })
     });
     
     if (!response.ok) {
-      console.error(`HTTP error: ${response.status}`);
-      throw new Error(`Failed to fetch puzzle: ${response.statusText}`);
+      const errorBody = await response.text();
+      console.error(`HTTP error: ${response.status} - ${response.statusText}`, errorBody);
+      throw new Error(`Failed to fetch puzzle (${response.status}): ${response.statusText}`);
     }
     
     const data = await response.json();
     
     if (data.success) {
       console.log("Successfully retrieved puzzle from Cloud Function");
+      // Perform basic validation on received data
+      if (!data.data || !data.data.algoScore || !data.data.targetColor || !data.data.states || !Array.isArray(data.data.states) || data.data.states.length === 0) {
+        console.error("Invalid data format received from Cloud Function:", data.data);
+        throw new Error("Invalid puzzle data format received from function.");
+      }
       return data.data as FirestorePuzzleData;
     } else {
       console.error("Error from Cloud Function:", data.error);
-      throw new Error(`Cloud Function error: ${data.error}`);
+      throw new Error(`Cloud Function error: ${data.error || 'Unknown error'}`);
     }
   } catch (error) {
-    console.error("Error calling Cloud Function:", error);
+    console.error("Error calling fetchPuzzle Cloud Function:", error);
+    // Re-throw the error to be handled by the caller (e.g., GameContext)
     throw error;
   }
 };
 
-// Function to fetch puzzle from Firestore with better fallback
-export const fetchPuzzleFromFirestore = async (date: string): Promise<FirestorePuzzleData> => {
-  console.log(`Attempting to fetch puzzle for date: ${date}`);
-  
-  try {
-    // Try to authenticate, but continue even if it fails
-    const user = await ensureAuthenticated();
-    console.log("Authentication status:", user ? "Authenticated" : "Not authenticated");
-    
-    if (user && db) { // Check that db is not null
-      try {
-        console.log("Attempting to fetch puzzle from Firestore");
-        const puzzleRef = doc(db, 'puzzles', date);
-        const puzzleSnap = await getDoc(puzzleRef);
-        
-        if (puzzleSnap.exists()) {
-          console.log("Puzzle found in Firestore");
-          const data = puzzleSnap.data();
-          
-          // Log the raw data to see its structure
-          console.log("Raw Firestore data:", data);
-          
-          // Validate the data has required properties with updated structure
-          if (!data.algoScore || !data.targetColor || !data.states || !Array.isArray(data.states)) {
-            console.error("Missing required fields:", { 
-              hasAlgoScore: !!data.algoScore, 
-              hasTargetColor: !!data.targetColor, 
-              hasStates: !!data.states,
-              statesIsArray: Array.isArray(data.states)
-            });
-            throw new Error("Invalid puzzle data format");
-          }
-          
-          // Additional validation for states
-          if (data.states.length === 0) {
-            console.error("States array is empty");
-            throw new Error("Invalid puzzle data format - empty states");
-          }
-          
-          return data as FirestorePuzzleData;
-        } else {
-          console.log("No puzzle found in Firestore for date:", date);
-          throw new Error("No puzzle found for date: " + date);
-        }
-      } catch (firestoreError) {
-        console.error("Firestore access error:", firestoreError);
-        throw new Error("Firestore access failed, falling back to local generation");
-      }
-    } else {
-      // Handle the case where db or auth is null
-      console.error("Firebase not initialized or user not authenticated");
-      throw new Error("Firebase not initialized or authentication failed");
-    }
-    
-    // If we get here, we need to fall back to local generation
-    console.log("Falling back to local puzzle generation");
-    throw new Error("Firestore access failed, falling back to local generation");
-    
-  } catch (error) {
-    console.error("Error in fetchPuzzleFromFirestore:", error);
-    throw error;
-  }
-};
-
-// Main puzzle fetch function - tries cloud function first, then falls back to direct Firestore
+// Main puzzle fetch function - now ONLY uses cloud function
 export const fetchPuzzle = async (date: string): Promise<FirestorePuzzleData> => {
-  try {
-    // First try the Cloud Function
-    return await fetchPuzzleFromCloudFunction(date);
-  } catch (error) {
-    console.warn("Cloud Function fetch failed, falling back to direct Firestore:", error);
-    
-    // Fall back to directly accessing Firestore
-    return await fetchPuzzleFromFirestore(date);
-  }
+  // Always use the Cloud Function
+  return await fetchPuzzleFromCloudFunction(date);
 };
 
 export default app; 

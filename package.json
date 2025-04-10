@@ -26,7 +26,11 @@
     "start": "nx serve",
     "build": "nx build",
     "test": "nx test",
-    "dev": "nx serve"
+    "dev": "nx serve",
+    "emulators": "firebase emulators:start",
+    "seed": "node scripts/seed-emulator.js",
+    "local-test": "chmod +x scripts/run-local-test.sh && scripts/run-local-test.sh",
+    "cursor-dev": "chmod +x scripts/cursor-emulator.sh && scripts/cursor-emulator.sh"
   },
   "eslintConfig": {
     "extends": [
@@ -54,6 +58,8 @@
     "@vitejs/plugin-react": "^4.3.4",
     "@vitest/ui": "^3.0.0",
     "eslint-config-react-app": "^7.0.1",
+    "firebase-admin": "^13.2.0",
+    "firebase-functions-test": "^3.4.1",
     "jest-watch-typeahead": "^2.2.2",
     "jiti": "2.4.2",
     "nx": "20.6.0",

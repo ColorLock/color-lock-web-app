@@ -1,0 +1,50 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Start Firebase Emulators",
+            "type": "shell",
+            "command": "firebase emulators:start --only auth,functions,firestore --project color-lock-prod --inspect-functions",
+            "isBackground": true,
+            "problemMatcher": [
+                {
+                    "pattern": [
+                        {
+                            "regexp": ".",
+                            "file": 1,
+                            "location": 2,
+                            "message": 3
+                        }
+                    ],
+                    "background": {
+                        "activeOnStart": true,
+                        "beginsPattern": "Firebase emulators started",
+                        "endsPattern": "All emulators ready"
+                    }
+                }
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+        {
+            "label": "Stop Firebase Emulators",
+            "type": "shell",
+            "command": "pkill -f 'firebase emulators' || true; pkill -f 'java.*emulator' || true",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+        {
+            "label": "Run Function Tests",
+            "type": "shell",
+            "command": "./scripts/run-emulator-with-tests.sh",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        }
+    ]
+} 

@@ -29,14 +29,13 @@ const resetDailyStats = (stats: GameStatistics): GameStatistics => {
   // Store yesterday's best score in dailyScores if it exists
   if (stats.todayStats.bestScore !== null) {
     const yesterday = localStorage.getItem(LAST_PLAYED_DATE_KEY);
-    if (yesterday) {
+    if (yesterday && stats.allTimeStats.dailyScores) {
       stats.allTimeStats.dailyScores[yesterday] = stats.todayStats.bestScore;
     }
   }
   
   // Reset today's stats
   stats.todayStats = {
-    movesUsed: 0,
     bestScore: null,
     timesPlayed: 0
   };
@@ -82,15 +81,16 @@ export const saveStats = (stats: GameStatistics): void => {
  */
 export const updateBestScore = (score: number): void => {
   const stats = getStats();
+  const currentDate = getCurrentDate();
   
   // Update today's best score if it's null or the new score is better (lower)
   if (stats.todayStats.bestScore === null || score < stats.todayStats.bestScore) {
     stats.todayStats.bestScore = score;
   }
   
-  // Update all-time best score if it's null or the new score is better (lower)
-  if (stats.allTimeStats.bestScoreEver === null || score < stats.allTimeStats.bestScoreEver) {
-    stats.allTimeStats.bestScoreEver = score;
+  // Update all-time best score for today if it's not set or the new score is better (lower)
+  if (!stats.allTimeStats.bestScoresByDay[currentDate] || score < stats.allTimeStats.bestScoresByDay[currentDate]) {
+    stats.allTimeStats.bestScoresByDay[currentDate] = score;
   }
   
   saveStats(stats);
@@ -102,7 +102,7 @@ export const updateBestScore = (score: number): void => {
 export const incrementTimesPlayed = (): void => {
   const stats = getStats();
   stats.todayStats.timesPlayed += 1;
-  stats.allTimeStats.gamesPlayed += 1;
+  stats.allTimeStats.totalGamesPlayed += 1;
   saveStats(stats);
 };
 
@@ -111,47 +111,59 @@ export const incrementTimesPlayed = (): void => {
  */
 export const updateMovesUsed = (moves: number): void => {
   const stats = getStats();
-  stats.todayStats.movesUsed = moves;
+  stats.allTimeStats.totalMovesUsed += moves;
   saveStats(stats);
 };
 
 /**
  * Update game statistics after a win
  */
-export const updateStatsAfterWin = (score: number, moves: number): void => {
-  const stats = getStats();
-  
+export function updateStatsAfterWin(stats: GameStatistics, score: number, moves: number): void {
   // Update best score
   if (stats.todayStats.bestScore === null || score < stats.todayStats.bestScore) {
     stats.todayStats.bestScore = score;
   }
   
   // Update all-time best score
-  if (stats.allTimeStats.bestScoreEver === null || score < stats.allTimeStats.bestScoreEver) {
-    stats.allTimeStats.bestScoreEver = score;
+  const currentDate = getCurrentDate();
+  if (!stats.allTimeStats.bestScoresByDay[currentDate] || score < stats.allTimeStats.bestScoresByDay[currentDate]) {
+    stats.allTimeStats.bestScoresByDay[currentDate] = score;
   }
   
-  // Update win percentage
-  const totalGames = stats.allTimeStats.gamesPlayed;
-  const newWins = (stats.allTimeStats.winPercentage * totalGames / 100) + 1;
-  stats.allTimeStats.winPercentage = (newWins / (totalGames + 1)) * 100;
+  // Update total wins and moves
+  stats.allTimeStats.totalWins += 1;
+  stats.allTimeStats.totalMovesUsed += moves;
   
-  // Update average moves per solve
-  const currentTotalMoves = stats.allTimeStats.averageMovesPerSolve * (totalGames * (stats.allTimeStats.winPercentage / 100));
-  const newTotalMoves = currentTotalMoves + moves;
-  const newWinCount = totalGames * (stats.allTimeStats.winPercentage / 100) + 1;
-  stats.allTimeStats.averageMovesPerSolve = newTotalMoves / newWinCount;
+  // Update streak (using currentStreak as it's the non-deprecated field)
+  stats.allTimeStats.currentStreak += 1;
   
-  // Update streak
-  stats.allTimeStats.streak += 1;
-  
-  // Store today's score in dailyScores
-  const currentDate = getCurrentDate();
-  stats.allTimeStats.dailyScores[currentDate] = score;
-  
-  // Increment games played
-  stats.allTimeStats.gamesPlayed += 1;
+  // Update total games played
+  stats.allTimeStats.totalGamesPlayed += 1;
   stats.todayStats.timesPlayed += 1;
   
+  // Update attempts for today
+  if (!stats.allTimeStats.attemptsPerDay[currentDate]) {
+    stats.allTimeStats.attemptsPerDay[currentDate] = 0;
+  }
+  stats.allTimeStats.attemptsPerDay[currentDate] += 1;
+  
+  // Add to played days if not already present
+  if (!stats.allTimeStats.playedDays.includes(currentDate)) {
+    stats.allTimeStats.playedDays.push(currentDate);
+  }
+  
+  // Update last streak date
+  stats.allTimeStats.lastStreakDate = currentDate;
+  
+  // Update longest streak if current streak is longer
+  if (stats.allTimeStats.currentStreak > stats.allTimeStats.longestStreak) {
+    stats.allTimeStats.longestStreak = stats.allTimeStats.currentStreak;
+  }
+  
+  // Add to goal achieved days if not already present
+  if (!stats.allTimeStats.goalAchievedDays.includes(currentDate)) {
+    stats.allTimeStats.goalAchievedDays.push(currentDate);
+  }
+  
   saveStats(stats);
-}; 
+} 

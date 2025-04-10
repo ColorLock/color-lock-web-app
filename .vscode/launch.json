@@ -23,6 +23,44 @@
             "path": "${webRoot}/"
           }
         ]
+      },
+      {
+        "type": "node",
+        "request": "attach",
+        "name": "Debug Firebase Functions",
+        "port": 9229,
+        "restart": true,
+        "skipFiles": [
+          "<node_internals>/**"
+        ],
+        "outFiles": [
+          "${workspaceFolder}/functions/lib/**/*.js"
+        ],
+        "sourceMaps": true,
+        "sourceMapPathOverrides": {
+          "webpack:///./~/*": "${workspaceFolder}/functions/node_modules/*",
+          "webpack:///./*": "${workspaceFolder}/functions/*",
+          "webpack:///*": "*"
+        }
+      },
+      {
+        "type": "node",
+        "request": "launch",
+        "name": "Debug Test Functions",
+        "program": "${workspaceFolder}/scripts/test-functions.js",
+        "skipFiles": [
+          "<node_internals>/**"
+        ],
+        "outFiles": [
+          "${workspaceFolder}/functions/lib/**/*.js"
+        ],
+        "env": {
+          "FIRESTORE_EMULATOR_HOST": "localhost:8080",
+          "FIREBASE_AUTH_EMULATOR_HOST": "localhost:9099",
+          "FUNCTIONS_EMULATOR_HOST": "localhost:5001"
+        },
+        "preLaunchTask": "Start Firebase Emulators",
+        "postDebugTask": "Stop Firebase Emulators"
       }
     ]
   }
