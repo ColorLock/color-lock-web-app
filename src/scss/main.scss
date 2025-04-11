@@ -1,5 +1,5 @@
 // Import all partials
-@use 'abstracts';
+@use 'abstracts' as *;
 @use 'base';
 @use 'layout';
 @use 'components';
@@ -569,4 +569,321 @@
 .modal-close:hover {
   background-color: #e0e0e0;
   transform: scale(1.05);
+}
+
+// --- Game Header Container ---
+.game-header-container {
+  width: 100%;
+  max-width: 500px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  margin-bottom: 1.5rem;
+}
+
+// --- Original Desktop Buttons (Absolute Positioning) ---
+.home-button,
+.settings-button,
+.stats-button,
+.info-button {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: $color-secondary;
+  color: $color-text-primary;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+  z-index: 10;
+}
+
+// Specific positions (RIGHT SIDE)
+.home-button {
+  top: 15px;
+  right: 15px;
+}
+.home-button:hover {
+  background-color: $color-secondary-dark;
+}
+
+.settings-button {
+  top: 65px;
+  right: 15px;
+}
+.settings-button:hover {
+  background-color: $color-secondary-dark;
+  transform: rotate(30deg);
+}
+
+.stats-button {
+  top: 115px;
+  right: 15px;
+}
+.stats-button:hover {
+  background-color: $color-secondary-dark;
+}
+
+.info-button {
+  top: 165px;
+  right: 15px;
+}
+.info-button:hover {
+  background-color: $color-secondary-dark;
+}
+
+// --- Desktop SignUp Button (Absolute Positioning) ---
+.guest-signup-container.left-side {
+  position: absolute;
+  top: 15px;
+  left: 15px;
+  z-index: 10;
+}
+
+// --- Hamburger Menu ---
+.hamburger-wrapper {
+  position: absolute; // Position absolutely within the top-card
+  top: $spacing-md;   // Adjust vertical position within card
+  left: $spacing-md;  // Adjust horizontal position within card
+  z-index: $z-index-modal + 1; // Ensure it appears above other elements
+}
+
+.hamburger-container {
+  position: relative;
+}
+
+.hamburger-button {
+  @include icon-button;
+  width: 40px;
+  height: 40px;
+  font-size: $font-size-large;
+  background-color: $color-secondary;
+  color: $color-text-primary;
+  z-index: $z-index-modal + 2; // Above menu content
+}
+
+.hamburger-menu-content {
+  position: absolute;
+  top: 50px; // Below button
+  left: 0;
+  right: auto;
+  background-color: $color-white;
+  border-radius: $border-radius-medium;
+  box-shadow: $shadow-large;
+  padding: $spacing-sm 0;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  animation: fadeIn $transition-fast ease-out;
+  z-index: $z-index-modal + 1; // Below button, above card content potentially
+}
+
+.hamburger-menu-item {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  color: #333;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.hamburger-menu-item:hover {
+  background-color: #f5f5f5;
+}
+
+.hamburger-menu-item svg {
+  width: 18px;
+  color: #666;
+}
+
+.hamburger-menu-item-signup {
+  padding: 0.5rem 1rem;
+  border-top: 1px solid #eee;
+  margin-top: 0.25rem;
+}
+
+.hamburger-menu-item-signup .signup-button {
+  width: 100%;
+  text-align: center;
+}
+
+// --- Responsive Visibility Control ---
+// Default: Mobile view (Hamburger visible, Desktop buttons/signup hidden)
+.desktop-only-button,
+.desktop-only-signup {
+  display: none;
+}
+
+.mobile-only-hamburger {
+  display: block;
+}
+
+// Desktop view (>= 780px)
+@media (min-width: 780px) {
+  .desktop-only-button {
+    display: flex;
+  }
+  .desktop-only-signup {
+    display: block;
+  }
+  .mobile-only-hamburger {
+    display: none;
+  }
+}
+
+// --- Top Card ---
+.top-card {
+  position: relative; // Needed for absolute positioning of hamburger inside it
+  width: 100%;
+  max-width: 500px;
+  margin-left: auto;
+  margin-right: auto;
+  background-color: $color-secondary;
+  padding: $spacing-md $spacing-lg;
+  border-radius: $border-radius-large;
+  box-shadow: $shadow-large;
+  // Use flexbox to manage internal content alignment
+  display: flex; 
+  justify-content: center; 
+  align-items: center;
+  min-height: 150px; // Ensure card has enough height for positioning hamburger
+
+  // Wrapper for the actual content to allow centering while hamburger is absolute
+  .top-card-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center; // Ensure text inside is centered
+  }
+}
+
+// Simple fade-in animation for hamburger menu
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// --- Main container and content wrapper ---
+.container {
+  position: relative; // For absolute positioning of side buttons
+}
+
+// Main game content wrapper
+.main-game-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  padding-top: $spacing-md; // Adding padding to the main content
+}
+
+// --- Side Button Containers ---
+.side-button-container {
+  position: absolute;
+  z-index: 10;
+
+  &.top-left {
+    top: $spacing-sm;
+    left: $spacing-sm; // Reduced from 15px to $spacing-sm (12px)
+  }
+
+  &.top-right {
+    top: $spacing-sm;
+    right: $spacing-sm; // Reduced from 15px to $spacing-sm (12px)
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
+// --- Icon Buttons ---
+.icon-button {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: $color-secondary;
+  color: $color-text-primary;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: $shadow-medium;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background-color: $color-secondary-dark;
+  }
+  
+  // Special hover for settings icon
+  &:has(svg[data-icon="gear"]):hover {
+    transform: rotate(30deg);
+  }
+  
+  // Hide on mobile screens
+  @media (max-width: 779px) {
+    display: none;
+  }
+}
+
+// --- Responsive Visibility Control ---
+
+// Default: Mobile view (Hamburger visible, Desktop buttons/signup hidden)
+.desktop-only-icons,
+.desktop-only-signup {
+  display: none;
+}
+
+.mobile-only-hamburger {
+  display: block;
+}
+
+// Desktop view (>= 780px)
+@media (min-width: 780px) {
+  .desktop-only-icons {
+    display: flex;
+  }
+  
+  .desktop-only-signup {
+    display: block;
+  }
+  
+  .mobile-only-hamburger {
+    display: none;
+  }
+}
+
+// Remove original absolute positioning for buttons
+.home-button,
+.settings-button,
+.stats-button,
+.info-button {
+  position: relative;
+  top: auto;
+  right: auto;
+}
+
+// --- Hamburger Menu Positioning ---
+.hamburger-wrapper {
+  position: absolute; // Position absolutely within the top-card
+  top: $spacing-md;   // Adjust vertical position within card
+  left: $spacing-md;  // Adjust horizontal position within card
+  z-index: $z-index-modal + 1; // Ensure it appears above other elements
 } 

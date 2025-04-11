@@ -1,55 +1,73 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faGear, faTrophy, faTimes, faInfoCircle, faHome } from '@fortawesome/free-solid-svg-icons';
+import { faGear, faTrophy, faInfoCircle, faHome } from '@fortawesome/free-solid-svg-icons';
 import { TileColor, DailyPuzzle } from '../types';
 import { AppSettings } from '../types/settings';
 import { useTutorialContext } from '../contexts/TutorialContext';
+import HamburgerMenu from './HamburgerMenu';
+import SignUpButton from './SignUpButton';
 
+// Updated GameHeader Props to include menu state/handlers
 interface GameHeaderProps {
   puzzle: DailyPuzzle;
   getColorCSS: (color: TileColor) => string;
-  onSettingsClick: () => void;
-  onStatsClick: () => void;
   onHintClick: () => void;
-  onInfoClick: () => void;
-  onHomeClick: () => void;
+  showHintButton?: boolean;
+  // Hamburger Menu Props
+  isMenuOpen?: boolean;
+  toggleMenu?: () => void;
+  isGuest?: boolean;
+  onHomeClick?: () => void;
+  onSettingsClick?: () => void;
+  onStatsClick?: () => void;
+  onInfoClick?: () => void;
 }
 
 export const GameHeader: React.FC<GameHeaderProps> = ({
   puzzle,
   getColorCSS,
-  onSettingsClick,
-  onStatsClick,
   onHintClick,
-  onInfoClick,
-  onHomeClick
+  showHintButton = true,
+  // Destructure menu props with defaults
+  isMenuOpen = false,
+  toggleMenu = () => {},
+  isGuest = false,
+  onHomeClick = () => {},
+  onSettingsClick = () => {},
+  onStatsClick = () => {},
+  onInfoClick = () => {}
 }) => {
-  const { isTutorialMode, showHintButton } = useTutorialContext();
+  const { isTutorialMode } = useTutorialContext();
   
   return (
-    <>
-      {/* Home Button */}
-      <button className="home-button" onClick={onHomeClick} aria-label="Home">
-        <FontAwesomeIcon icon={faHome} />
-      </button>
+    <div className="top-card">
+      {/* Hamburger Menu Wrapper (Mobile Only) */}
+      <div className="hamburger-wrapper mobile-only-hamburger">
+        <HamburgerMenu isOpen={isMenuOpen} onToggle={toggleMenu}>
+          {/* Pass actions directly to menu items */}
+          <button className="hamburger-menu-item" onClick={onHomeClick}>
+            <FontAwesomeIcon icon={faHome} /> Home
+          </button>
+          <button className="hamburger-menu-item" onClick={onSettingsClick}>
+            <FontAwesomeIcon icon={faGear} /> Settings
+          </button>
+          <button className="hamburger-menu-item" onClick={onStatsClick}>
+            <FontAwesomeIcon icon={faTrophy} /> Stats
+          </button>
+          <button className="hamburger-menu-item" onClick={onInfoClick}>
+            <FontAwesomeIcon icon={faInfoCircle} /> Tutorial
+          </button>
+          {isGuest && (
+            <div className="hamburger-menu-item-signup">
+              {/* Pass toggleMenu to onClose if needed */}
+              <SignUpButton onClose={toggleMenu} />
+            </div>
+          )}
+        </HamburgerMenu>
+      </div>
 
-      {/* Settings Button */}
-      <button className="settings-button" onClick={onSettingsClick} aria-label="Settings">
-        <FontAwesomeIcon icon={faGear} />
-      </button>
-
-      {/* Stats Button */}
-      <button className="stats-button" onClick={onStatsClick} aria-label="Statistics">
-        <FontAwesomeIcon icon={faTrophy} />
-      </button>
-
-      {/* Info Button */}
-      <button className="info-button" onClick={onInfoClick} aria-label="Tutorial">
-        <FontAwesomeIcon icon={faInfoCircle} />
-      </button>
-
-      {/* Top info card */}
-      <div className="top-card">
+      {/* Top Card Content */}
+      <div className="top-card-content">
         <h1 style={{ color: isTutorialMode ? 'red' : 'inherit' }}>
           {isTutorialMode ? 'Tutorial' : 'Color Lock'}
         </h1>
@@ -64,12 +82,11 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
           <span>Goal: {puzzle.algoScore}</span>
           <span>Moves: {puzzle.userMovesUsed}</span>
         </div>
-        {/* Only show hint button if not in tutorial mode or if showHintButton is true */}
-        {(!isTutorialMode || showHintButton) && (
+        {showHintButton && (
           <button className="hint-button" onClick={onHintClick}>Get Hint</button>
         )}
       </div>
-    </>
+    </div>
   );
 };
 
@@ -124,7 +141,7 @@ export const GameFooter: React.FC<GameFooterProps> = ({
   );
 };
 
-// Original GameControls for backward compatibility
+// Updated GameControls Props to include menu props
 interface GameControlsProps {
   puzzle: DailyPuzzle;
   settings: AppSettings;
@@ -132,24 +149,34 @@ interface GameControlsProps {
   getLockedColorCSS: () => string;
   getLockedRegionSize: () => number;
   onTryAgain: () => void;
-  onSettingsClick: () => void;
-  onStatsClick: () => void;
   onHintClick: () => void;
-  onInfoClick: () => void;
-  onHomeClick: () => void;
+  // Add menu props if GameControls is the direct parent managing state
+  isMenuOpen?: boolean;
+  toggleMenu?: () => void;
+  isGuest?: boolean;
+  onHomeClick?: () => void;
+  onSettingsClick?: () => void;
+  onStatsClick?: () => void;
+  onInfoClick?: () => void;
 }
 
 const GameControls: React.FC<GameControlsProps> = (props) => {
+  const { isTutorialMode, showHintButton } = useTutorialContext();
+
   return (
     <>
       <GameHeader 
         puzzle={props.puzzle}
         getColorCSS={props.getColorCSS}
+        onHintClick={props.onHintClick}
+        showHintButton={!isTutorialMode || showHintButton}
+        isMenuOpen={props.isMenuOpen}
+        toggleMenu={props.toggleMenu}
+        isGuest={props.isGuest}
+        onHomeClick={props.onHomeClick}
         onSettingsClick={props.onSettingsClick}
         onStatsClick={props.onStatsClick}
-        onHintClick={props.onHintClick}
         onInfoClick={props.onInfoClick}
-        onHomeClick={props.onHomeClick}
       />
       <GameFooter
         puzzle={props.puzzle}

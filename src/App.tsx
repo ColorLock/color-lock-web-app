@@ -1,6 +1,8 @@
 import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
 import './scss/main.scss';
 import ReactConfetti from 'react-confetti';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faHome, faGear, faTrophy, faInfoCircle } from '@fortawesome/free-solid-svg-icons';
 
 // Types
 import { AppSettings } from './types/settings';
@@ -21,6 +23,7 @@ import TutorialHighlight from './components/TutorialHighlight';
 import TutorialWarningModal from './components/TutorialWarningModal';
 import LandingScreen from './components/LandingScreen';
 import SignUpButton from './components/SignUpButton';
+import HamburgerMenu from './components/HamburgerMenu';
 
 // Utils
 import { generateShareText, shareToTwitter, shareToFacebook, copyToClipboard } from './utils/shareUtils';
@@ -118,6 +121,14 @@ const GameContainer = () => {
   // Auth context
   const { isGuest } = useAuth();
 
+  // Hamburger Menu State
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const toggleMenu = () => setIsMenuOpen(!isMenuOpen);
+  const handleMenuItemClick = (action: () => void) => {
+    action();
+    setIsMenuOpen(false);
+  };
+
   const [windowDimensions, setWindowDimensions] = useState<{width: number, height: number}>({
     width: window.innerWidth,
     height: window.innerHeight,
@@ -185,6 +196,11 @@ const GameContainer = () => {
     setShowLandingPage(true);
   };
 
+  // Define button action handlers
+  const handleSettingsClick = () => setShowSettings(true);
+  const handleStatsClick = () => setShowStats(true);
+  const handleInfoClick = () => setShowTutorialModal(true);
+
   if (loading || !showAppContent || !puzzle) {
     return (
       <div className="loading-container">
@@ -240,70 +256,96 @@ const GameContainer = () => {
 
   return (
     <div className={containerClasses.join(' ')}>
-      {/* Confetti for win celebration */}
-      {confettiActive && (
-        <ReactConfetti
-          width={windowDimensions.width}
-          height={windowDimensions.height}
-          recycle={false}
-          numberOfPieces={500}
-        />
-      )}
-
-      {/* Game Header */}
-      <GameHeader 
-        puzzle={isTutorialMode ? {
-          ...puzzle,
-          targetColor: 'red' as TileColor,
-          algoScore: 7,
-          userMovesUsed: currentMoveIndex
-        } : puzzle}
-        getColorCSS={getColorCSSWithSettings}
-        onSettingsClick={() => setShowSettings(true)}
-        onStatsClick={() => setShowStats(true)}
-        onHintClick={handleHint}
-        onInfoClick={() => setShowTutorialModal(true)}
-        onHomeClick={handleHomeClick}
-      />
-
-      {/* Sign Up Button for Guest Users */}
+      {/* Absolutely Positioned Side Buttons */}
+      {/* Desktop Signup Button (Top Left) */}
       {isGuest && (
-        <div className="guest-signup-container left-side">
+        <div className="side-button-container top-left desktop-only-signup">
           <SignUpButton />
         </div>
       )}
 
-      {/* Game Grid */}
-      <div className="grid-container" style={{ position: 'relative' }}>
-        <GameGrid 
-          grid={currentBoard}
-          lockedCells={isTutorialMode ? tutorialLockedCells : puzzle.lockedCells}
-          hintCell={hintCell}
-          settings={settings}
-          onTileClick={onTileClick}
-          getColorCSS={getColorCSSWithSettings}
-        />
-        
-        {/* Tutorial Highlight for connected tiles */}
-        {isTutorialMode && (
-          <TutorialHighlight />
-        )}
+      {/* Desktop Icon Buttons (Top Right) */}
+      <div className="side-button-container top-right desktop-only-icons">
+        <button className="icon-button" onClick={handleHomeClick} aria-label="Home">
+          <FontAwesomeIcon icon={faHome} />
+        </button>
+        <button className="icon-button" onClick={handleSettingsClick} aria-label="Settings">
+          <FontAwesomeIcon icon={faGear} />
+        </button>
+        <button className="icon-button" onClick={handleStatsClick} aria-label="Statistics">
+          <FontAwesomeIcon icon={faTrophy} />
+        </button>
+        <button className="icon-button" onClick={handleInfoClick} aria-label="Tutorial">
+          <FontAwesomeIcon icon={faInfoCircle} />
+        </button>
       </div>
 
-      {/* Game Footer (now below the grid) */}
-      <GameFooter
-        puzzle={puzzle}
-        settings={settings}
-        getLockedColorCSS={() => {
-          if (isTutorialMode && tutorialBoard) {
-            return getLockedColorCSS(tutorialBoard, tutorialLockedCells, settings);
-          }
-          return getLockedColorCSSWithSettings();
-        }}
-        getLockedRegionSize={() => isTutorialMode ? tutorialLockedCells.size : getLockedRegionSize()}
-        onTryAgain={handleTryAgain}
-      />
+      {/* Main Game Content Wrapper */}
+      <div className="main-game-content">
+        {/* Confetti for win celebration */}
+        {confettiActive && (
+          <ReactConfetti
+            width={windowDimensions.width}
+            height={windowDimensions.height}
+            recycle={false}
+            numberOfPieces={500}
+          />
+        )}
 
+        {/* Game Header - updated with hamburger menu props */}
+        <GameHeader 
+          puzzle={isTutorialMode ? {
+            ...puzzle,
+            targetColor: 'red' as TileColor,
+            algoScore: 7,
+            userMovesUsed: currentMoveIndex
+          } : puzzle}
+          getColorCSS={getColorCSSWithSettings}
+          onHintClick={handleHint}
+          showHintButton={!isTutorialMode || useTutorialContext().showHintButton}
+          // Add hamburger menu props
+          isMenuOpen={isMenuOpen}
+          toggleMenu={toggleMenu}
+          isGuest={isGuest}
+          onHomeClick={() => handleMenuItemClick(handleHomeClick)}
+          onSettingsClick={() => handleMenuItemClick(handleSettingsClick)}
+          onStatsClick={() => handleMenuItemClick(handleStatsClick)}
+          onInfoClick={() => handleMenuItemClick(handleInfoClick)}
+        />
+
+        {/* Game Grid */}
+        <div className="grid-container" style={{ position: 'relative' }}>
+          <GameGrid 
+            grid={currentBoard}
+            lockedCells={isTutorialMode ? tutorialLockedCells : puzzle.lockedCells}
+            hintCell={hintCell}
+            settings={settings}
+            onTileClick={onTileClick}
+            getColorCSS={getColorCSSWithSettings}
+          />
+          
+          {/* Tutorial Highlight for connected tiles */}
+          {isTutorialMode && (
+            <TutorialHighlight />
+          )}
+        </div>
+
+        {/* Game Footer */}
+        <GameFooter
+          puzzle={puzzle}
+          settings={settings}
+          getLockedColorCSS={() => {
+            if (isTutorialMode && tutorialBoard) {
+              return getLockedColorCSS(tutorialBoard, tutorialLockedCells, settings);
+            }
+            return getLockedColorCSSWithSettings();
+          }}
+          getLockedRegionSize={() => isTutorialMode ? tutorialLockedCells.size : getLockedRegionSize()}
+          onTryAgain={handleTryAgain}
+        />
+      </div>
+
+      {/* Modals - keep these at the bottom of the container */}
       {/* Tutorial Modal - For intro */}
       <TutorialModal 
         isOpen={showTutorialModal} 
