@@ -34,6 +34,14 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
     setIsWebShareSupported(typeof navigator.share === 'function');
   }, []);
   
+  // Handle outside click
+  const handleOverlayClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // Only close if the click is directly on the overlay, not its children
+    if (e.target === e.currentTarget) {
+      onClose();
+    }
+  }, [onClose]);
+  
   // Use defaultStats if stats prop is null or undefined
   const currentStats = stats || defaultStats;
   const allTimeStats = currentStats.allTimeStats || defaultStats.allTimeStats; // Ensure allTimeStats exists
@@ -131,7 +139,7 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
   }, [formattedShareText]); // Dependency
 
   return (
-    <div className="modal-overlay">
+    <div className="modal-overlay" onClick={handleOverlayClick}>
       <div className="modal-content stats-modal">
         <button className="close-button" onClick={onClose} aria-label="Close">
           <FontAwesomeIcon icon={faXmark} />

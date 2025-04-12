@@ -8,6 +8,55 @@
 
 // Add these new styles at the end of the file
 
+// --- Main Container Fade-in ---
+.container {
+  position: relative;
+  
+  // Apply fade-in when the class is present
+  &.app-fade-in {
+    opacity: 0; // Start invisible
+    animation: appFadeIn 0.5s ease forwards; // Adjust duration/timing
+  }
+}
+
+@keyframes appFadeIn {
+  from { opacity: 0; transform: translateY(10px); } // Optional subtle upward movement
+  to { opacity: 1; transform: translateY(0); }
+}
+
+// --- Simple Loading Container ---
+.simple-loading-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  width: 100%;
+  background-color: #fff; // Match background
+  position: fixed; // Keep it centered covering everything
+  top: 0;
+  left: 0;
+  z-index: 100; // Above other potential elements before game loads
+
+  .spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid rgba($color-primary, 0.2);
+    border-left-color: $color-primary;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  
+  p {
+    margin-top: $spacing-md;
+    color: $color-text-secondary;
+  }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 // Board fading animation
 .board-fading {
   .grid {

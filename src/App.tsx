@@ -115,7 +115,8 @@ const GameContainer = () => {
     getCurrentStepConfig,
     showWarningModal,
     closeWarningModal,
-    currentMoveIndex
+    currentMoveIndex,
+    showHintButton
   } = useTutorialContext();
 
   // Auth context
@@ -135,8 +136,6 @@ const GameContainer = () => {
   });
   
   const [confettiActive, setConfettiActive] = useState<boolean>(false);
-  const [showAppContent, setShowAppContent] = useState<boolean>(false);
-  const [loadingAnimationComplete, setLoadingAnimationComplete] = useState<boolean>(false);
 
   // Update window dimensions for confetti
   useEffect(() => {
@@ -163,53 +162,22 @@ const GameContainer = () => {
     return undefined;
   }, [puzzle?.isSolved]);
 
-  // Control loading animation and app content fade-in
-  useEffect(() => {
-    if (!loading && puzzle) {
-      // Set a timer for the logo animation to complete (3 seconds)
-      const animationTimer = setTimeout(() => {
-        setLoadingAnimationComplete(true);
-      }, 3000);
-      
-      // Set a timer for the app content to fade in (after 4.5 seconds total)
-      const contentTimer = setTimeout(() => {
-        setShowAppContent(true);
-      }, 4500);
-      
-      return () => {
-        clearTimeout(animationTimer);
-        clearTimeout(contentTimer);
-      };
-    }
-    
-    // Reset states when loading changes
-    if (loading) {
-      setLoadingAnimationComplete(false);
-      setShowAppContent(false);
-    }
-    
-    return undefined;
-  }, [loading, puzzle]);
-
   // Handle home navigation - modify to use context
   const handleHomeClick = () => {
     setShowLandingPage(true);
   };
 
   // Define button action handlers
-  const handleSettingsClick = () => setShowSettings(true);
-  const handleStatsClick = () => setShowStats(true);
-  const handleInfoClick = () => setShowTutorialModal(true);
+  const handleSettingsClickAction = () => setShowSettings(true);
+  const handleStatsClickAction = () => setShowStats(true);
+  const handleInfoClickAction = () => setShowTutorialModal(true);
 
-  if (loading || !showAppContent || !puzzle) {
+  // Show loading indicator while fetching puzzle data
+  if (loading || !puzzle) {
     return (
-      <div className="loading-container">
-        <div className={`logo-animation ${loadingAnimationComplete ? 'fade-out' : ''}`}>
-          <img src="/tbs_logo.png" alt="The Banana Standard" className="loading-logo" />
-        </div>
-        {loadingAnimationComplete && !showAppContent && (
-          <div className="app-fade-in-placeholder" />
-        )}
+      <div className="simple-loading-container">
+        <div className="spinner"></div>
+        {/* Optional: <p>Loading Puzzle...</p> */}
       </div>
     );
   }
@@ -231,7 +199,6 @@ const GameContainer = () => {
 
   // Get tutorial step configuration
   const tutorialConfig = isTutorialMode ? getCurrentStepConfig() : { overlayElements: [] };
-  console.log("Tutorial Config: ", tutorialConfig);
 
   // Determine which board to display (tutorial board or regular board)
   const currentBoard = isTutorialMode && tutorialBoard ? tutorialBoard : puzzle.grid;
@@ -269,13 +236,13 @@ const GameContainer = () => {
         <button className="icon-button" onClick={handleHomeClick} aria-label="Home">
           <FontAwesomeIcon icon={faHome} />
         </button>
-        <button className="icon-button" onClick={handleSettingsClick} aria-label="Settings">
+        <button className="icon-button" onClick={handleSettingsClickAction} aria-label="Settings">
           <FontAwesomeIcon icon={faGear} />
         </button>
-        <button className="icon-button" onClick={handleStatsClick} aria-label="Statistics">
+        <button className="icon-button" onClick={handleStatsClickAction} aria-label="Statistics">
           <FontAwesomeIcon icon={faTrophy} />
         </button>
-        <button className="icon-button" onClick={handleInfoClick} aria-label="Tutorial">
+        <button className="icon-button" onClick={handleInfoClickAction} aria-label="Tutorial">
           <FontAwesomeIcon icon={faInfoCircle} />
         </button>
       </div>
@@ -308,9 +275,9 @@ const GameContainer = () => {
           toggleMenu={toggleMenu}
           isGuest={isGuest}
           onHomeClick={() => handleMenuItemClick(handleHomeClick)}
-          onSettingsClick={() => handleMenuItemClick(handleSettingsClick)}
-          onStatsClick={() => handleMenuItemClick(handleStatsClick)}
-          onInfoClick={() => handleMenuItemClick(handleInfoClick)}
+          onSettingsClick={() => handleMenuItemClick(handleSettingsClickAction)}
+          onStatsClick={() => handleMenuItemClick(handleStatsClickAction)}
+          onInfoClick={() => handleMenuItemClick(handleInfoClickAction)}
         />
 
         {/* Game Grid */}
@@ -515,14 +482,7 @@ const App: React.FC = () => {
 
 const AuthenticatedApp: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
-  const { showLandingPage, setShowLandingPage } = useNavigation();
-  
-  // Reset showLandingPage when authentication state changes
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setShowLandingPage(true);
-    }
-  }, [isAuthenticated, setShowLandingPage]);
+  const { showLandingPage } = useNavigation();
   
   // Show loading indicator while checking authentication
   if (isLoading) {
@@ -535,26 +495,27 @@ const AuthenticatedApp: React.FC = () => {
     );
   }
 
-  // If user has clicked on the Home button, show the landing page
-  // regardless of authentication status
-  if (showLandingPage) {
-    return (
-      <LandingScreen />
-    );
+  // If authenticated, decide between Game and Landing
+  if (isAuthenticated) {
+    // If user explicitly navigated to landing page, show it
+    if (showLandingPage) {
+      return <LandingScreen />;
+    } else {
+      // Otherwise (authenticated and not navigating home), show the game
+      return (
+        <GameProvider>
+          <TutorialProvider>
+            <SettingsContext.Provider value={null}>
+              <GameContainer />
+            </SettingsContext.Provider>
+          </TutorialProvider>
+        </GameProvider>
+      );
+    }
   }
-  
-  // Otherwise, render LandingScreen or GameContainer based on authentication state
-  return isAuthenticated ? (
-    <GameProvider>
-      <TutorialProvider>
-        <SettingsContext.Provider value={null}>
-          <GameContainer />
-        </SettingsContext.Provider>
-      </TutorialProvider>
-    </GameProvider>
-  ) : (
-    <LandingScreen />
-  );
+
+  // If not authenticated (and not loading), always show LandingScreen
+  return <LandingScreen />;
 };
 
 export default App;

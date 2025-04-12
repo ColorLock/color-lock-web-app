@@ -148,9 +148,21 @@ const WinModal: React.FC<WinModalProps> = ({
       row.map(color => getTileEmoji(color)).join("")
     ).join("\n");
     
+    // Get difficulty level from settings
+    const difficultyLevel = settings?.difficultyLevel || 'medium';
+    const difficultyText = difficultyLevel.charAt(0).toUpperCase() + difficultyLevel.slice(1);
+    
+    // Get hints used for today
+    const hintsUsedToday = allTimeStats?.hintUsageByDay?.[todayKey] || 0;
+    const hintsText = hintsUsedToday > 0 
+      ? `Hints Used: ${hintsUsedToday}` 
+      : `No hints used! 🧠`;
+    
     // Create formatted text that matches the required format
     return `Color Lock - ${formatDate()}
 Target: ${getTileEmoji(puzzle.targetColor)}
+Difficulty: ${difficultyText}
+${hintsText}
 
 Score: ${puzzle.userMovesUsed} moves${beatOptimal ? ' 🏅' : ''}
 
