@@ -163,6 +163,8 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
       } else {
         await signUp(email, password);
       }
+      // Navigate to the game after successful authentication
+      setShowLandingPage(false);
     } catch (err: any) {
       console.error('Authentication error:', err);
       setError(err.message || 'An error occurred during authentication');

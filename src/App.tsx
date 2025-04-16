@@ -469,7 +469,7 @@ const GameContainer = () => {
 };
 
 const App: React.FC = () => {
-  const [showLandingPage, setShowLandingPage] = useState(false);
+  const [showLandingPage, setShowLandingPage] = useState(true);
 
   return (
     <NavigationContext.Provider value={{ showLandingPage, setShowLandingPage }}>

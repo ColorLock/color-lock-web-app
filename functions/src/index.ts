@@ -68,14 +68,40 @@ async function validateAuthToken(token: string): Promise<admin.auth.DecodedIdTok
  * Determine if a request is authorized via auth token (for both prod and local dev)
  */
 async function isAuthorizedRequest(request: functions.https.Request): Promise<admin.auth.DecodedIdToken | null> {
-  const authHeader = request.headers.authorization || "";
+  let userId: string | null = null;
+  let decodedToken: admin.auth.DecodedIdToken | null = null;
 
-  if (authHeader.startsWith("Bearer ")) {
-    const token = authHeader.split("Bearer ")[1];
-    return await validateAuthToken(token);
+  // 1. Check X-Forwarded-Authorization header first (coming from API Gateway)
+  const forwardedAuthHeader = request.headers["x-forwarded-authorization"] as string || "";
+  if (forwardedAuthHeader.startsWith("Bearer ")) {
+    const userToken = forwardedAuthHeader.split("Bearer ")[1];
+    try {
+      decodedToken = await admin.auth().verifyIdToken(userToken);
+      userId = decodedToken.uid;
+      logger.info(`User ID from X-Forwarded-Authorization: ${userId}`);
+      return decodedToken;
+    } catch (error) {
+      logger.warn("Failed to verify token from X-Forwarded-Authorization:", error);
+      // Continue to try other auth methods
+    }
   }
 
-  // Allow special header for emulator testing without full auth
+  // 2. Check standard Authorization header (for direct emulator calls or other scenarios)
+  const authHeader = request.headers.authorization || "";
+  if (authHeader.startsWith("Bearer ")) {
+    const token = authHeader.split("Bearer ")[1];
+    try {
+      decodedToken = await validateAuthToken(token);
+      if (decodedToken) {
+        logger.info(`User ID from Authorization header: ${decodedToken.uid}`);
+        return decodedToken;
+      }
+    } catch (error) {
+      logger.warn("Failed to verify token from Authorization header:", error);
+    }
+  }
+
+  // 3. Allow special header for emulator testing without full auth
   if (process.env.FUNCTIONS_EMULATOR === "true" && request.headers["x-emulator-user-id"]) {
     const userId = request.headers["x-emulator-user-id"] as string;
     logger.warn(`Emulator bypass: Using user ID from header: ${userId}`);
@@ -266,332 +292,272 @@ interface UpdateUserStatsPayload {
   movesToAdd?: number; // For reconcileAbandonedMoves event
 }
 
-// --- REFACTORED: updateUserStats Function ---
-export const updateUserStats = functions.https.onCall(async (request) => {
-  console.log("--- updateUserStats START ---");
+// Type interface for processUserStatsUpdate return value
+interface UserStatsSuccessResult {
+  success: true;
+  updatedStats: any; // Using any here but ideally would be a more specific type
+}
+
+interface UserStatsErrorResult {
+  success: false;
+  error: string;
+}
+
+type UserStatsResult = UserStatsSuccessResult | UserStatsErrorResult;
+
+/**
+ * Process user stats update for both callable and HTTP functions
+ */
+async function processUserStatsUpdate(userId: string, data: UpdateUserStatsPayload): Promise<UserStatsResult> {
+  const { eventType, puzzleId } = data;
+
+  // Validate the event type
+  if (!["firstMove", "hint", "win", "loss", "tryAgain", "reconcileAbandonedMoves"].includes(eventType)) {
+    logger.error(`Invalid eventType: ${eventType}`);
+    return {
+      success: false,
+      error: "Invalid eventType. Must be one of: firstMove, hint, win, loss, tryAgain, reconcileAbandonedMoves",
+    };
+  }
+
+  if (!puzzleId) {
+    logger.error("Missing puzzleId in payload");
+    return { success: false, error: "puzzleId is required" };
+  }
+
+  logger.info(`Processing ${eventType} event for user ${userId} on puzzle ${puzzleId}`);
+
+  // Reference to user's stats document
+  const userStatsRef = db.collection("userStats").doc(userId);
+
   try {
-    const requestData = request.data;
-    logger.info("[updateUserStats] Raw requestData:", JSON.stringify(requestData || null));
+    // Use a transaction to ensure atomic updates
+    const result = await db.runTransaction(async (transaction) => {
+      // Get current user stats
+      const doc = await transaction.get(userStatsRef);
 
-    let userId: string;
-    const auth = request.auth;
+      // Create base stats if document doesn't exist
+      const stats = doc.exists ? doc.data() || {} : {
+        totalGamesPlayed: 0,
+        totalWins: 0,
+        totalMovesUsed: 0,
+        totalHintsUsed: 0,
+        currentStreak: 0,
+        longestStreak: 0,
+        lastStreakDate: null,
+        firstTryStreak: 0,
+        longestFirstTryStreak: 0,
+        lastFirstTryStreakDate: null,
+        playedDays: [],
+        goalAchievedDays: [],
+        winsPerDay: {},
+        bestScoresByDay: {},
+        hintUsageByDay: {},
+        attemptsPerDay: {},
+        attemptsToAchieveBotScore: {},
+      };
 
-    // Check for auth
-    if (auth?.uid) {
-      // Standard case: Auth context and UID are present
-      userId = auth.uid;
-      logger.info(`[updateUserStats] Auth context present. User ID: ${userId}`);
-    } else {
-      // Auth context or UID is missing
-      logger.warn("[updateUserStats] Auth context or UID is missing.");
-      // Check if running in the emulator
-      if (process.env.FUNCTIONS_EMULATOR === "true") {
-        logger.warn("[updateUserStats] Running in emulator and auth context/UID missing. Using placeholder UID for guest user.");
-        // Assign a placeholder UID specifically for emulator testing with anonymous users
-        userId = "emulator-guest-user-" + Date.now(); // Or a fixed one like 'emulator-guest' if you prefer
-        logger.info(`[updateUserStats] Assigned placeholder User ID: ${userId}`);
-      } else {
-        // Not in emulator, and auth/UID is missing - this is a real error
-        logger.error("[updateUserStats] FATAL: auth.uid is missing outside emulator!");
-        throw new functions.https.HttpsError("unauthenticated", "User ID (uid) is required and missing.");
-      }
-    }
+      // Ensure nested objects/arrays exist
+      stats.playedDays = stats.playedDays || [];
+      stats.goalAchievedDays = stats.goalAchievedDays || [];
+      stats.winsPerDay = stats.winsPerDay || {};
+      stats.bestScoresByDay = stats.bestScoresByDay || {};
+      stats.hintUsageByDay = stats.hintUsageByDay || {};
+      stats.attemptsPerDay = stats.attemptsPerDay || {};
+      stats.attemptsToAchieveBotScore = stats.attemptsToAchieveBotScore || {};
 
-    // Now userId is guaranteed to be set (either real or placeholder in emulator)
-    logger.info(`[updateUserStats] Processing for effective User ID: ${userId}`);
+      // Process based on event type
+      if (eventType === "firstMove") {
+        // --- attemptsPerDay LOGIC ---
+        // Increment attemptsPerDay ONLY on the first move of any attempt.
+        stats.attemptsPerDay[puzzleId] = (stats.attemptsPerDay[puzzleId] || 0) + 1;
+        logger.info(`Incremented attemptsPerDay for ${puzzleId} to ${stats.attemptsPerDay[puzzleId]}`);
 
-    const data = requestData as unknown as UpdateUserStatsPayload;
-    const today = getServersideLocalDateString(); // Use server's local date
-
-    logger.info(`[updateUserStats] Processing eventType: ${data.eventType}, puzzleId: ${data.puzzleId}`);
-
-    // 2. Input Validation (use 'data' directly now)
-    if (!data.eventType || !data.puzzleId) {
-      logger.error("Missing eventType or puzzleId in request", data);
-      throw new functions.https.HttpsError("invalid-argument", "eventType and puzzleId are required.");
-    }
-    if (data.puzzleId !== today && ["firstMove", "hint", "win", "loss", "tryAgain"].includes(data.eventType)) {
-      logger.warn(`Received event for a past puzzleId (${data.puzzleId}) while today is ${today}. Processing anyway.`);
-      // Allow processing for past dates if necessary, but log it.
-    }
-
-    const dateKey = data.puzzleId; // Use the date from the payload for map keys
-    const userStatsRef = db.collection("userStats").doc(userId); // Use the determined userId
-    logger.info(`[updateUserStats] Starting Firestore transaction for document: userStats/${userId}`);
-
-    // 3. Firestore Transaction
-    const updatedStats = await db.runTransaction(async (transaction) => {
-      logger.info("[updateUserStats] Transaction started");
-      const userStatsSnap = await transaction.get(userStatsRef);
-      let statsData: Record<string, any>; // Use Record<string, any> for flexibility
-
-      // Initialize stats if document doesn't exist
-      if (!userStatsSnap.exists) {
-        logger.info(`[updateUserStats] Initializing stats for new user: ${userId}`);
-        statsData = {
-          attemptsPerDay: {},
-          bestScoresByDay: {},
-          currentStreak: 0,
-          goalAchievedDays: [],
-          hintUsageByDay: {},
-          lastStreakDate: null,
-          longestStreak: 0,
-          playedDays: [],
-          totalGamesPlayed: 0,
-          totalHintsUsed: 0,
-          totalMovesUsed: 0,
-          totalWins: 0,
-          winsPerDay: {},
-          firstTryStreak: 0,
-          longestFirstTryStreak: 0,
-          lastFirstTryStreakDate: null,
-          attemptsToAchieveBotScore: {},
-          // Add any other fields from your type definition with default values
-        };
-      } else {
-        statsData = userStatsSnap.data() as Record<string, any>;
-        // Ensure all necessary maps/arrays exist to prevent runtime errors
-        statsData.attemptsPerDay = statsData.attemptsPerDay || {};
-        statsData.bestScoresByDay = statsData.bestScoresByDay || {};
-        statsData.goalAchievedDays = statsData.goalAchievedDays || [];
-        statsData.hintUsageByDay = statsData.hintUsageByDay || {};
-        statsData.playedDays = statsData.playedDays || [];
-        statsData.winsPerDay = statsData.winsPerDay || {};
-        statsData.attemptsToAchieveBotScore = statsData.attemptsToAchieveBotScore || {};
-        // Initialize potentially missing fields from older schemas
-        statsData.currentStreak = statsData.currentStreak ?? 0;
-        statsData.longestStreak = statsData.longestStreak ?? 0;
-        statsData.totalGamesPlayed = statsData.totalGamesPlayed ?? 0;
-        statsData.totalHintsUsed = statsData.totalHintsUsed ?? 0;
-        statsData.totalMovesUsed = statsData.totalMovesUsed ?? 0;
-        statsData.totalWins = statsData.totalWins ?? 0;
-        statsData.firstTryStreak = statsData.firstTryStreak ?? 0;
-        statsData.longestFirstTryStreak = statsData.longestFirstTryStreak ?? 0;
-        statsData.lastStreakDate = statsData.lastStreakDate ?? null;
-        statsData.lastFirstTryStreakDate = statsData.lastFirstTryStreakDate ?? null;
-      }
-
-      const gameAlreadyCountedToday = false; // Flag to prevent double counting games/attempts per event
-
-      // 4. Update Stats Based on Event Type
-      logger.info(`[updateUserStats] Processing eventType: ${data.eventType} for dateKey: ${dateKey}`);
-
-      switch (data.eventType) {
-      case "firstMove":
-        if (!statsData.playedDays.includes(dateKey)) {
-          statsData.playedDays.push(dateKey);
-          // Initialize attempts for the day if it's the first time playing today
-          statsData.attemptsPerDay[dateKey] = 0;
-          logger.info(`[updateUserStats] First move of the day recorded for ${dateKey}`);
-        } else {
-          logger.info("[updateUserStats] User already played today, first move event ignored");
-        }
-        // Increment attemptsPerDay here when the user makes their first move of an attempt
-        statsData.attemptsPerDay[dateKey] = (statsData.attemptsPerDay[dateKey] || 0) + 1;
-        logger.info(`[updateUserStats] Attempt started. attemptsPerDay[${dateKey}] incremented to ${statsData.attemptsPerDay[dateKey]}`);
-
-        // Increment totalGamesPlayed when user makes first move of a new attempt
-        statsData.totalGamesPlayed = (statsData.totalGamesPlayed || 0) + 1;
-        logger.info(`[updateUserStats] First move of attempt recorded. totalGamesPlayed incremented to ${statsData.totalGamesPlayed}`);
-
-        // Don't increment totalMovesUsed here, wait for win/loss/tryAgain or hint
-        break;
-
-      case "hint":
-        // Increment hints used for the day and total
-        const hintsToAdd = data.hintsUsedInGame === undefined ? 1 : data.hintsUsedInGame; // Default to 1 if not provided
-        statsData.hintUsageByDay[dateKey] = (statsData.hintUsageByDay[dateKey] || 0) + hintsToAdd;
-        statsData.totalHintsUsed = (statsData.totalHintsUsed || 0) + hintsToAdd;
-        logger.info(`[updateUserStats] Hint event processed. Added ${hintsToAdd} hint(s). totalHintsUsed: ${statsData.totalHintsUsed}, hintUsageByDay[${dateKey}]: ${statsData.hintUsageByDay[dateKey]}. Moves NOT incremented here.`);
-        break;
-
-      case "win":
-      case "loss":
-      case "tryAgain":
-        // These events signify the end of an attempt or game session
-        logger.info(`[updateUserStats] Processing end-of-attempt event: ${data.eventType}`);
-
-        // Ensure required fields exist for 'win'
-        if (data.eventType === "win" && (data.userScore === undefined || data.algoScore === undefined || data.isFirstTryOfDay === undefined || data.attemptNumberToday === undefined)) {
-          logger.error("Missing required data for 'win' event", data);
-          throw new functions.https.HttpsError("invalid-argument", "Missing score/attempt data for win event.");
+        // Track total games played (only increment if it's the first attempt *ever* for this puzzleId)
+        if (!stats.playedDays.includes(puzzleId)) {
+          stats.playedDays = [...stats.playedDays, puzzleId];
+          stats.totalGamesPlayed = (stats.totalGamesPlayed || 0) + 1;
+          logger.info(`Added ${puzzleId} to playedDays. Incremented totalGamesPlayed to ${stats.totalGamesPlayed}`);
         }
 
-        // Increment total moves used *by the amount reported from the client for this attempt*
-        statsData.totalMovesUsed = (statsData.totalMovesUsed || 0) + (data.movesUsedInGame || 0);
-        logger.info(`[updateUserStats] Added ${data.movesUsedInGame || 0} moves, totalMovesUsed now: ${statsData.totalMovesUsed}`);
+        // Initialize hint usage for this puzzle if not exist
+        if (stats.hintUsageByDay[puzzleId] === undefined) {
+          stats.hintUsageByDay[puzzleId] = 0;
+          logger.info(`Initialized hintUsageByDay for ${puzzleId} to 0`);
+        }
+      } else if (eventType === "hint") {
+        // Logic for hint usage
+        const hintsToAdd = data.hintsUsedInGame || 1; // Default to 1 if not specified
+        stats.totalHintsUsed = (stats.totalHintsUsed || 0) + hintsToAdd;
+        stats.hintUsageByDay[puzzleId] = (stats.hintUsageByDay[puzzleId] || 0) + hintsToAdd;
+        logger.info(`Incremented totalHintsUsed by ${hintsToAdd}. hintUsageByDay for ${puzzleId} is now ${stats.hintUsageByDay[puzzleId]}`);
 
-        // *** DO NOT INCREMENT HINTS HERE ***
-        // Hint counts are handled *only* by the 'hint' event to prevent double counting,
-        // especially with autocomplete scenarios. The data.hintsUsedInGame from the client
-        // for win/loss/tryAgain events is ignored for hint counting purposes.
+      } else if (eventType === "win") {
+        // Logic for win event
+        const { userScore, algoScore, movesUsedInGame, isFirstTryOfDay } = data;
 
-        // DO NOT increment attemptsPerDay here anymore - moved to firstMove event
-
-        // DO NOT increment totalGamesPlayed here anymore - moved to firstMove event
-
-        if (!statsData.playedDays.includes(dateKey)) {
-          statsData.playedDays.push(dateKey);
-          logger.info(`[updateUserStats] Added ${dateKey} to playedDays list`);
+        if (userScore === undefined || algoScore === undefined ||
+            movesUsedInGame === undefined || isFirstTryOfDay === undefined) {
+          logger.error("Missing required win event data", data);
+          // Return error within transaction to abort it
+          throw new Error("Missing required win event data: userScore, algoScore, movesUsedInGame, isFirstTryOfDay");
         }
 
-        // Handle Win-Specific Logic
-        if (data.eventType === "win") {
-          const userScore = data.userScore!;
-          const algoScore = data.algoScore!;
-          logger.info(`[updateUserStats] Processing win event with userScore: ${userScore}, algoScore: ${algoScore}`);
+        // --- Core Win Stats ---
+        stats.totalWins = (stats.totalWins || 0) + 1;
+        stats.totalMovesUsed = (stats.totalMovesUsed || 0) + movesUsedInGame;
+        logger.info(`Incremented totalWins to ${stats.totalWins}. Added ${movesUsedInGame} moves, totalMovesUsed is now ${stats.totalMovesUsed}`);
 
-          // Update best score for the day
-          if (statsData.bestScoresByDay[dateKey] === undefined || userScore < statsData.bestScoresByDay[dateKey]) {
-            statsData.bestScoresByDay[dateKey] = userScore;
-            logger.info(`[updateUserStats] New best score for ${dateKey}: ${userScore}`);
-          }
+        // Update wins per day
+        stats.winsPerDay[puzzleId] = (stats.winsPerDay[puzzleId] || 0) + 1;
+        logger.info(`Incremented winsPerDay for ${puzzleId} to ${stats.winsPerDay[puzzleId]}`);
 
-          // Check if goal achieved
-          if (userScore <= algoScore) {
-            statsData.totalWins = (statsData.totalWins || 0) + 1;
-            statsData.winsPerDay[dateKey] = (statsData.winsPerDay[dateKey] || 0) + 1;
-            if (!statsData.goalAchievedDays.includes(dateKey)) {
-              statsData.goalAchievedDays.push(dateKey);
-              logger.info(`[updateUserStats] Goal achieved for ${dateKey}, totalWins now: ${statsData.totalWins}`);
-            }
+        // --- Goal Achieved & Streaks (Conditional) ---
+        const goalMet = userScore <= algoScore;
+        logger.info(`Goal Met (userScore <= algoScore): ${goalMet} (${userScore} <= ${algoScore})`);
 
-            // --- Streak Calculation ---
-            const yesterday = new Date(dateKey); // Use puzzle date for calculation
+        // Track if this is the first time *meeting the goal* for this puzzle
+        const firstTimeMeetingGoal = !stats.goalAchievedDays.includes(puzzleId);
+
+        if (goalMet) {
+          // --- goalAchievedDays LOGIC ---
+          if (firstTimeMeetingGoal) {
+            stats.goalAchievedDays = [...stats.goalAchievedDays, puzzleId];
+            logger.info(`Added ${puzzleId} to goalAchievedDays.`);
+
+            // --- Regular Streak Logic (only update on first goal achievement per day) ---
+            const today = new Date(); // Use server time
+            const yesterday = new Date(today);
             yesterday.setDate(yesterday.getDate() - 1);
             const yesterdayStr = yesterday.toISOString().split("T")[0];
 
-            if (statsData.lastStreakDate === yesterdayStr) {
-              statsData.currentStreak = (statsData.currentStreak || 0) + 1; // Continue streak
-              logger.info(`[updateUserStats] Continued streak: ${statsData.currentStreak}`);
-            } else if (statsData.lastStreakDate !== dateKey) {
-              statsData.currentStreak = 1; // Start new streak
-              logger.info("[updateUserStats] Started new streak");
-            } // If lastStreakDate === dateKey, streak already updated today, do nothing.
-            statsData.lastStreakDate = dateKey;
-            statsData.longestStreak = Math.max(statsData.longestStreak || 0, statsData.currentStreak);
-            // --- End Streak ---
-
-            // --- Set AttemptsToAchieveBotScore (ONLY ONCE per day) ---
-            // Check if it hasn't been set for this day yet
-            if (statsData.attemptsToAchieveBotScore[dateKey] === undefined) {
-              // Use the current attempt count FOR THE DAY from the backend state
-              // Default to 1 if attemptsPerDay somehow isn't set yet (shouldn't happen with firstMove logic)
-              const attemptsToday = statsData.attemptsPerDay[dateKey] || 1;
-              statsData.attemptsToAchieveBotScore[dateKey] = attemptsToday;
-              logger.info(`[updateUserStats] Goal achieved for the first time today (${dateKey}). Setting attemptsToAchieveBotScore to ${attemptsToday} (from attemptsPerDay)`);
-            } else {
-              logger.info(`[updateUserStats] Goal achieved again for ${dateKey}, attemptsToAchieveBotScore already set to ${statsData.attemptsToAchieveBotScore[dateKey]}.`);
+            if (stats.lastStreakDate === yesterdayStr) {
+              stats.currentStreak = (stats.currentStreak || 0) + 1;
+              logger.info(`Continued streak. Current streak: ${stats.currentStreak}`);
+            } else if (stats.lastStreakDate !== puzzleId) {
+              // Don't reset if winning again on the same day
+              stats.currentStreak = 1;
+              logger.info("Started new streak. Current streak: 1");
             }
-
-            // --- First Try Streak (Still needs client data: data.isFirstTryOfDay) ---
-            if (data.isFirstTryOfDay) {
-              // Calculate first try streak
-              if (statsData.lastFirstTryStreakDate === yesterdayStr) {
-                statsData.firstTryStreak = (statsData.firstTryStreak || 0) + 1;
-                logger.info(`[updateUserStats] Continued first try streak: ${statsData.firstTryStreak}`);
-              } else if (statsData.lastFirstTryStreakDate !== dateKey) {
-                statsData.firstTryStreak = 1;
-                logger.info("[updateUserStats] Started new first try streak");
-              } // If lastFirstTryStreakDate === dateKey, already updated today.
-              statsData.lastFirstTryStreakDate = dateKey;
-              statsData.longestFirstTryStreak = Math.max(statsData.longestFirstTryStreak || 0, statsData.firstTryStreak);
-            } else {
-              // If it wasn't the first try but was a win, reset the first try streak *if* the last date wasn't today
-              if (statsData.lastFirstTryStreakDate !== dateKey) {
-                statsData.firstTryStreak = 0;
-                logger.info("[updateUserStats] Reset first try streak (not first attempt)");
-              }
+            if (stats.currentStreak > (stats.longestStreak || 0)) {
+              stats.longestStreak = stats.currentStreak;
+              logger.info(`New longest streak: ${stats.longestStreak}`);
             }
-            // --- End First Try ---
+            stats.lastStreakDate = puzzleId; // Update last date only when goal is met
           } else {
-            // Win event, but score > algoScore (Goal NOT achieved)
-            // Reset streaks if the last streak date wasn't today
-            if (statsData.lastStreakDate !== dateKey) {
-              statsData.currentStreak = 0;
-              logger.info("[updateUserStats] Reset current streak (win but didn't achieve goal)");
+            logger.info(`Goal met, but ${puzzleId} already in goalAchievedDays. Regular streak not updated.`);
+          }
+
+          // --- firstTryStreak LOGIC ---
+          if (isFirstTryOfDay) { // Use flag from client
+            // Calculate yesterday based on server time
+            const today = new Date();
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayStr = yesterday.toISOString().split("T")[0];
+
+            if (stats.lastFirstTryStreakDate === yesterdayStr) {
+              stats.firstTryStreak = (stats.firstTryStreak || 0) + 1;
+              logger.info(`Continued first try streak. Current: ${stats.firstTryStreak}`);
+            } else if (stats.lastFirstTryStreakDate !== puzzleId) {
+              // Don't reset if winning again on the same day (though unlikely for first try)
+              stats.firstTryStreak = 1;
+              logger.info("Started new first try streak. Current: 1");
             }
-            if (statsData.lastFirstTryStreakDate !== dateKey) {
-              statsData.firstTryStreak = 0;
-              logger.info("[updateUserStats] Reset first try streak (win but didn't achieve goal)");
+
+            if (stats.firstTryStreak > (stats.longestFirstTryStreak || 0)) {
+              stats.longestFirstTryStreak = stats.firstTryStreak;
+              logger.info(`New longest first try streak: ${stats.longestFirstTryStreak}`);
             }
+            stats.lastFirstTryStreakDate = puzzleId; // Update last date only on successful first try goal met
+          } else {
+            // If it's a win, goal met, but NOT the first try, reset the first try streak
+            stats.firstTryStreak = 0;
+            logger.info("Win was not first try, resetting firstTryStreak to 0.");
           }
         } else {
-          // Loss or TryAgain event - reset streaks if applicable
-          if (statsData.lastStreakDate !== dateKey) {
-            statsData.currentStreak = 0;
-            logger.info("[updateUserStats] Reset current streak (loss/tryAgain)");
-          }
-          if (statsData.lastFirstTryStreakDate !== dateKey) {
-            statsData.firstTryStreak = 0;
-            logger.info("[updateUserStats] Reset first try streak (loss/tryAgain)");
-          }
+          // If goal was NOT met on this win, reset the first try streak
+          stats.firstTryStreak = 0;
+          logger.info("Goal not met on win, resetting firstTryStreak to 0.");
         }
-        break;
 
-      case "reconcileAbandonedMoves":
+        // --- Best Score Logic ---
+        // Update best score if better or not set
+        if (!stats.bestScoresByDay[puzzleId] || userScore < stats.bestScoresByDay[puzzleId]) {
+          stats.bestScoresByDay[puzzleId] = userScore;
+          logger.info(`Updated bestScoresByDay for ${puzzleId} to ${userScore}`);
+
+          // --- attemptsToAchieveBotScore LOGIC ---
+          // If score equals algo score, record the number of attempts *at that moment*
+          if (goalMet && userScore === algoScore) {
+            // Use the current attemptsPerDay count for this puzzle
+            const attemptsWhenGoalMet = stats.attemptsPerDay[puzzleId] || 1; // Fallback to 1 if somehow not set
+            stats.attemptsToAchieveBotScore[puzzleId] = attemptsWhenGoalMet;
+            logger.info(`Recorded attemptsToAchieveBotScore for ${puzzleId} as ${attemptsWhenGoalMet}`);
+          }
+
+          // Update the daily scores collection for leaderboards
+          // This should happen regardless of goalMet, just based on best score update
+          await updateDailyScore(userId, puzzleId, userScore);
+        }
+
+      } else if (eventType === "loss") {
+        // --- attemptsPerDay LOGIC ---
+        // *No increment here* - handled by firstMove of the next attempt
+        logger.info(`Loss event recorded for ${puzzleId}. attemptsPerDay not incremented here.`);
+
+        // Add moves used in the lost game
+        const movesInLostGame = data.movesUsedInGame || 0;
+        stats.totalMovesUsed = (stats.totalMovesUsed || 0) + movesInLostGame;
+        logger.info(`Added ${movesInLostGame} moves from lost game. totalMovesUsed is now ${stats.totalMovesUsed}`);
+
+      } else if (eventType === "tryAgain") {
+        // --- attemptsPerDay LOGIC ---
+        // *No increment here* - handled by firstMove of the next attempt
+        logger.info(`TryAgain event recorded for ${puzzleId}. attemptsPerDay not incremented here.`);
+
+        // Add moves used in the abandoned/failed game (if any sent)
+        const movesInFailedAttempt = data.movesUsedInGame || 0;
+        if (movesInFailedAttempt > 0) {
+          stats.totalMovesUsed = (stats.totalMovesUsed || 0) + movesInFailedAttempt;
+          logger.info(`Added ${movesInFailedAttempt} moves from failed/abandoned attempt. totalMovesUsed is now ${stats.totalMovesUsed}`);
+        } else {
+          logger.info("No moves added for TryAgain event (movesUsedInGame was 0 or undefined).");
+        }
+
+      } else if (eventType === "reconcileAbandonedMoves") {
+        // Add moves to the total that were abandoned
         const movesToAdd = data.movesToAdd || 0;
         if (movesToAdd > 0) {
-          statsData.totalMovesUsed = (statsData.totalMovesUsed || 0) + movesToAdd;
-          // Ensure day is marked as played if somehow the firstMove failed before
-          if (!statsData.playedDays.includes(dateKey)) {
-            statsData.playedDays.push(dateKey);
-            logger.info(`[updateUserStats] Added ${dateKey} to playedDays list (triggered by reconcile)`);
-          }
-          logger.info(`[updateUserStats] Reconciled ${movesToAdd} abandoned moves for ${dateKey}. totalMovesUsed: ${statsData.totalMovesUsed}`);
+          stats.totalMovesUsed = (stats.totalMovesUsed || 0) + movesToAdd;
+          logger.info(`Reconciled ${movesToAdd} abandoned moves. totalMovesUsed is now ${stats.totalMovesUsed}`);
         } else {
-          logger.warn(`[updateUserStats] Received reconcile event with 0 movesToAdd for ${dateKey}. Ignoring.`);
+          logger.info("No moves added for reconcileAbandonedMoves event (movesToAdd was 0 or undefined).");
         }
-        // DO NOT increment totalGamesPlayed or attemptsPerDay here
-        break;
-
-      default:
-        logger.warn(`Unknown eventType received: ${data.eventType}`);
-        break;
       }
 
-      // 5. Update Firestore Document in Transaction
-      logger.info(`[updateUserStats] Updating Firestore document for user ${userId}`);
-      if (userStatsSnap.exists) {
-        transaction.update(userStatsRef, statsData);
-        logger.info("[updateUserStats] Updated existing stats document");
-      } else {
-        transaction.set(userStatsRef, statsData);
-        logger.info("[updateUserStats] Created new stats document");
-      }
+      // Write the updated stats back to Firestore
+      transaction.set(userStatsRef, stats, { merge: true });
 
-      return statsData; // Return the updated stats
+      logger.info(`Successfully updated stats for user ${userId} after ${eventType} event.`);
+
+      // Return the updated stats object which the caller can use
+      return {
+        success: true as const,
+        updatedStats: stats,
+      };
     });
 
-    // 6. Update Daily Score (outside transaction, but after success)
-    if (data.eventType === "win" && data.userScore !== undefined) {
-      try {
-        logger.info(`[updateUserStats] Updating daily score for user ${userId} on puzzle ${data.puzzleId} with score ${data.userScore}`);
-        await updateDailyScore(userId, data.puzzleId, data.userScore);
-        logger.info(`[updateUserStats] Successfully updated daily score for user ${userId} on puzzle ${data.puzzleId}`);
-      } catch (scoreError) {
-        logger.error(`[updateUserStats] Failed to update daily score for user ${userId} on puzzle ${data.puzzleId}`, scoreError);
-        // Don't fail the whole function, but log the error.
-      }
-    }
-
-    logger.info(`[updateUserStats] Successfully processed event ${data.eventType} for user ${userId}`);
-    return {success: true, updatedStats}; // Return the updated stats
-  } catch (error: any) {
-    logger.error("[updateUserStats] !!! UNHANDLED ERROR IN FUNCTION BODY !!!", {
-      message: error.message,
-      code: error.code,
-      details: error.details,
-      stack: error.stack?.substring(0, 500),
-    });
-    throw new functions.https.HttpsError(
-      "internal",
-      `Internal function error: ${error.message || "Unknown error"}`
-    );
-  } finally {
-    console.log("--- updateUserStats END ---");
+    return result; // Return the result of the transaction
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(`Error running transaction for user ${userId} on event ${eventType}:`, error);
+    return {
+      success: false,
+      error: `Failed to update user stats: ${errorMessage}`,
+    };
   }
-});
+}
 
 // --- NEW: Function to fetch user stats ---
 export const getUserStats = functions.https.onCall(async (data, context) => {
@@ -868,5 +834,262 @@ export const getDailyScoresStats = functions.https.onCall(async (request) => {
       "internal",
       `Error getting daily scores: ${error instanceof Error ? error.message : "Unknown error"}`
     );
+  }
+});
+
+// Create HTTP versions of callable functions for API Gateway
+
+export const updateUserStatsHttp = functions.https.onRequest(async (req, res) => {
+  // Validate origin and get CORS headers
+  const [isValid, origin] = await validateOriginAndAuth(req);
+  if (!isValid) {
+    res.status(403).set(setCorsHeaders(origin)).send({success: false, error: "Forbidden: Invalid origin"});
+    return;
+  }
+  if (req.method === "OPTIONS") {
+    res.status(204).set(setCorsHeaders(origin, "OPTIONS")).end();
+    return;
+  }
+  res.set(setCorsHeaders(origin)); // Set CORS for the main request
+
+  if (req.method !== "POST") {
+    res.status(405).send({success: false, error: "Method Not Allowed"});
+    return;
+  }
+
+  // Validate authorization
+  const decodedToken = await isAuthorizedRequest(req);
+  if (!decodedToken) {
+    res.status(401).send({
+      success: false,
+      error: "Unauthorized: Valid Firebase Auth token or emulator header required",
+    });
+    return;
+  }
+
+  try {
+    const userId = decodedToken.uid;
+    const data = req.body as UpdateUserStatsPayload;
+
+    // Validate required fields
+    if (!data || !data.eventType || !data.puzzleId) {
+      res.status(400).send({
+        success: false,
+        error: "Missing required fields: eventType and puzzleId",
+      });
+      return;
+    }
+
+    logger.info(`HTTP updateUserStats called with eventType: ${data.eventType} for user: ${userId}`);
+
+    // Process the update using the same logic as the callable function
+    const result = await processUserStatsUpdate(userId, data); // Call the updated function
+
+    // Return success response (or error if result.success is false)
+    if (result.success) {
+      res.status(200).send(result);
+    } else {
+      res.status(500).send(result); // Send 500 on internal processing error
+    }
+  } catch (error: any) {
+    logger.error("HTTP updateUserStats error:", error);
+    res.status(500).send({
+      success: false,
+      error: error.message || "Internal Server Error",
+    });
+  }
+});
+
+export const getDailyScoresStatsHttp = functions.https.onRequest(async (req, res) => {
+  // Validate origin and get CORS headers
+  const [isValid, origin] = await validateOriginAndAuth(req);
+  if (!isValid) {
+    res.status(403).set(setCorsHeaders(origin)).send({success: false, error: "Forbidden: Invalid origin"});
+    return;
+  }
+  if (req.method === "OPTIONS") {
+    res.status(204).set(setCorsHeaders(origin, "OPTIONS")).end();
+    return;
+  }
+  res.set(setCorsHeaders(origin)); // Set CORS for the main request
+
+  if (req.method !== "POST") {
+    res.status(405).send({success: false, error: "Method Not Allowed"});
+    return;
+  }
+
+  // Validate authorization
+  const decodedToken = await isAuthorizedRequest(req);
+  if (!decodedToken) {
+    res.status(401).send({
+      success: false,
+      error: "Unauthorized: Valid Firebase Auth token required",
+    });
+    return;
+  }
+
+  try {
+    const data = req.body as DailyScoresStatsRequest;
+    const puzzleId = data.puzzleId;
+
+    if (!puzzleId) {
+      res.status(400).send({
+        success: false,
+        error: "puzzleId is required",
+      });
+      return;
+    }
+
+    logger.info(`HTTP getDailyScoresStats called with puzzleId: ${puzzleId}`);
+
+    // Access the scores subcollection
+    const scoresRef = db.collection("dailyScores").doc(puzzleId).collection("scores");
+    const scoresSnapshot = await scoresRef.get();
+
+    logger.info(`Found ${scoresSnapshot.size} documents in scores subcollection`);
+
+    if (scoresSnapshot.empty) {
+      logger.warn("No scores found in subcollection");
+      // Return empty stats
+      res.status(200).send({
+        success: true,
+        stats: {
+          lowestScore: null,
+          averageScore: null,
+          totalPlayers: 0,
+          playersWithLowestScore: 0,
+        },
+      });
+      return;
+    }
+
+    // Extract scores from documents
+    const allScores: number[] = [];
+    const invalidDocs: string[] = [];
+
+    scoresSnapshot.forEach((doc) => {
+      const scoreData = doc.data();
+      if (scoreData && typeof scoreData.score === "number") {
+        allScores.push(scoreData.score);
+      } else {
+        invalidDocs.push(doc.id);
+        logger.warn(`Invalid score data for document ${doc.id}:`, JSON.stringify(scoreData));
+      }
+    });
+
+    if (invalidDocs.length > 0) {
+      logger.warn(`Found ${invalidDocs.length} documents with invalid score data`);
+    }
+
+    logger.info(`Extracted ${allScores.length} valid scores`);
+
+    if (allScores.length === 0) {
+      logger.warn("No valid scores extracted, returning null stats");
+      res.status(200).send({
+        success: true,
+        stats: {
+          lowestScore: null,
+          averageScore: null,
+          totalPlayers: 0,
+          playersWithLowestScore: 0,
+        },
+      });
+      return;
+    }
+
+    // Calculate stats
+    const lowestScore = Math.min(...allScores);
+    const averageScore = allScores.reduce((sum, score) => sum + score, 0) / allScores.length;
+    const totalPlayers = allScores.length;
+    const playersWithLowestScore = allScores.filter((score) => score === lowestScore).length;
+
+    logger.info("Stats calculated:", {
+      lowestScore,
+      averageScore,
+      totalPlayers,
+      playersWithLowestScore,
+    });
+
+    // Return response
+    res.status(200).send({
+      success: true,
+      stats: {
+        lowestScore,
+        averageScore,
+        totalPlayers,
+        playersWithLowestScore,
+      },
+    });
+  } catch (error: any) {
+    logger.error("HTTP getDailyScoresStats error:", error);
+    res.status(500).send({
+      success: false,
+      error: error.message || "Internal Server Error",
+    });
+  }
+});
+
+// Fix indentation and quotes in the updateUserStats function
+export const updateUserStats = functions.https.onCall(async (request) => {
+  console.log("--- updateUserStats START ---");
+  try {
+    const requestData = request.data;
+    logger.info("[updateUserStats] Raw requestData:", JSON.stringify(requestData || null));
+
+    let userId: string;
+    const auth = request.auth;
+
+    if (auth?.uid) {
+      userId = auth.uid;
+      logger.info(`[updateUserStats] Auth context present. User ID: ${userId}`);
+    } else {
+      logger.warn("[updateUserStats] Auth context or UID is missing.");
+      if (process.env.FUNCTIONS_EMULATOR === "true") {
+        logger.warn("[updateUserStats] Running in emulator and auth context/UID missing. Using placeholder UID for guest user.");
+        userId = "emulator-guest-user-" + Date.now();
+        logger.info(`[updateUserStats] Assigned placeholder User ID: ${userId}`);
+      } else {
+        logger.error("[updateUserStats] FATAL: auth.uid is missing outside emulator!");
+        throw new functions.https.HttpsError("unauthenticated", "User ID (uid) is required and missing.");
+      }
+    }
+
+    const data = requestData as unknown as UpdateUserStatsPayload;
+
+    // Validate required fields more robustly
+    if (!data || !data.eventType || !data.puzzleId) {
+      logger.error("[updateUserStats] Invalid payload structure. Missing eventType or puzzleId.", data);
+      throw new functions.https.HttpsError("invalid-argument", "Missing required fields: eventType and puzzleId");
+    }
+
+    logger.info(`[updateUserStats] Calling processUserStatsUpdate for user ${userId}`);
+    const result = await processUserStatsUpdate(userId, data); // Call the updated function
+
+    if (!result.success) {
+      logger.error(`[updateUserStats] Processing failed: ${result.error}`);
+      // Throw HttpsError for callable functions
+      throw new functions.https.HttpsError("internal", result.error || "Unknown error during stats processing");
+    }
+
+    logger.info(`[updateUserStats] Successfully processed event ${data.eventType} for user ${userId}`);
+    // Return the result object which includes { success: true, updatedStats: stats }
+    return result;
+  } catch (error: any) {
+    // Catch HttpsError specifically if thrown
+    if (error instanceof functions.https.HttpsError) {
+      logger.error(`[updateUserStats] HttpsError: ${error.code} - ${error.message}`, error.details);
+      throw error; // Re-throw HttpsError
+    }
+    // Catch other errors
+    logger.error("[updateUserStats] !!! UNHANDLED ERROR IN FUNCTION BODY !!!", {
+      message: error.message,
+      stack: error.stack?.substring(0, 500),
+    });
+    throw new functions.https.HttpsError(
+      "internal",
+      `Internal function error: ${error.message || "Unknown error"}`
+    );
+  } finally {
+    console.log("--- updateUserStats END ---");
   }
 });

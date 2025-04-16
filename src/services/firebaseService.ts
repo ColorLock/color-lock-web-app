@@ -171,9 +171,10 @@ export const fetchPuzzleFromCloudFunction = async (date: string): Promise<Firest
     functionUrl = `http://localhost:5001/${projectId}/${region}/fetchPuzzle`;
     console.log(`Using Emulator URL: ${functionUrl}`);
   } else {
-    // Use production URL otherwise
-    functionUrl = `https://${region}-${projectId}.cloudfunctions.net/fetchPuzzle`;
-    console.log(`Using Production URL: ${functionUrl}`);
+    // Use API Gateway URL for production
+    const gatewayApiUrl = import.meta.env.VITE_API_GATEWAY_URL // || `https://colorlock-gateway.uc.gateway.dev`;
+    functionUrl = `${gatewayApiUrl}/fetchPuzzle`;
+    console.log(`Using API Gateway URL: ${functionUrl}`);
   }
   
   try {

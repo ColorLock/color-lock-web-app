@@ -11,13 +11,13 @@
 3.  [Core Concepts & Architecture](#core-concepts--architecture)
     *   [Frontend (React + TypeScript + Vite)](#frontend-react--typescript--vite)
     *   [State Management (React Context API)](#state-management-react-context-api)
-    *   [Backend (Firebase Functions)](#backend-firebase-functions)
+    *   [Backend (Firebase Functions on Cloud Run with API Gateway)](#backend-firebase-functions-on-cloud-run-with-api-gateway)
     *   [Database (Firestore)](#database-firestore)
 4.  [Data Flow](#data-flow)
-    *   [Game Initialization](#game-initialization)
+    *   [Game Initialization (via API Gateway)](#game-initialization-via-api-gateway)
     *   [User Actions (Making a Move)](#user-actions-making-a-move)
-    *   [Updating Statistics](#updating-statistics)
-    *   [Fetching Global Stats](#fetching-global-stats)
+    *   [Updating Statistics (via API Gateway)](#updating-statistics-via-api-gateway)
+    *   [Fetching Global Stats (via API Gateway)](#fetching-global-stats-via-api-gateway)
     *   [Authentication](#authentication)
 5.  [Key Features & Modules](#key-features--modules)
     *   [Game Logic](#game-logic)
@@ -35,11 +35,12 @@
     *   [Emulator UI](#emulator-ui)
 7.  [Testing](#testing)
     *   [Unit & Integration Tests](#unit--integration-tests)
-    *   [Emulator Testing](#emulator-testing)
+    *   [Emulator Testing (Functions & Gateway)](#emulator-testing-functions--gateway)
     *   [Debugging Firebase Functions](#debugging-firebase-functions)
 8.  [Deployment](#deployment)
     *   [Frontend (Netlify)](#frontend-netlify)
     *   [Backend (Firebase Functions)](#backend-firebase-functions-1)
+    *   [API Gateway (Google Cloud)](#api-gateway-google-cloud)
 9.  [Contributing Guide](#contributing-guide)
     *   [Code Style](#code-style)
     *   [Branching](#branching)
@@ -154,13 +155,24 @@ Global state is managed primarily through React's Context API. Key contexts incl
 *   **`NavigationContext`**: Simple context (defined in `App.tsx`) to toggle between the `LandingScreen` and the main `GameContainer`.
 *   **`SettingsContext`**: (Defined in `App.tsx`, state managed by `useSettings` hook) Holds the current application settings affecting visuals, accessibility, and game difficulty.
 
-### Backend (Firebase Functions)
+### Backend (Firebase Functions on Cloud Run with API Gateway)
 
-Cloud Functions provide a secure API layer between the frontend and Firestore. They handle operations that require elevated privileges or complex server-side logic.
+The backend logic resides in Firebase Cloud Functions (Gen 2), which run on Cloud Run. Due to organizational security policies (`constraints/iam.allowedPolicyMemberDomains`), these Cloud Run services are deployed as **private** and cannot be invoked directly by unauthenticated users or services outside the GCP project (like the public internet).
 
-*   **`fetchPuzzle` (HTTP Request):** Securely fetches the daily puzzle data for a given date from Firestore. Requires authentication (Firebase Auth token or emulator bypass header). Handles CORS and origin validation.
-*   **`updateUserStats` (Callable):** Updates user statistics in Firestore (`userStats` collection) and records the user's score for the day in the `dailyScores` subcollection. Triggered after game completion, loss, or try again. Uses Firestore transactions for atomic updates.
-*   **`getDailyScoresStats` (Callable):** Calculates and returns aggregate statistics (lowest score, average score, total players, etc.) for a specific puzzle date by querying the `dailyScores` subcollection. Used by the `LandingScreen`.
+To securely expose these functions to the authenticated frontend, **API Gateway** is used as a managed proxy:
+
+1.  **API Gateway Endpoint:** A public HTTPS endpoint managed by Google Cloud. The frontend application interacts *only* with this gateway URL.
+2.  **Firebase Auth Validation:** The gateway is configured (via an OpenAPI specification) to validate incoming Firebase ID tokens (`Authorization: Bearer <token>`). It checks the token's signature, issuer, audience, and expiry against your Firebase project's configuration. Only valid tokens are accepted.
+3.  **IAM-Authenticated Backend Calls:** If the Firebase token is valid, the gateway invokes the **private** Cloud Run service URL. It does *not* use the user's token for this call. Instead, it uses a designated **Service Account** (e.g., `api-gateway-invoker@...`) which has been granted the `roles/run.invoker` permission on the Cloud Run service. This invocation uses a Google-signed ID token for the service account, satisfying Cloud Run's IAM authentication requirement.
+4.  **Original Token Forwarding:** The gateway forwards the original user's Firebase ID token in the `X-Forwarded-Authorization` header to the backend function.
+5.  **Backend Function Logic:** The Cloud Function code can optionally re-verify the token from the `X-Forwarded-Authorization` header using the Firebase Admin SDK to get the user's UID and claims for business logic (like accessing user-specific data in Firestore).
+
+This architecture ensures:
+*   The Cloud Run service itself is not publicly exposed, adhering to security policies.
+*   Only requests from users authenticated via your Firebase project can reach the backend logic.
+*   The gateway handles the complexity of JWT validation and secure backend invocation.
+
+*Relevant Files:* `functions/src/index.ts`, `openapi.yaml` (API Gateway configuration), `firebase.json` (for emulator config).
 
 ### Database (Firestore)
 
@@ -177,54 +189,80 @@ Firestore is used to store persistent data:
 
 Understanding how data moves through the application is key:
 
-1.  **Game Initialization:**
-    *   `App.tsx` mounts -> `AuthProvider` checks auth state.
-    *   If authenticated (or guest mode initiated), `GameProvider` mounts.
-    *   `GameProvider`'s `useEffect` calls `fetchPuzzle` (in `firebaseService.ts`).
-    *   `fetchPuzzle` ensures authentication (signing in anonymously if needed) and calls the `fetchPuzzle` Cloud Function (HTTP).
-    *   The Cloud Function validates the request (auth, origin) and reads the puzzle data from `puzzles/{date}` in Firestore.
-    *   The function returns the puzzle data to the frontend.
-    *   `GameProvider` receives the data, uses `generatePuzzleFromDB` to create the initial `DailyPuzzle` state object (adjusting `algoScore` based on difficulty settings), finds the initial `lockedCells`, and updates its state.
-    *   `GameContainer` and child components re-render with the puzzle data.
+### Game Initialization (via API Gateway)
 
-2.  **User Actions (Making a Move):**
-    *   User clicks a non-locked tile -> `GameGrid` -> `Tile` -> `onTileClick` prop.
-    *   `GameContext.handleTileClick` is called, setting `selectedTile` and showing the `ColorPickerModal`.
-    *   User clicks a color in the modal -> `ColorPickerModal.onSelect`.
-    *   `GameContext.handleColorSelect` is called:
-        *   If it's the first move, calls `callUpdateStats` to trigger the `updateUserStats` function with `eventType: 'firstMove'`.
-        *   Calls `applyColorChange` (in `gameUtils.ts`) which uses `floodFill` (in `gameLogic.ts`) to update the grid state.
-        *   Updates the `puzzle` state (grid, moves used, checks for win/loss).
-        *   Calls `checkIfOnOptimalPath` to update `isOnOptimalPath`.
-        *   Checks `shouldShowAutocomplete` and potentially shows the `AutocompleteModal`.
-        *   If solved, calls `handlePuzzleSolved`.
-        *   Closes the color picker.
-    *   Components re-render based on the updated `puzzle` state.
+1.  `App.tsx` mounts -> `AuthProvider` checks auth state.
+2.  If authenticated, `GameProvider` mounts.
+3.  `GameProvider`'s `useEffect` calls `fetchPuzzle` (in `firebaseService.ts`).
+4.  `fetchPuzzle` ensures authentication (signing in anonymously if needed) and retrieves the user's **Firebase ID Token**.
+5.  `fetchPuzzle` makes an HTTPS POST request to the **API Gateway URL** for the `fetchPuzzle` endpoint, including the ID token in the `Authorization: Bearer <token>` header.
+6.  **API Gateway** receives the request:
+    *   Validates the Firebase ID token. If invalid, rejects with 401/403.
+    *   If valid, prepares to call the private Cloud Run service URL for the `fetchPuzzle` function.
+    *   Uses its configured **Invoker Service Account** to generate a Google-signed ID token for the backend call.
+    *   Forwards the request to Cloud Run, replacing the `Authorization` header with the service account token and adding the original user token to the `X-Forwarded-Authorization` header.
+7.  **Cloud Run (fetchPuzzle function)** receives the request:
+    *   Verifies the incoming request has a valid IAM token from the allowed Invoker Service Account (this happens automatically via Cloud Run's built-in auth).
+    *   Reads the `X-Forwarded-Authorization` header to get the original user's Firebase token.
+    *   Verifies the user's token using the Admin SDK (`admin.auth().verifyIdToken(...)`) to confirm identity and get the UID.
+    *   Reads the puzzle data from `puzzles/{date}` in Firestore.
+    *   Returns the puzzle data in the response.
+8.  **API Gateway** forwards the response back to the frontend.
+9.  `GameProvider` receives the data, processes it, and updates state.
+10. Components re-render.
 
-3.  **Updating Statistics:**
-    *   **Win/Loss/Try Again/Hint/First Move:** `GameContext` calls `callUpdateStats` with relevant event data (score, moves, hints, puzzleId, etc.).
-    *   `callUpdateStats` invokes the `updateUserStats` Firebase Function (Callable).
-    *   The Cloud Function reads the user's current stats from `userStats/{userId}` within a transaction.
-    *   It calculates updated stats based on the event type and the descriptions in `prompts/userStats_descriptions.txt`.
-    *   If the event involves a score (win or try again with a score), it also updates/sets the score in `dailyScores/{puzzleId}/scores/{userId}` (only if the new score is better).
-    *   The function writes the updated stats back to `userStats/{userId}` atomically via the transaction.
-    *   *(Note: The frontend stats state managed by `useGameStats` is currently separate and uses local storage. It should ideally be synchronized with Firestore data, potentially by having `updateUserStats` return the updated stats or by refetching after updates).*
+### User Actions (Making a Move)
 
-4.  **Fetching Global Stats (Landing Screen):**
-    *   `LandingScreen` mounts -> `useEffect` triggers `fetchDailyScoresStats`.
-    *   This calls the `getDailyScoresStats` Firebase Function (Callable) with today's date as `puzzleId`.
-    *   The Cloud Function queries all documents in the `dailyScores/{today}/scores` subcollection.
-    *   It calculates the lowest score, average score, total players, and players with the lowest score.
-    *   The function returns these stats to the `LandingScreen`.
-    *   `LandingScreen` updates its state and displays the global stats.
+*   User clicks a non-locked tile -> `GameGrid` -> `Tile` -> `onTileClick` prop.
+*   `GameContext.handleTileClick` is called, setting `selectedTile` and showing the `ColorPickerModal`.
+*   User clicks a color in the modal -> `ColorPickerModal.onSelect`.
+*   `GameContext.handleColorSelect` is called:
+    *   If it's the first move, calls `callUpdateStats` to trigger the `updateUserStats` function with `eventType: 'firstMove'`.
+    *   Calls `applyColorChange` (in `gameUtils.ts`) which uses `floodFill` (in `gameLogic.ts`) to update the grid state.
+    *   Updates the `puzzle` state (grid, moves used, checks for win/loss).
+    *   Calls `checkIfOnOptimalPath` to update `isOnOptimalPath`.
+    *   Checks `shouldShowAutocomplete` and potentially shows the `AutocompleteModal`.
+    *   If solved, calls `handlePuzzleSolved`.
+    *   Closes the color picker.
+*   Components re-render based on the updated `puzzle` state.
 
-5.  **Authentication:**
-    *   User interacts with `SignInScreen` or `SignUpButton` or clicks "Play as Guest" on `LandingScreen`.
-    *   These components call functions from `useAuth()` (`signIn`, `signUp`, `playAsGuest`, `logOut`).
-    *   `AuthContext` interacts directly with Firebase Authentication (`signInWithEmailAndPassword`, `createUserWithEmailAndPassword`, `signInAnonymously`, `signOut`).
-    *   `onAuthStateChanged` listener in `AuthContext` updates `currentUser`, `isGuest`, `isAuthenticated`, and `isLoading` state.
-    *   Components consuming `AuthContext` (like `App.tsx`, `SignUpButton`) re-render based on auth state changes.
-    *   `AuthContext` also manages `localStorage` for the `authPreference` ('guest' or 'user').
+### Updating Statistics (via API Gateway)
+
+1.  **Win/Loss/Try Again/Hint/First Move:** `GameContext` calls `callUpdateStats` with relevant event data.
+2.  `callUpdateStats` retrieves the user's **Firebase ID Token**.
+3.  `callUpdateStats` makes an HTTPS POST request to the **API Gateway URL** for the `updateUserStats` endpoint, including the ID token in the `Authorization: Bearer <token>` header and the event data in the body.
+4.  **API Gateway** validates the token and invokes the private `updateUserStats` Cloud Run function using its **Invoker Service Account**, forwarding the original token in `X-Forwarded-Authorization`.
+5.  **Cloud Run (updateUserStats function)**:
+    *   Verifies the invoker identity (automatic).
+    *   Retrieves the user's UID by verifying the token from `X-Forwarded-Authorization` using the Admin SDK.
+    *   Performs the statistics update logic within a Firestore transaction (`userStats/{userId}`, `dailyScores/{puzzleId}/scores/{userId}`).
+    *   Returns a success/failure response, potentially with updated stats.
+6.  **API Gateway** forwards the response to the frontend.
+7.  `GameContext` (potentially via `useGameStats`) updates the local stats state based on the response.
+
+### Fetching Global Stats (via API Gateway)
+
+1.  `LandingScreen` mounts -> `useEffect` triggers `fetchDailyScoresStats`.
+2.  This function retrieves the user's **Firebase ID Token** (even guest users have tokens).
+3.  It makes an HTTPS POST request to the **API Gateway URL** for the `getDailyScoresStats` endpoint, including the ID token in the `Authorization: Bearer <token>` header and the `puzzleId` in the body.
+4.  **API Gateway** validates the token and invokes the private `getDailyScoresStats` Cloud Run function using its **Invoker Service Account**.
+5.  **Cloud Run (getDailyScoresStats function)**:
+    *   Verifies the invoker identity (automatic).
+    *   Could verify the user token from `X-Forwarded-Authorization` if needed, but likely not necessary for global stats.
+    *   Queries the `dailyScores/{puzzleId}/scores` subcollection.
+    *   Calculates aggregate stats.
+    *   Returns the stats.
+6.  **API Gateway** forwards the response to the frontend.
+7.  `LandingScreen` updates its state and displays the global stats.
+
+### Authentication
+
+*   User interacts with `SignInScreen` or `SignUpButton` or clicks "Play as Guest" on `LandingScreen`.
+*   These components call functions from `useAuth()` (`signIn`, `signUp`, `playAsGuest`, `logOut`).
+*   `AuthContext` interacts directly with Firebase Authentication (`signInWithEmailAndPassword`, `createUserWithEmailAndPassword`, `signInAnonymously`, `signOut`).
+*   `onAuthStateChanged` listener in `AuthContext` updates `currentUser`, `isGuest`, `isAuthenticated`, and `isLoading` state.
+*   Components consuming `AuthContext` (like `App.tsx`, `SignUpButton`) re-render based on auth state changes.
+*   `AuthContext` also manages `localStorage` for the `authPreference` ('guest' or 'user').
 
 ---
 
@@ -333,7 +371,7 @@ To run tests: npm test
 
 Recommendation: Add more tests using Vitest and @testing-library/react for components, hooks, and utility functions. Mock Firebase interactions where necessary.
 
-Emulator Testing
+Emulator Testing (Functions & Gateway)
 This is the primary way to test the full application flow locally.
 
 Use the npm run cursor-dev script to ensure a clean environment and seeded data.
@@ -375,6 +413,60 @@ Select Project: Make sure the correct Firebase project (color-lock-prod) is sele
 Compile: Build the TypeScript functions: cd functions && npm run build && cd ..
 
 Deploy: Deploy only the functions: firebase deploy --only functions
+
+API Gateway (Google Cloud)
+The API Gateway requires separate deployment steps from the Firebase Functions.
+
+1. **Prerequisites:**
+   - Google Cloud CLI (`gcloud`) installed and configured
+   - Proper IAM permissions to create API Gateways, manage service accounts, and configure services
+
+2. **Service Account Setup:**
+   - Create a dedicated service account for API Gateway to invoke Cloud Run functions:
+     ```
+     gcloud iam service-accounts create api-gateway-invoker \
+       --display-name "API Gateway Invoker"
+     ```
+   - Grant this service account the Cloud Run Invoker role on your functions:
+     ```
+     gcloud run services add-iam-policy-binding fetchpuzzle-function \
+       --member="serviceAccount:api-gateway-invoker@PROJECT_ID.iam.gserviceaccount.com" \
+       --role="roles/run.invoker"
+     ```
+     (Repeat for other function services)
+
+3. **Deploy the API Gateway:**
+   - Create an API Definition from the OpenAPI spec:
+     ```
+     gcloud api-gateway api-configs create colorlock-config-v1 \
+       --api=colorlock-api \
+       --openapi-spec=openapi.yaml \
+       --project=PROJECT_ID \
+       --backend-auth-service-account=api-gateway-invoker@PROJECT_ID.iam.gserviceaccount.com
+     ```
+   - Deploy the gateway:
+     ```
+     gcloud api-gateway gateways create colorlock-gateway \
+       --api=colorlock-api \
+       --api-config=colorlock-config-v1 \
+       --location=us-central1 \
+       --project=PROJECT_ID
+     ```
+
+4. **Update Frontend Configuration:**
+   - Update environment variables in the frontend to point to the new gateway URL:
+     ```
+     VITE_API_GATEWAY_URL=https://colorlock-gateway-<hash>.uc.gateway.dev
+     ```
+
+5. **Testing:**
+   - Validate the gateway using curl:
+     ```
+     curl -X POST -H "Authorization: Bearer <valid-firebase-token>" \
+       -H "Content-Type: application/json" \
+       -d '{"date":"2023-07-01"}' \
+       https://colorlock-gateway-<hash>.uc.gateway.dev/fetchPuzzle
+     ```
 
 9. Contributing Guide
 Code Style

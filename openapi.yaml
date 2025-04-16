@@ -1,0 +1,115 @@
+# openapi.yaml (Corrected based on provided URLs)
+swagger: '2.0'
+info:
+  title: ColorLock API
+  version: 1.0.0
+schemes:
+  - https
+produces:
+  - application/json
+
+# Define Firebase Authentication Security
+securityDefinitions:
+  firebase_auth:
+    type: oauth2
+    flow: implicit
+    authorizationUrl: "" # Required but not used for implicit flow
+    x-google-issuer: "https://securetoken.google.com/color-lock-prod"
+    x-google-jwks_uri: "https://www.googleapis.com/service_accounts/v1/metadata/x509/securetoken@system.gserviceaccount.com"
+    x-google-audiences: "color-lock-prod"
+
+# NOTE: Removed top-level x-google-backend. Backend is defined per-path now.
+
+paths:
+  /fetchPuzzle: # Path exposed by the API Gateway
+    post:
+      summary: Fetches the daily puzzle
+      operationId: fetchPuzzle
+      security:
+        - firebase_auth: []
+      x-google-backend:
+        # Address of the SPECIFIC backend function URL
+        address: "https://us-central1-color-lock-prod.cloudfunctions.net/fetchPuzzle"
+        # Audience for the token the GATEWAY generates to call the BACKEND
+        jwt_audience: "https://us-central1-color-lock-prod.cloudfunctions.net/fetchPuzzle"
+        # Use CONSTANT_ADDRESS because the backend URL already includes the function path
+        path_translation: CONSTANT_ADDRESS
+      responses:
+        '200':
+          description: Successful response with puzzle data
+        '400':
+          description: Bad Request (e.g., missing date)
+        '401':
+          description: Unauthorized (Invalid Firebase Token)
+        '403':
+          description: Forbidden (Origin issue or other)
+        '404':
+          description: Puzzle not found
+        '500':
+          description: Internal Server Error
+
+  /updateUserStats: # Path exposed by the API Gateway
+    post:
+      summary: Updates user statistics
+      operationId: updateUserStats
+      security:
+        - firebase_auth: []
+      x-google-backend:
+        address: "https://us-central1-color-lock-prod.cloudfunctions.net/updateUserStats"
+        jwt_audience: "https://us-central1-color-lock-prod.cloudfunctions.net/updateUserStats"
+        path_translation: CONSTANT_ADDRESS
+      responses:
+        '200':
+          description: Stats updated successfully
+        '400':
+          description: Bad Request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal Server Error
+
+  /getDailyScoresStats: # Path exposed by the API Gateway
+    post:
+      summary: Gets daily score statistics
+      operationId: getDailyScoresStats
+      security:
+        - firebase_auth: []
+      x-google-backend:
+        address: "https://us-central1-color-lock-prod.cloudfunctions.net/getDailyScoresStats"
+        jwt_audience: "https://us-central1-color-lock-prod.cloudfunctions.net/getDailyScoresStats"
+        path_translation: CONSTANT_ADDRESS
+      responses:
+        '200':
+          description: Stats retrieved successfully
+        '400':
+          description: Bad Request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal Server Error
+
+  /getUserStats: # Path exposed by the API Gateway
+    post:
+      summary: Gets user statistics
+      operationId: getUserStats
+      security:
+        - firebase_auth: []
+      x-google-backend:
+        address: "https://us-central1-color-lock-prod.cloudfunctions.net/getUserStats"
+        jwt_audience: "https://us-central1-color-lock-prod.cloudfunctions.net/getUserStats"
+        path_translation: CONSTANT_ADDRESS
+      responses:
+        '200':
+          description: User stats retrieved successfully
+        '400':
+          description: Bad Request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal Server Error

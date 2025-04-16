@@ -72,7 +72,71 @@ The emulators provide a UI for inspection:
 The emulator should show three Cloud Functions:
 - `fetchPuzzle`
 - `updateUserStats`
+- `updateUserStatsHttp`
 - `getDailyScoresStats`
+- `getDailyScoresStatsHttp`
+- `getUserStats`
+- `getUserStatsHttp`
+
+## Testing with API Gateway
+
+In production, the app uses Google Cloud API Gateway to securely access the Firebase Cloud Functions. For local development, there are several options:
+
+### Direct Emulator Testing (Default)
+
+By default, when running the app with `npm run dev` while emulators are active, the code in `firebaseService.ts` will detect this and use direct emulator URLs. This bypasses the API Gateway but allows testing of function logic.
+
+You'll see log messages like:
+```
+Using Emulator URL: http://localhost:5001/color-lock-prod/us-central1/fetchPuzzle
+```
+
+### Mock API Gateway Testing
+
+If you want to test more closely to the production setup:
+
+1. **Local Proxy Option**: Create a simple proxy server that mimics the API Gateway:
+   
+   ```bash
+   # Install required packages
+   npm install express cors http-proxy-middleware --save-dev
+   
+   # Create a proxy.js file (scripts/mock-gateway.js)
+   const express = require('express');
+   const { createProxyMiddleware } = require('http-proxy-middleware');
+   const cors = require('cors');
+   
+   const app = express();
+   app.use(cors());
+   
+   // Proxy all requests to the Functions emulator
+   app.use('/', createProxyMiddleware({
+     target: 'http://localhost:5001/color-lock-prod/us-central1',
+     changeOrigin: true,
+     onProxyReq: (proxyReq, req) => {
+       // Forward the original Authorization header to X-Forwarded-Authorization
+       const authHeader = req.headers.authorization;
+       if (authHeader) {
+         proxyReq.setHeader('X-Forwarded-Authorization', authHeader);
+       }
+     }
+   }));
+   
+   const PORT = 8888;
+   app.listen(PORT, () => {
+     console.log(`Mock API Gateway running at http://localhost:${PORT}`);
+   });
+   ```
+
+2. Run the mock gateway:
+   ```bash
+   node scripts/mock-gateway.js
+   ```
+
+3. Update your `.env.local` to point to the mock gateway:
+   ```
+   VITE_API_GATEWAY_URL=http://localhost:8888
+   ```
 
 ## Common Issues & Troubleshooting
 
@@ -122,6 +186,15 @@ If your app isn't connecting to the emulators:
 
 3. Ensure you're running in development mode (`npm run dev`)
 
+### API Gateway Issues
+
+If you're using a mock API Gateway and experiencing issues:
+
+1. Check if the mock gateway is running (`node scripts/mock-gateway.js`)
+2. Verify that your `.env.local` has the correct gateway URL
+3. Look at browser Network tab to ensure requests are going to the mock gateway URL
+4. Check the mock gateway console for any errors or connection issues
+
 ## Debugging
 
 ### Console Debugging Tools
@@ -142,6 +215,15 @@ You can test functions directly:
 
 ```javascript
 window.testFirebase.testFunction('2025-04-01')
+```
+
+### Testing Token Forwarding
+
+When using a mock API Gateway, you can check token forwarding in function logs:
+
+```javascript
+// In browser console
+window.testFirebase.logTokenInfo()
 ```
 
 ## Manual Setup (Advanced)
@@ -176,6 +258,7 @@ When you're done testing:
 
 1. Stop the app (Ctrl+C in its terminal)
 2. Stop the emulators (Ctrl+C in the emulator terminal)
+3. If using a mock gateway, stop it too (Ctrl+C in its terminal)
    
 Both the `cursor-dev` and `local-test` scripts handle cleanup automatically when you press Ctrl+C.
 

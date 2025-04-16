@@ -30,7 +30,8 @@
     "emulators": "firebase emulators:start",
     "seed": "node scripts/seed-emulator.js",
     "local-test": "chmod +x scripts/run-local-test.sh && scripts/run-local-test.sh",
-    "cursor-dev": "chmod +x scripts/cursor-emulator.sh && scripts/cursor-emulator.sh"
+    "cursor-dev": "chmod +x scripts/cursor-emulator.sh && scripts/cursor-emulator.sh",
+    "mock-gateway": "node scripts/mock-gateway.js"
   },
   "eslintConfig": {
     "extends": [
@@ -57,9 +58,12 @@
     "@testing-library/jest-dom": "^6.6.3",
     "@vitejs/plugin-react": "^4.3.4",
     "@vitest/ui": "^3.0.0",
+    "cors": "^2.8.5",
     "eslint-config-react-app": "^7.0.1",
+    "express": "^4.18.2",
     "firebase-admin": "^13.2.0",
     "firebase-functions-test": "^3.4.1",
+    "http-proxy-middleware": "^2.0.6",
     "jest-watch-typeahead": "^2.2.2",
     "jiti": "2.4.2",
     "nx": "20.6.0",
