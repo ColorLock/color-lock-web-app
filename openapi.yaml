@@ -22,6 +22,25 @@ securityDefinitions:
 
 paths:
   /fetchPuzzle: # Path exposed by the API Gateway
+    options:
+      summary: CORS support for fetchPuzzle
+      operationId: corsFetchPuzzle
+      responses:
+        '204':
+          description: CORS Preflight Check Successful
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
+            Access-Control-Allow-Methods:
+              type: string
+              default: 'POST, OPTIONS'
+            Access-Control-Allow-Headers:
+              type: string
+              default: 'Content-Type, Authorization, X-Emulator-User-Id'
+            Access-Control-Max-Age:
+              type: string
+              default: '3600'
     post:
       summary: Fetches the daily puzzle
       operationId: fetchPuzzle
@@ -37,40 +56,122 @@ paths:
       responses:
         '200':
           description: Successful response with puzzle data
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '400':
           description: Bad Request (e.g., missing date)
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '401':
           description: Unauthorized (Invalid Firebase Token)
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '403':
           description: Forbidden (Origin issue or other)
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '404':
           description: Puzzle not found
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '500':
           description: Internal Server Error
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
 
   /updateUserStats: # Path exposed by the API Gateway
+    options:
+      summary: CORS support for updateUserStats
+      operationId: corsUpdateUserStats
+      responses:
+        '204':
+          description: CORS Preflight Check Successful
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
+            Access-Control-Allow-Methods:
+              type: string
+              default: 'POST, OPTIONS'
+            Access-Control-Allow-Headers:
+              type: string
+              default: 'Content-Type, Authorization, X-Emulator-User-Id'
+            Access-Control-Max-Age:
+              type: string
+              default: '3600'
     post:
       summary: Updates user statistics
       operationId: updateUserStats
       security:
         - firebase_auth: []
       x-google-backend:
-        address: "https://us-central1-color-lock-prod.cloudfunctions.net/updateUserStats"
-        jwt_audience: "https://us-central1-color-lock-prod.cloudfunctions.net/updateUserStats"
+        address: "https://us-central1-color-lock-prod.cloudfunctions.net/updateUserStatsHttp"
+        jwt_audience: "https://us-central1-color-lock-prod.cloudfunctions.net/updateUserStatsHttp"
         path_translation: CONSTANT_ADDRESS
       responses:
         '200':
           description: Stats updated successfully
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '400':
           description: Bad Request
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '401':
           description: Unauthorized
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '403':
           description: Forbidden
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '500':
           description: Internal Server Error
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
 
   /getDailyScoresStats: # Path exposed by the API Gateway
+    options:
+      summary: CORS support for getDailyScoresStats
+      operationId: corsGetDailyScoresStats
+      responses:
+        '204':
+          description: CORS Preflight Check Successful
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
+            Access-Control-Allow-Methods:
+              type: string
+              default: 'POST, OPTIONS'
+            Access-Control-Allow-Headers:
+              type: string
+              default: 'Content-Type, Authorization, X-Emulator-User-Id'
+            Access-Control-Max-Age:
+              type: string
+              default: '3600'
     post:
       summary: Gets daily score statistics
       operationId: getDailyScoresStats
@@ -85,33 +186,92 @@ paths:
       responses:
         '200':
           description: Stats retrieved successfully
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '400':
           description: Bad Request
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '401':
           description: Unauthorized
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '403':
           description: Forbidden
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '500':
           description: Internal Server Error
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
 
   /getUserStats: # Path exposed by the API Gateway
+    options:
+      summary: CORS support for getUserStats
+      operationId: corsGetUserStats
+      responses:
+        '204':
+          description: CORS Preflight Check Successful
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
+            Access-Control-Allow-Methods:
+              type: string
+              default: 'POST, OPTIONS'
+            Access-Control-Allow-Headers:
+              type: string
+              default: 'Content-Type, Authorization, X-Emulator-User-Id'
+            Access-Control-Max-Age:
+              type: string
+              default: '3600'
     post:
       summary: Gets user statistics
       operationId: getUserStats
       security:
         - firebase_auth: []
       x-google-backend:
-        address: "https://us-central1-color-lock-prod.cloudfunctions.net/getUserStats"
-        jwt_audience: "https://us-central1-color-lock-prod.cloudfunctions.net/getUserStats"
+        address: "https://us-central1-color-lock-prod.cloudfunctions.net/getUserStatsHttp"
+        jwt_audience: "https://us-central1-color-lock-prod.cloudfunctions.net/getUserStatsHttp"
         path_translation: CONSTANT_ADDRESS
       responses:
         '200':
           description: User stats retrieved successfully
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '400':
           description: Bad Request
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '401':
           description: Unauthorized
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '403':
           description: Forbidden
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'
         '500':
           description: Internal Server Error
+          headers:
+            Access-Control-Allow-Origin:
+              type: string
+              default: 'https://colorlock.xyz'

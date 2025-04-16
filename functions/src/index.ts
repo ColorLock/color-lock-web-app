@@ -172,22 +172,15 @@ export const fetchPuzzle = functions.https.onRequest(async (request, response) =
   const [isValid, origin] = await validateOriginAndAuth(request);
   if (!isValid) {
     // Return 403 Forbidden if request is not from allowed origin or authorized local
-    response.status(403).set(setCorsHeaders(origin)).send({
+    response.status(403).send({
       success: false,
       error: "Forbidden: Invalid origin",
     });
     return;
   }
 
-  // Set CORS headers for the preflight request
-  if (request.method === "OPTIONS") {
-    response.status(204).set(setCorsHeaders(origin, "OPTIONS")).end();
-    return;
-  }
-
-  // Set CORS headers for the main request
-  response.set(setCorsHeaders(origin));
-
+  // CORS is now handled by API Gateway - removing OPTIONS handling and CORS headers
+  
   // Validate authorization
   const decodedToken = await isAuthorizedRequest(request);
   if (!decodedToken) {
@@ -626,14 +619,11 @@ export const getUserStatsHttp = functions.https.onRequest(async (req, res) => {
   // Validate origin and get CORS headers
   const [isValid, origin] = await validateOriginAndAuth(req);
   if (!isValid) {
-    res.status(403).set(setCorsHeaders(origin)).send({success: false, error: "Forbidden: Invalid origin"});
+    res.status(403).send({success: false, error: "Forbidden: Invalid origin"});
     return;
   }
-  if (req.method === "OPTIONS") {
-    res.status(204).set(setCorsHeaders(origin, "OPTIONS")).end();
-    return;
-  }
-  res.set(setCorsHeaders(origin)); // Set CORS for the main request
+  
+  // CORS is now handled by API Gateway - removing OPTIONS handling and CORS headers
 
   if (req.method !== "POST") { // Typically stats requests might be GET, but POST is fine if you expect a body later
     res.status(405).send({success: false, error: "Method Not Allowed"});
@@ -843,14 +833,11 @@ export const updateUserStatsHttp = functions.https.onRequest(async (req, res) =>
   // Validate origin and get CORS headers
   const [isValid, origin] = await validateOriginAndAuth(req);
   if (!isValid) {
-    res.status(403).set(setCorsHeaders(origin)).send({success: false, error: "Forbidden: Invalid origin"});
+    res.status(403).send({success: false, error: "Forbidden: Invalid origin"});
     return;
   }
-  if (req.method === "OPTIONS") {
-    res.status(204).set(setCorsHeaders(origin, "OPTIONS")).end();
-    return;
-  }
-  res.set(setCorsHeaders(origin)); // Set CORS for the main request
+  
+  // CORS is now handled by API Gateway - removing OPTIONS handling and CORS headers
 
   if (req.method !== "POST") {
     res.status(405).send({success: false, error: "Method Not Allowed"});
@@ -904,14 +891,11 @@ export const getDailyScoresStatsHttp = functions.https.onRequest(async (req, res
   // Validate origin and get CORS headers
   const [isValid, origin] = await validateOriginAndAuth(req);
   if (!isValid) {
-    res.status(403).set(setCorsHeaders(origin)).send({success: false, error: "Forbidden: Invalid origin"});
+    res.status(403).send({success: false, error: "Forbidden: Invalid origin"});
     return;
   }
-  if (req.method === "OPTIONS") {
-    res.status(204).set(setCorsHeaders(origin, "OPTIONS")).end();
-    return;
-  }
-  res.set(setCorsHeaders(origin)); // Set CORS for the main request
+  
+  // CORS is now handled by API Gateway - removing OPTIONS handling and CORS headers
 
   if (req.method !== "POST") {
     res.status(405).send({success: false, error: "Method Not Allowed"});
