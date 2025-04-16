@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigation } from '../App';
 import '../scss/main.scss';
-import { getFunctions, httpsCallable, connectFunctionsEmulator } from 'firebase/functions';
-import { getApp } from 'firebase/app';
 import { dateKeyForToday } from '../utils/dateUtils';
+import firebaseConfig from '../env/firebaseConfig'; // Needed for project ID fallback
+import { auth, useEmulators } from '../services/firebaseService'; // Import auth and useEmulators
 
 interface DailyScoreStats {
   lowestScore: number | null;
@@ -46,66 +46,91 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
         const today = dateKeyForToday();
         console.log(`Fetching daily scores stats for date: ${today}`);
         
-        // Import necessary Firebase Functions modules 
-        const { getFunctions, httpsCallable } = await import('firebase/functions');
-        const { getApp } = await import('firebase/app');
-        
-        // Get the initialized Firebase app
-        const app = getApp();
-        
-        // Use the functions instance from firebaseService (already properly initialized for emulators if needed)
-        const { functions } = await import('../services/firebaseService');
-        
-        if (!functions) {
-          console.error('Firebase Functions not initialized');
-          fallbackToSampleData();
-          return;
+        // --- NEW Fetch Logic ---
+        if (!auth?.currentUser && !useEmulators) {
+           console.warn('No user logged in and not using emulators. Skipping stats fetch.');
+           fallbackToSampleData(); // Or set stats to empty/default
+           return;
         }
-        
-        // Create the callable function
-        const getDailyScoresStatsFunc = httpsCallable(functions, 'getDailyScoresStats');
-        
-        try {
-          console.log('Calling getDailyScoresStats function with puzzleId:', today);
-          
-          // Log the exact request being sent
-          console.log('Request data:', JSON.stringify({ puzzleId: today }));
-          
-          const result = await getDailyScoresStatsFunc({ puzzleId: today });
-          console.log('Function call completed. Result:', result);
-          
-          // Process the results...
-          const data = result.data as { success: boolean; stats: DailyScoreStats };
-          
-          if (data.success) {
-            console.log('Function succeeded. Stats:', data.stats);
-            
-            if (data.stats.lowestScore === null) {
-              console.log('No stats found, falling back to sample data');
-              fallbackToSampleData();
-            } else {
-              console.log('Setting stats from API response');
-              setStats(data.stats);
-              
-              if (data.stats.totalPlayers > 0 && data.stats.playersWithLowestScore > 0) {
-                setUsersWithBestScore(data.stats.playersWithLowestScore);
+
+        let idToken = '';
+        if (auth?.currentUser) {
+           try {
+              idToken = await auth.currentUser.getIdToken();
+           } catch (tokenError) {
+              console.error("Failed to get ID token for stats fetch:", tokenError);
+              if (!useEmulators) { // Only throw if not in emulator mode where we might proceed without token
+                 throw new Error("Authentication token unavailable.");
               }
-            }
-          } else {
-            console.error('Function returned success: false');
-            fallbackToSampleData();
+              console.warn("Proceeding without ID token in emulator mode.");
+           }
+        } else if (useEmulators) {
+           console.warn("No current user, but using emulators. Proceeding without ID token.");
+        }
+
+        const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const projectId = firebaseConfig.projectId || 'color-lock-prod';
+        const region = 'us-central1'; // Ensure this matches your deployment/emulator
+
+        let functionUrl: string;
+        if (isLocalDev && useEmulators) {
+          // Use direct emulator URL for the HTTP endpoint
+          functionUrl = `http://localhost:5001/${projectId}/${region}/getDailyScoresStatsHttp`; // <-- Use the HTTP version
+          console.log(`Using Emulator URL for stats: ${functionUrl}`);
+        } else {
+          // Use API Gateway URL for production
+          const gatewayApiUrl = import.meta.env.VITE_API_GATEWAY_URL;
+          if (!gatewayApiUrl) {
+             console.error("VITE_API_GATEWAY_URL is not set in environment variables!");
+             throw new Error("API Gateway URL is not configured.");
           }
-        } catch (error: any) {
-          console.error('Function call error:', error.message);
-          console.error('Error details:', { 
-            code: error.code,
-            message: error.message,
-            details: error.details,
-            stack: error.stack
-          });
+          // The path should match the one defined in openapi.yaml for the gateway
+          functionUrl = `${gatewayApiUrl}/getDailyScoresStats`; // <-- Path exposed by gateway
+          console.log(`Using API Gateway URL for stats: ${functionUrl}`);
+        }
+
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        if (idToken) {
+          headers['Authorization'] = `Bearer ${idToken}`;
+        }
+        // Add emulator header if needed for local testing
+        if (isLocalDev && useEmulators && currentUser?.uid) {
+           headers['X-Emulator-User-Id'] = currentUser.uid;
+        }
+
+        const response = await fetch(functionUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ puzzleId: today }),
+        });
+
+        console.log(`Stats fetch response status: ${response.status}`);
+
+        if (!response.ok) {
+          const errorBody = await response.text();
+          console.error(`HTTP error fetching stats: ${response.status} - ${response.statusText}`, errorBody);
+          // Try to parse error if JSON
+          let errorJson = {};
+          try { errorJson = JSON.parse(errorBody); } catch(e){}
+          throw new Error(`Failed to fetch stats (${response.status}): ${ (errorJson as any)?.error || response.statusText}`);
+        }
+
+        const result = await response.json();
+        console.log('Stats fetch result:', result);
+        // --- End NEW Fetch Logic ---
+
+        if (result.success && result.stats) {
+          console.log('Setting stats from API response');
+          setStats(result.stats);
+          setUsersWithBestScore(result.stats.playersWithLowestScore || 0); // Handle potential null
+        } else {
+          console.error('Stats fetch failed or returned invalid data:', result.error || 'No stats data');
           fallbackToSampleData();
         }
-      } catch (error) {
+
+      } catch (error: any) {
         console.error('Error in fetchDailyScoresStats:', error);
         fallbackToSampleData();
       }
@@ -113,7 +138,7 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
     
     // Helper function to use sample data when API calls fail
     const fallbackToSampleData = () => {
-      if (window.location.hostname === 'localhost') {
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
         console.log('Using sample data for development');
         setStats({
           lowestScore: 6,
@@ -122,11 +147,15 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
           playersWithLowestScore: 3
         });
         setUsersWithBestScore(3);
+      } else {
+         // Set to empty/default in production if fetch fails
+         setStats({ lowestScore: null, averageScore: null, totalPlayers: 0, playersWithLowestScore: 0 });
+         setUsersWithBestScore(0);
       }
     };
     
     fetchDailyScoresStats();
-  }, []);
+  }, [currentUser, isAuthenticated]); // Add currentUser/isAuthenticated dependency
 
   // Simplified loading - just show content directly
   useEffect(() => {

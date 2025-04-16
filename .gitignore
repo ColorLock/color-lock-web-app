@@ -18,6 +18,7 @@
 .env.*
 !.env.example
 .keys/
+.gateway-update.sh
 
 # logs
 npm-debug.log*

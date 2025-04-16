@@ -77,8 +77,10 @@ paths:
       security:
         - firebase_auth: []
       x-google-backend:
-        address: "https://us-central1-color-lock-prod.cloudfunctions.net/getDailyScoresStats"
-        jwt_audience: "https://us-central1-color-lock-prod.cloudfunctions.net/getDailyScoresStats"
+        # Update to point to the HTTP version of the function
+        address: "https://us-central1-color-lock-prod.cloudfunctions.net/getDailyScoresStatsHttp"
+        # Update JWT audience to match the HTTP function URL
+        jwt_audience: "https://us-central1-color-lock-prod.cloudfunctions.net/getDailyScoresStatsHttp"
         path_translation: CONSTANT_ADDRESS
       responses:
         '200':
