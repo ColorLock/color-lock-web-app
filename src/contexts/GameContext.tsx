@@ -4,7 +4,7 @@ import { AppSettings, defaultSettings, DifficultyLevel } from '../types/settings
 import { GameStatistics, defaultStats } from '../types/stats';
 import { HintResult } from '../utils/hintUtils';
 import { fetchPuzzle, functions } from '../services/firebaseService';
-import { getFunctions, httpsCallable, Functions, HttpsCallableResult } from 'firebase/functions';
+import { getFunctions, Functions } from 'firebase/functions';
 import { dateKeyForToday } from '../utils/dateUtils';
 import { findLargestRegion, generatePuzzleFromDB } from '../utils/gameLogic';
 import { applyColorChange, checkIfOnOptimalPath, getGameHint } from '../utils/gameUtils';
@@ -119,53 +119,96 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setFreshStats 
   } = useGameStats(defaultStats);
 
-  // Firebase Functions reference
-  const updateUserStatsFn = useRef(
-      functions ? httpsCallable(functions, 'updateUserStats') : null
-  ).current;
-  const getUserStatsFn = useRef(
-      functions ? httpsCallable(functions, 'getUserStats') : null
-  ).current;
-
   // --- Utility Function ---
   const callUpdateStats = useCallback(async (data: any) => {
       console.log(`[Stats ${new Date().toISOString()}] callUpdateStats invoked with event: ${data.eventType}, puzzleId: ${data.puzzleId}`);
       
-      if (!updateUserStatsFn) {
-          console.error(`[Stats ${new Date().toISOString()}] updateUserStats function is not available.`);
-          setError("Cannot update stats. Function not available.");
+      if (!currentUser && !(process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost')) {
+          console.error(`[Stats ${new Date().toISOString()}] No Firebase user logged in. Cannot update stats.`);
+          setError("You must be logged in to save statistics.");
           return null;
       }
-       if (!currentUser && !(process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost')) {
-           console.error(`[Stats ${new Date().toISOString()}] No Firebase user logged in. Cannot update stats.`);
-           setError("You must be logged in to save statistics.");
-           return null;
-       }
 
       const userId = currentUser?.uid || 'dev-user';
-      console.log(`[Stats ${new Date().toISOString()}] Preparing to call Firebase function for user: ${userId}`);
+      console.log(`[Stats ${new Date().toISOString()}] Preparing API request for user: ${userId}`);
       console.log(`[Stats ${new Date().toISOString()}] Full payload:`, JSON.stringify(data));
       
       try {
-          console.log(`[Stats ${new Date().toISOString()}] Sending request to Firebase function...`);
+          console.log(`[Stats ${new Date().toISOString()}] Sending request to API Gateway...`);
           const startTime = performance.now();
-          const result = await updateUserStatsFn(data) as HttpsCallableResult<{ success: boolean; updatedStats?: Record<string, any> }>;
-          const duration = (performance.now() - startTime).toFixed(2);
           
-          console.log(`[Stats ${new Date().toISOString()}] Firebase function completed in ${duration}ms`);
-          console.log(`[Stats ${new Date().toISOString()}] Result:`, result.data);
+          // Determine if we're in local development environment
+          const isLocal = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+          
+          // Prepare auth token
+          let idToken = '';
+          if (currentUser) {
+              try {
+                  idToken = await currentUser.getIdToken();
+              } catch (tokenError) {
+                  console.error(`[Stats ${new Date().toISOString()}] Failed to get ID token:`, tokenError);
+                  if (!isLocal) throw tokenError; // Only throw in production
+              }
+          }
+          
+          // Determine the API endpoint
+          let apiUrl: string;
+          if (isLocal) {
+              // Use emulator endpoint for local development
+              apiUrl = 'http://localhost:5001/color-lock-prod/us-central1/updateUserStatsHttp';
+              console.log(`[Stats ${new Date().toISOString()}] Using emulator endpoint: ${apiUrl}`);
+          } else {
+              // Use API Gateway in production
+              const gatewayUrl = import.meta.env.VITE_API_GATEWAY_URL;
+              if (!gatewayUrl) {
+                  throw new Error('API Gateway URL is not configured');
+              }
+              apiUrl = `${gatewayUrl}/updateUserStats`;
+              console.log(`[Stats ${new Date().toISOString()}] Using API Gateway: ${apiUrl}`);
+          }
+          
+          // Prepare headers
+          const headers: Record<string, string> = {
+              'Content-Type': 'application/json',
+          };
+          
+          if (idToken) {
+              headers['Authorization'] = `Bearer ${idToken}`;
+          }
+          
+          // For emulator testing
+          if (isLocal && currentUser?.uid) {
+              headers['X-Emulator-User-Id'] = currentUser.uid;
+          }
+          
+          // Make the fetch request
+          const response = await fetch(apiUrl, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(data),
+          });
+          
+          const duration = (performance.now() - startTime).toFixed(2);
+          console.log(`[Stats ${new Date().toISOString()}] API request completed in ${duration}ms`);
+          
+          if (!response.ok) {
+              const errorText = await response.text();
+              console.error(`[Stats ${new Date().toISOString()}] API responded with error ${response.status}:`, errorText);
+              throw new Error(`API Error (${response.status}): ${errorText}`);
+          }
+          
+          const result = await response.json();
+          console.log(`[Stats ${new Date().toISOString()}] Result:`, result);
           
           // Check for success AND updatedStats
-          if (result.data?.success && result.data.updatedStats) {
+          if (result?.success && result.updatedStats) {
              console.log(`[Stats ${new Date().toISOString()}] Backend update successful. Updating local state.`);
              // Update local gameStats state using setFreshStats with the allTimeStats from backend
-             setFreshStats(result.data.updatedStats);
-             return result.data; // Return full result if needed elsewhere
-          } else if (result.data?.success) {
+             setFreshStats(result.updatedStats);
+             return result; // Return full result if needed elsewhere
+          } else if (result?.success) {
              console.warn(`[Stats ${new Date().toISOString()}] Backend reported success but did not return updatedStats.`);
-             // Optionally trigger a full refetch as a fallback
-             // fetchAndSetUserStats();
-             return result.data;
+             return result;
           } else {
              // Handle cases where backend explicitly returned success: false
              console.error(`[Stats ${new Date().toISOString()}] Backend function reported failure.`);
@@ -173,12 +216,12 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
              return null;
           }
       } catch (error: any) {
-          console.error(`[Stats ${new Date().toISOString()}] Error calling updateUserStats function:`, error);
+          console.error(`[Stats ${new Date().toISOString()}] Error calling updateUserStats:`, error);
           console.error(`[Stats ${new Date().toISOString()}] Error details:`, error.message, error.code, error.details);
           setError(`Failed to update stats: ${error.message || 'Unknown error'}`);
           return null;
       }
-  }, [updateUserStatsFn, currentUser, setFreshStats]);
+  }, [currentUser, setFreshStats]);
   
   const fetchAndSetUserStats = useCallback(async () => {
       if (!currentUser && !(process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost')) {
@@ -193,60 +236,62 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
           // Check if we're in the local/development environment
           const isLocal = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
           
-          let statsData;
-          
-          if (isLocal) {
-              // Use the HTTP endpoint in local development to avoid CORS issues
+          // Prepare auth token
+          let idToken = '';
+          if (currentUser) {
               try {
-                  console.log("Using HTTP endpoint for stats in local environment");
-                  
-                  // Prepare headers for the HTTP request
-                  const headers: Record<string, string> = {
-                      'Content-Type': 'application/json',
-                  };
-                  
-                  // Add X-Emulator-User-Id header with the current user's ID if available
-                  if (currentUser?.uid) {
-                      headers['X-Emulator-User-Id'] = currentUser.uid;
-                      console.log(`Adding X-Emulator-User-Id header with value: ${currentUser.uid}`);
-                  }
-                  
-                  const response = await fetch('http://localhost:5001/color-lock-prod/us-central1/getUserStatsHttp', {
-                      method: 'POST',
-                      headers,
-                      body: JSON.stringify({}),
-                  });
-                  
-                  if (!response.ok) {
-                      console.warn(`HTTP response not OK: ${response.status} ${response.statusText}`);
-                      throw new Error(`HTTP error! Status: ${response.status}`);
-                  }
-                  
-                  const data = await response.json();
-                  console.log("Successfully fetched stats via HTTP endpoint");
-                  statsData = data;
-              } catch (fetchError: any) {
-                  console.warn("Error using HTTP endpoint, falling back to callable function:", fetchError);
-                  
-                  // Fall back to callable function if HTTP endpoint fails
-                  if (getUserStatsFn) {
-                      const result = await getUserStatsFn() as HttpsCallableResult<{ success: boolean; stats?: any; error?: string }>;
-                      console.log("getUserStats callable result:", result.data);
-                      statsData = result.data;
-                  } else {
-                      throw new Error("Stats functions not available");
-                  }
+                  idToken = await currentUser.getIdToken();
+              } catch (tokenError) {
+                  console.error(`Failed to get ID token:`, tokenError);
+                  if (!isLocal) throw tokenError; // Only throw in production
               }
-          } else {
-              // Use the callable function in production
-              if (!getUserStatsFn) {
-                  throw new Error("getUserStats function is not available.");
-              }
-              
-              const result = await getUserStatsFn() as HttpsCallableResult<{ success: boolean; stats?: any; error?: string }>;
-              console.log("getUserStats result:", result.data);
-              statsData = result.data;
           }
+          
+          // Determine the API endpoint
+          let apiUrl: string;
+          if (isLocal) {
+              // Use emulator endpoint for local development
+              apiUrl = 'http://localhost:5001/color-lock-prod/us-central1/getUserStatsHttp';
+              console.log(`Using emulator endpoint for stats: ${apiUrl}`);
+          } else {
+              // Use API Gateway in production
+              const gatewayUrl = import.meta.env.VITE_API_GATEWAY_URL;
+              if (!gatewayUrl) {
+                  throw new Error('API Gateway URL is not configured');
+              }
+              apiUrl = `${gatewayUrl}/getUserStats`;
+              console.log(`Using API Gateway for stats: ${apiUrl}`);
+          }
+          
+          // Prepare headers
+          const headers: Record<string, string> = {
+              'Content-Type': 'application/json',
+          };
+          
+          if (idToken) {
+              headers['Authorization'] = `Bearer ${idToken}`;
+          }
+          
+          // For emulator testing
+          if (isLocal && currentUser?.uid) {
+              headers['X-Emulator-User-Id'] = currentUser.uid;
+          }
+          
+          // Make the fetch request
+          const response = await fetch(apiUrl, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({}),
+          });
+          
+          if (!response.ok) {
+              const errorText = await response.text();
+              console.error(`API responded with error ${response.status}:`, errorText);
+              throw new Error(`API Error (${response.status}): ${errorText}`);
+          }
+          
+          const statsData = await response.json();
+          console.log("getUserStats result:", statsData);
           
           if (statsData && statsData.success && statsData.stats) {
               const currentTodayStats = gameStats.todayStats;
@@ -261,7 +306,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       } finally {
           setIsLoadingStats(false);
       }
-  }, [getUserStatsFn, currentUser, setIsLoadingStats, setFreshStats, gameStats.todayStats]);
+  }, [currentUser, setIsLoadingStats, setFreshStats, gameStats.todayStats]);
 
   // --- Helper function to clear pending moves ---
   const clearPendingMoves = useCallback(() => {

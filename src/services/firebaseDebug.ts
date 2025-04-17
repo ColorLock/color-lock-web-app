@@ -4,7 +4,6 @@
 
 import { auth, db, functions, useEmulators } from './firebaseService';
 import { getApp } from 'firebase/app';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import { collection, doc, getDoc } from 'firebase/firestore';
 
 /**
@@ -25,21 +24,72 @@ export const logFirebaseConnectionInfo = (): void => {
 /**
  * Test a call to the getDailyScoresStats function
  * Returns the result or error information
+ * Now uses the API Gateway instead of httpsCallable
  */
 export const testGetDailyScoresStats = async (date?: string): Promise<any> => {
   try {
-    const functionRef = getFunctions(getApp());
-    const getDailyScoresStatsFunc = httpsCallable(functionRef, 'getDailyScoresStats');
-    
     // Use today's date if none provided
     const puzzleId = date || new Date().toISOString().split('T')[0];
     
     console.log(`Testing getDailyScoresStats with puzzleId: ${puzzleId}`);
-    const result = await getDailyScoresStatsFunc({ puzzleId });
     
+    if (!auth?.currentUser) {
+      console.error('User not authenticated. Please sign in first.');
+      return { success: false, error: 'User not authenticated' };
+    }
+    
+    // Get the user's ID token
+    const idToken = await auth.currentUser.getIdToken();
+    
+    // Get the API Gateway URL from environment or use local emulator
+    const isLocal = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+    let apiUrl: string;
+    
+    if (isLocal) {
+      // Use emulator endpoint for local development
+      apiUrl = 'http://localhost:5001/color-lock-prod/us-central1/getDailyScoresStatsHttp';
+      console.log(`Using emulator endpoint: ${apiUrl}`);
+    } else {
+      // Use API Gateway in production
+      const gatewayUrl = import.meta.env.VITE_API_GATEWAY_URL;
+      if (!gatewayUrl) {
+        throw new Error('API Gateway URL is not configured');
+      }
+      apiUrl = `${gatewayUrl}/getDailyScoresStats`;
+      console.log(`Using API Gateway: ${apiUrl}`);
+    }
+    
+    // Prepare headers
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    
+    if (idToken) {
+      headers['Authorization'] = `Bearer ${idToken}`;
+    }
+    
+    // For emulator testing
+    if (isLocal && auth?.currentUser?.uid) {
+      headers['X-Emulator-User-Id'] = auth.currentUser.uid;
+    }
+    
+    // Make the fetch request
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ puzzleId }),
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`API responded with error ${response.status}:`, errorText);
+      throw new Error(`API Error (${response.status}): ${errorText}`);
+    }
+    
+    const result = await response.json();
     console.log('Function call successful!');
-    console.log('Result:', result.data);
-    return result.data;
+    console.log('Result:', result);
+    return result;
   } catch (error) {
     console.error('Function call failed:', error);
     return { success: false, error };
