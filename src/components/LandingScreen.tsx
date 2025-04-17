@@ -41,43 +41,37 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
   // Fetch global stats on component mount
   useEffect(() => {
     const fetchDailyScoresStats = async () => {
-      console.log('Fetching daily scores stats...');
+      const today = new Date().toISOString().split('T')[0]; // Format: YYYY-MM-DD
+      console.log(`Attempting to fetch daily scores stats for ${today}`);
+      
+      // Helper function to add delay before retry
+      const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+      
+      // Max retries and starting delay
+      const MAX_RETRIES = 3;
+      const STARTING_DELAY_MS = 500;
+      
       try {
-        // Ensure authentication before making API call
-        if (!currentUser && !isAuthenticated) {
-          console.warn('User not authenticated, attempting to authenticate first');
+        let idToken: string | null = null;
+
+        // Get current authentication status
+        if (currentUser) {
           try {
-            const authUser = await ensureAuthenticated();
-            if (!authUser) {
-              console.error('Failed to authenticate user for stats fetch');
-              fallbackToSampleData();
-              return;
+            console.log('Current user exists, getting ID token');
+            // Use Promise.race with a timeout to prevent hanging
+            const tokenPromise = currentUser.getIdToken(true); // Force refresh token
+            const timeoutPromise = new Promise<null>((_, reject) => 
+              setTimeout(() => reject(new Error("Token request timed out")), 5000)
+            );
+            
+            idToken = await Promise.race([tokenPromise, timeoutPromise]) as string;
+            console.log('Successfully retrieved ID token');
+          } catch (tokenError) {
+            console.error('Error getting ID token:', tokenError);
+            if (!isAuthenticated) {
+              console.warn('Cannot proceed without authentication');
+              throw new Error('Authentication required to fetch stats');
             }
-          } catch (authError) {
-            console.error('Authentication error:', authError);
-            fallbackToSampleData();
-            return;
-          }
-        }
-
-        // Get today's date in YYYY-MM-DD format 
-        const today = dateKeyForToday();
-        console.log(`Fetching stats for date: ${today}`);
-
-        // Get ID token for authorization
-        let idToken: string | undefined;
-        
-        try {
-          if (currentUser) {
-            idToken = await currentUser.getIdToken();
-          } else {
-            console.warn('No current user available to get token');
-          }
-        } catch (tokenError) {
-          console.error('Error getting ID token:', tokenError);
-          // Continue without token in development but fail in production
-          if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-            throw new Error('Authentication required to fetch stats');
           }
         }
 
@@ -102,55 +96,99 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
           console.log(`Using API Gateway URL for stats: ${functionUrl}`);
         }
 
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-        };
+        // Execute request with retry logic
+        let result = null;
+        let lastError = null;
         
-        // Always include auth token if available
-        if (idToken) {
-          headers['Authorization'] = `Bearer ${idToken}`;
-          console.log('Including authentication token in request');
-        } else {
-          console.warn('No ID token available for API call');
-          // In production, fail if no token is available
-          if (!isLocalDev) {
-            throw new Error('Authentication token required but not available');
+        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+          if (attempt > 0) {
+            // Add exponential backoff delay before retries
+            const delayMs = STARTING_DELAY_MS * Math.pow(2, attempt - 1);
+            console.log(`Retry attempt ${attempt + 1}/${MAX_RETRIES} after ${delayMs}ms delay`);
+            await delay(delayMs);
+          }
+          
+          try {
+            const headers: Record<string, string> = {
+              'Content-Type': 'application/json',
+            };
+            
+            // Always include auth token if available
+            if (idToken) {
+              headers['Authorization'] = `Bearer ${idToken}`;
+              console.log('Including authentication token in request');
+            } else {
+              console.warn('No ID token available for API call');
+              // In production, we'll continue without token and let the server decide
+            }
+            
+            // Add emulator header if needed for local testing
+            if (isLocalDev && useEmulators && currentUser?.uid) {
+              headers['X-Emulator-User-Id'] = currentUser.uid;
+            }
+
+            console.log(`Making fetch request to ${functionUrl} (attempt ${attempt + 1}/${MAX_RETRIES})`);
+            console.log('Request headers:', Object.keys(headers));
+            
+            const response = await fetch(functionUrl, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ puzzleId: today }),
+              credentials: 'same-origin', // Helps with cookies if used
+            });
+
+            console.log(`Stats fetch response status: ${response.status}`);
+
+            if (!response.ok) {
+              const errorBody = await response.text();
+              console.error(`HTTP error fetching stats: ${response.status} - ${response.statusText}`, errorBody);
+              
+              // Try to parse error if JSON
+              let errorJson = {};
+              try { errorJson = JSON.parse(errorBody); } catch(e){}
+              
+              // For specific errors that we shouldn't retry
+              if (response.status === 401 || response.status === 403) {
+                console.error('Authentication error - not retrying');
+                throw new Error(`Authentication failed (${response.status}): ${(errorJson as any)?.error || response.statusText}`);
+              }
+              
+              // For other errors, continue retry loop
+              lastError = new Error(`Failed to fetch stats (${response.status}): ${(errorJson as any)?.error || response.statusText}`);
+              continue;
+            }
+
+            result = await response.json();
+            console.log('Stats fetch result:', result);
+            break; // Success, exit retry loop
+          } catch (fetchError: any) {
+            console.error(`Fetch error on attempt ${attempt + 1}:`, fetchError);
+            lastError = fetchError;
+            
+            // Check for CORS errors or network issues that might be retryable
+            if (fetchError.message?.includes('NetworkError') || 
+                fetchError.message?.includes('CORS') || 
+                fetchError.message?.includes('Failed to fetch')) {
+              continue; // Retry
+            } else {
+              throw fetchError; // Non-retryable error
+            }
           }
         }
         
-        // Add emulator header if needed for local testing
-        if (isLocalDev && useEmulators && currentUser?.uid) {
-          headers['X-Emulator-User-Id'] = currentUser.uid;
+        // If we exhausted retries, throw the last error
+        if (!result && lastError) {
+          console.error('All retry attempts failed');
+          throw lastError;
         }
 
-        console.log('Making fetch request with headers:', Object.keys(headers));
-        const response = await fetch(functionUrl, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ puzzleId: today }),
-        });
-
-        console.log(`Stats fetch response status: ${response.status}`);
-
-        if (!response.ok) {
-          const errorBody = await response.text();
-          console.error(`HTTP error fetching stats: ${response.status} - ${response.statusText}`, errorBody);
-          // Try to parse error if JSON
-          let errorJson = {};
-          try { errorJson = JSON.parse(errorBody); } catch(e){}
-          throw new Error(`Failed to fetch stats (${response.status}): ${ (errorJson as any)?.error || response.statusText}`);
-        }
-
-        const result = await response.json();
-        console.log('Stats fetch result:', result);
-        // --- End NEW Fetch Logic ---
-
-        if (result.success && result.stats) {
+        // Process results
+        if (result && result.success && result.stats) {
           console.log('Setting stats from API response');
           setStats(result.stats);
-          setUsersWithBestScore(result.stats.playersWithLowestScore || 0); // Handle potential null
+          setUsersWithBestScore(result.stats.playersWithLowestScore || 0);
         } else {
-          console.error('Stats fetch failed or returned invalid data:', result.error || 'No stats data');
+          console.error('Stats fetch failed or returned invalid data:', result?.error || 'No stats data');
           fallbackToSampleData();
         }
 

@@ -110,6 +110,25 @@ export const ensureAuthenticated = async (): Promise<User | null> => {
     }
     
     console.log("User already authenticated");
+    
+    // Force token refresh for existing users
+    try {
+      console.log("Forcing ID token refresh");
+      const forceRefreshPromise = auth.currentUser.getIdToken(true);
+      const refreshTimeoutPromise = new Promise<string>((_, reject) => {
+        setTimeout(() => {
+          console.error("Token refresh timed out after 5 seconds");
+          reject(new Error("Token refresh timed out"));
+        }, 5000);
+      });
+      
+      await Promise.race([forceRefreshPromise, refreshTimeoutPromise]);
+      console.log("Token refresh successful");
+    } catch (refreshError) {
+      console.warn("Token refresh failed, but using existing authentication:", refreshError);
+      // Continue with existing user even if refresh fails
+    }
+    
     return auth.currentUser;
   } catch (error) {
     console.error("Error in ensureAuthenticated:", error);
