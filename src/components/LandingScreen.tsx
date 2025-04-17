@@ -4,7 +4,7 @@ import { useNavigation } from '../App';
 import '../scss/main.scss';
 import { dateKeyForToday } from '../utils/dateUtils';
 import firebaseConfig from '../env/firebaseConfig'; // Needed for project ID fallback
-import { auth, useEmulators } from '../services/firebaseService'; // Import auth and useEmulators
+import { auth, useEmulators, ensureAuthenticated } from '../services/firebaseService'; // Import auth and useEmulators
 
 interface DailyScoreStats {
   lowestScore: number | null;
@@ -41,31 +41,44 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
   // Fetch global stats on component mount
   useEffect(() => {
     const fetchDailyScoresStats = async () => {
+      console.log('Fetching daily scores stats...');
       try {
-        // Get today's date in YYYY-MM-DD format using local date, not UTC
-        const today = dateKeyForToday();
-        console.log(`Fetching daily scores stats for date: ${today}`);
-        
-        // --- NEW Fetch Logic ---
-        if (!auth?.currentUser && !useEmulators) {
-           console.warn('No user logged in and not using emulators. Skipping stats fetch.');
-           fallbackToSampleData(); // Or set stats to empty/default
-           return;
+        // Ensure authentication before making API call
+        if (!currentUser && !isAuthenticated) {
+          console.warn('User not authenticated, attempting to authenticate first');
+          try {
+            const authUser = await ensureAuthenticated();
+            if (!authUser) {
+              console.error('Failed to authenticate user for stats fetch');
+              fallbackToSampleData();
+              return;
+            }
+          } catch (authError) {
+            console.error('Authentication error:', authError);
+            fallbackToSampleData();
+            return;
+          }
         }
 
-        let idToken = '';
-        if (auth?.currentUser) {
-           try {
-              idToken = await auth.currentUser.getIdToken();
-           } catch (tokenError) {
-              console.error("Failed to get ID token for stats fetch:", tokenError);
-              if (!useEmulators) { // Only throw if not in emulator mode where we might proceed without token
-                 throw new Error("Authentication token unavailable.");
-              }
-              console.warn("Proceeding without ID token in emulator mode.");
-           }
-        } else if (useEmulators) {
-           console.warn("No current user, but using emulators. Proceeding without ID token.");
+        // Get today's date in YYYY-MM-DD format 
+        const today = dateKeyForToday();
+        console.log(`Fetching stats for date: ${today}`);
+
+        // Get ID token for authorization
+        let idToken: string | undefined;
+        
+        try {
+          if (currentUser) {
+            idToken = await currentUser.getIdToken();
+          } else {
+            console.warn('No current user available to get token');
+          }
+        } catch (tokenError) {
+          console.error('Error getting ID token:', tokenError);
+          // Continue without token in development but fail in production
+          if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+            throw new Error('Authentication required to fetch stats');
+          }
         }
 
         const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
@@ -75,31 +88,42 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
         let functionUrl: string;
         if (isLocalDev && useEmulators) {
           // Use direct emulator URL for the HTTP endpoint
-          functionUrl = `http://localhost:5001/${projectId}/${region}/getDailyScoresStatsHttp`; // <-- Use the HTTP version
+          functionUrl = `http://localhost:5001/${projectId}/${region}/getDailyScoresStatsHttp`;
           console.log(`Using Emulator URL for stats: ${functionUrl}`);
         } else {
           // Use API Gateway URL for production
           const gatewayApiUrl = import.meta.env.VITE_API_GATEWAY_URL;
           if (!gatewayApiUrl) {
-             console.error("VITE_API_GATEWAY_URL is not set in environment variables!");
-             throw new Error("API Gateway URL is not configured.");
+            console.error("VITE_API_GATEWAY_URL is not set in environment variables!");
+            throw new Error("API Gateway URL is not configured.");
           }
           // The path should match the one defined in openapi.yaml for the gateway
-          functionUrl = `${gatewayApiUrl}/getDailyScoresStats`; // <-- Path exposed by gateway
+          functionUrl = `${gatewayApiUrl}/getDailyScoresStats`;
           console.log(`Using API Gateway URL for stats: ${functionUrl}`);
         }
 
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
         };
+        
+        // Always include auth token if available
         if (idToken) {
           headers['Authorization'] = `Bearer ${idToken}`;
+          console.log('Including authentication token in request');
+        } else {
+          console.warn('No ID token available for API call');
+          // In production, fail if no token is available
+          if (!isLocalDev) {
+            throw new Error('Authentication token required but not available');
+          }
         }
+        
         // Add emulator header if needed for local testing
         if (isLocalDev && useEmulators && currentUser?.uid) {
-           headers['X-Emulator-User-Id'] = currentUser.uid;
+          headers['X-Emulator-User-Id'] = currentUser.uid;
         }
 
+        console.log('Making fetch request with headers:', Object.keys(headers));
         const response = await fetch(functionUrl, {
           method: 'POST',
           headers,
