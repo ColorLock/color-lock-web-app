@@ -1,9 +1,9 @@
 import { initializeApp, FirebaseApp } from 'firebase/app';
-import { getAuth, signInAnonymously, User, Auth, connectAuthEmulator } from 'firebase/auth';
+import { getAuth, signInAnonymously, User, Auth, connectAuthEmulator, getIdToken } from 'firebase/auth';
 import { getFirestore, Firestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getFunctions, connectFunctionsEmulator, Functions, httpsCallable } from 'firebase/functions';
-// Import AppCheck types and provider
-import { initializeAppCheck, ReCaptchaV3Provider, AppCheck } from 'firebase/app-check';
+// Import AppCheck types and ReCaptchaEnterpriseProvider
+import { initializeAppCheck, ReCaptchaEnterpriseProvider, AppCheck } from 'firebase/app-check';
 import { FirestorePuzzleData } from '../types';
 // Import the Firebase configuration
 import firebaseConfig from '../env/firebaseConfig';
@@ -24,11 +24,9 @@ const isDevelopment = process.env.NODE_ENV === 'development' ||
 const useEmulators = isDevelopment;
 
 // --- App Check Debug Token (Development ONLY) ---
-// Assign the debug token to a global variable for easy access in the console
-// DO NOT use this in production.
-if (isDevelopment) {
-  (self as any).FIREBASE_APPCHECK_DEBUG_TOKEN = true; // Enable debug token generation
-  console.warn("App Check debug token generation enabled. Ensure this is not active in production.");
+if (useEmulators) {
+  (self as any).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+  console.warn("App Check debug token generation enabled for emulator testing. Ensure this is not active in production.");
   console.log("To get the debug token, check the console logs for a message starting with 'App Check debug token:'");
 }
 // --- End App Check Debug Token ---
@@ -36,46 +34,59 @@ if (isDevelopment) {
 try {
   // Initialize Firebase app
   app = initializeApp(firebaseConfig);
+  console.log("Firebase App initialized.");
 
   // --- Initialize App Check ---
-  // Ensure the site key is available
+  // Ensure the site key is available (this should be your reCAPTCHA Enterprise Site Key)
   if (import.meta.env.VITE_RECAPTCHA_SITE_KEY) {
-    appCheck = initializeAppCheck(app, {
-      provider: new ReCaptchaV3Provider(import.meta.env.VITE_RECAPTCHA_SITE_KEY),
-      // Optional argument. If true, the SDK automatically refreshes App Check
-      // tokens as needed. Recommended for SPAs.
-      isTokenAutoRefreshEnabled: true
-    });
-    console.log("Firebase App Check initialized successfully.");
+    try {
+        appCheck = initializeAppCheck(app, {
+          // Use ReCaptchaEnterpriseProvider instead of ReCaptchaV3Provider
+          provider: new ReCaptchaEnterpriseProvider(import.meta.env.VITE_RECAPTCHA_SITE_KEY),
+          isTokenAutoRefreshEnabled: true
+        });
+        console.log("Firebase App Check initialized successfully with reCAPTCHA Enterprise provider.");
+    } catch (appCheckError) {
+        console.error("Firebase App Check (Enterprise) initialization error:", appCheckError);
+    }
   } else {
-    console.error("VITE_RECAPTCHA_SITE_KEY is not set. App Check initialization skipped.");
+    console.warn("VITE_RECAPTCHA_SITE_KEY is not set. App Check initialization skipped. This is OK for emulator testing but required for production.");
   }
   // --- End App Check Initialization ---
 
   // IMPORTANT: Initialize Auth FIRST before any other Firebase service
   auth = getAuth(app);
+  console.log("Firebase Auth initialized.");
 
   // Only after Auth is initialized, initialize Firestore
   db = getFirestore(app);
+  console.log("Firebase Firestore initialized.");
 
   // Initialize Functions
   functions = getFunctions(app, 'us-central1'); // Specify region
+  console.log("Firebase Functions initialized for region us-central1.");
 
   // Connect to emulators if in development
   if (useEmulators) {
-    console.log("Connecting to Firebase emulators");
-    // Note: App Check emulator connection is not typically needed for client-side testing
-    // unless you are testing custom App Check providers. reCAPTCHA v3 works against the real service.
-    connectAuthEmulator(auth, "http://localhost:9099");
-    connectFirestoreEmulator(db, "localhost", 8080);
-    connectFunctionsEmulator(functions, "localhost", 5001);
-    console.log(`Functions emulator connected: http://localhost:5001`);
+    console.log("Connecting to Firebase emulators...");
+    try {
+        connectAuthEmulator(auth, "http://localhost:9099", { disableWarnings: true });
+        console.log("Connected to Auth emulator (localhost:9099)");
+    } catch (e) { console.error("Failed to connect to Auth emulator:", e); }
+    try {
+        connectFirestoreEmulator(db, "localhost", 8080);
+        console.log("Connected to Firestore emulator (localhost:8080)");
+    } catch (e) { console.error("Failed to connect to Firestore emulator:", e); }
+    try {
+        connectFunctionsEmulator(functions, "localhost", 5001);
+        console.log("Connected to Functions emulator (localhost:5001)");
+    } catch (e) { console.error("Failed to connect to Functions emulator:", e); }
   }
 
-  console.log("Firebase initialized successfully", isDevelopment ? "(development mode)" : "(production mode)");
+  console.log("Firebase initialized successfully", useEmulators ? "(development mode with emulators)" : "(production mode)");
+
 } catch (error) {
-  console.error("Firebase initialization error:", error);
-  // Create placeholders if initialization fails
+  console.error("Firebase core initialization error:", error);
   app = null;
   auth = null;
   db = null;
@@ -83,85 +94,44 @@ try {
   appCheck = null;
 }
 
-export { auth, db, functions, useEmulators, appCheck }; // Export appCheck
+export { auth, db, functions, useEmulators, appCheck };
 
 // Function to ensure user is authenticated with better error handling
 export const ensureAuthenticated = async (): Promise<User | null> => {
-  try {
-    // Check if Firebase is properly initialized
-    if (!auth) {
-      console.error("Firebase Auth not initialized");
-      return null;
-    }
-
-    console.log("Attempting to ensure authentication");
-
-    if (!auth.currentUser) {
-      console.log("No current user, attempting anonymous sign-in");
-
-      // Add timeout protection to anonymous sign-in
-      const signInPromise = signInAnonymously(auth).then(userCredential => {
-        console.log("Anonymous sign-in successful");
-        return userCredential.user;
-      });
-
-      // Create a timeout promise
-      const timeoutPromise = new Promise<null>((_, reject) => { // Changed resolve to reject
-        setTimeout(() => {
-          console.error("Anonymous sign-in timed out after 8 seconds");
-          reject(new Error("Authentication timed out"));
-        }, 8000);
-      });
-
-      try {
-        // Race the sign-in against the timeout
-        const user = await Promise.race([signInPromise, timeoutPromise]);
-        return user;
-      } catch (error) {
-        console.error("Anonymous authentication error:", error);
-
-        // Check if there's a user despite the error (race condition)
-        if (auth.currentUser) {
-          console.warn("Found user despite authentication error");
-          return auth.currentUser;
-        }
-
-        // Return null instead of throwing to allow graceful fallback
-        return null;
-      }
-    }
-
-    console.log("User already authenticated:", auth.currentUser.uid);
-
-    // Force token refresh for existing users (optional, but good practice)
-    try {
-      console.log("Forcing ID token refresh");
-      const forceRefreshPromise = auth.currentUser.getIdToken(true);
-      const refreshTimeoutPromise = new Promise<string>((_, reject) => {
-        setTimeout(() => {
-          console.error("Token refresh timed out after 5 seconds");
-          reject(new Error("Token refresh timed out"));
-        }, 5000);
-      });
-
-      await Promise.race([forceRefreshPromise, refreshTimeoutPromise]);
-      console.log("Token refresh successful");
-    } catch (refreshError) {
-      console.warn("Token refresh failed, but using existing authentication:", refreshError);
-      // Continue with existing user even if refresh fails
-    }
-
-    return auth.currentUser;
-  } catch (error) {
-    console.error("Error in ensureAuthenticated:", error);
-
-    // Even if we hit an error, check if we have a user (race condition)
-    if (auth?.currentUser) {
-      console.warn("Found user despite error in ensureAuthenticated");
-      return auth?.currentUser;
-    }
-
+  if (!auth) {
+    console.error("Firebase Auth not initialized, cannot ensure authentication.");
     return null;
+  }
+
+  if (auth.currentUser) {
+    console.log("User already authenticated:", auth.currentUser.uid, "Anonymous:", auth.currentUser.isAnonymous);
+    try {
+      await getIdToken(auth.currentUser, true); // Force refresh
+      console.log("ID token refreshed silently.");
+    } catch (refreshError) {
+      console.warn("Silent token refresh failed:", refreshError);
+    }
+    return auth.currentUser;
+  }
+
+  console.log("No current user, attempting anonymous sign-in...");
+  try {
+    const signInPromise = signInAnonymously(auth);
+    const timeoutPromise = new Promise<null>((_, reject) =>
+      setTimeout(() => reject(new Error("Anonymous sign-in timed out (8s)")), 8000)
+    );
+
+    const userCredential = await Promise.race([signInPromise, timeoutPromise as Promise<any>]);
+    if (userCredential && userCredential.user) {
+        console.log("Anonymous sign-in successful:", userCredential.user.uid);
+        return userCredential.user;
+    } else {
+        console.warn("Sign-in promise resolved after timeout or returned unexpected structure.");
+        return auth.currentUser;
+    }
+  } catch (error) {
+    console.error("Anonymous sign-in error:", error);
+    return auth.currentUser || null;
   }
 };
 
