@@ -3,8 +3,13 @@ import { TileColor, DailyPuzzle, FirestorePuzzleData } from '../types';
 import { AppSettings, defaultSettings, DifficultyLevel } from '../types/settings';
 import { GameStatistics, defaultStats } from '../types/stats';
 import { HintResult } from '../utils/hintUtils';
-import { fetchPuzzle, functions } from '../services/firebaseService';
-import { getFunctions, Functions } from 'firebase/functions';
+import {
+    auth, // Keep auth import if needed elsewhere
+    fetchPuzzleCallable,
+    updateUserStatsCallable,
+    getUserStatsCallable
+} from '../services/firebaseService';
+import { httpsCallable } from 'firebase/functions'; // Just import httpsCallable
 import { dateKeyForToday } from '../utils/dateUtils';
 import { findLargestRegion, generatePuzzleFromDB } from '../utils/gameLogic';
 import { applyColorChange, checkIfOnOptimalPath, getGameHint } from '../utils/gameUtils';
@@ -119,195 +124,86 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setFreshStats 
   } = useGameStats(defaultStats);
 
-  // --- Utility Function ---
+  // --- Utility Function (Use updateUserStatsCallable) ---
   const callUpdateStats = useCallback(async (data: any) => {
       console.log(`[Stats ${new Date().toISOString()}] callUpdateStats invoked with event: ${data.eventType}, puzzleId: ${data.puzzleId}`);
-      
-      if (!currentUser && !(process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost')) {
-          console.error(`[Stats ${new Date().toISOString()}] No Firebase user logged in. Cannot update stats.`);
-          setError("You must be logged in to save statistics.");
-          return null;
-      }
 
-      const userId = currentUser?.uid || 'dev-user';
-      console.log(`[Stats ${new Date().toISOString()}] Preparing API request for user: ${userId}`);
+      // No need to check currentUser here, callable function requires auth implicitly
+      // unless the function backend allows unauthenticated access explicitly.
+      // Our backend function now requires auth for this.
+
+      console.log(`[Stats ${new Date().toISOString()}] Preparing callable request`);
       console.log(`[Stats ${new Date().toISOString()}] Full payload:`, JSON.stringify(data));
-      
+
       try {
-          console.log(`[Stats ${new Date().toISOString()}] Sending request to API Gateway...`);
+          console.log(`[Stats ${new Date().toISOString()}] Sending request via httpsCallable...`);
           const startTime = performance.now();
-          
-          // Determine if we're in local development environment
-          const isLocal = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
-          
-          // Prepare auth token
-          let idToken = '';
-          if (currentUser) {
-              try {
-                  idToken = await currentUser.getIdToken();
-              } catch (tokenError) {
-                  console.error(`[Stats ${new Date().toISOString()}] Failed to get ID token:`, tokenError);
-                  if (!isLocal) throw tokenError; // Only throw in production
-              }
-          }
-          
-          // Determine the API endpoint
-          let apiUrl: string;
-          if (isLocal) {
-              // Use emulator endpoint for local development
-              apiUrl = 'http://localhost:5001/color-lock-prod/us-central1/updateUserStatsHttp';
-              console.log(`[Stats ${new Date().toISOString()}] Using emulator endpoint: ${apiUrl}`);
-          } else {
-              // Use API Gateway in production
-              const gatewayUrl = import.meta.env.VITE_API_GATEWAY_URL;
-              if (!gatewayUrl) {
-                  throw new Error('API Gateway URL is not configured');
-              }
-              apiUrl = `${gatewayUrl}/updateUserStats`;
-              console.log(`[Stats ${new Date().toISOString()}] Using API Gateway: ${apiUrl}`);
-          }
-          
-          // Prepare headers
-          const headers: Record<string, string> = {
-              'Content-Type': 'application/json',
-          };
-          
-          if (idToken) {
-              headers['Authorization'] = `Bearer ${idToken}`;
-          }
-          
-          // For emulator testing
-          if (isLocal && currentUser?.uid) {
-              headers['X-Emulator-User-Id'] = currentUser.uid;
-          }
-          
-          // Make the fetch request
-          const response = await fetch(apiUrl, {
-              method: 'POST',
-              headers,
-              body: JSON.stringify(data),
-          });
-          
+
+          // Call the callable function
+          const result = await updateUserStatsCallable(data);
+
           const duration = (performance.now() - startTime).toFixed(2);
-          console.log(`[Stats ${new Date().toISOString()}] API request completed in ${duration}ms`);
-          
-          if (!response.ok) {
-              const errorText = await response.text();
-              console.error(`[Stats ${new Date().toISOString()}] API responded with error ${response.status}:`, errorText);
-              throw new Error(`API Error (${response.status}): ${errorText}`);
-          }
-          
-          const result = await response.json();
-          console.log(`[Stats ${new Date().toISOString()}] Result:`, result);
-          
+          console.log(`[Stats ${new Date().toISOString()}] Callable request completed in ${duration}ms`);
+
+          console.log(`[Stats ${new Date().toISOString()}] Result:`, result.data);
+
           // Check for success AND updatedStats
-          if (result?.success && result.updatedStats) {
+          if (result.data?.success && result.data.updatedStats) {
              console.log(`[Stats ${new Date().toISOString()}] Backend update successful. Updating local state.`);
              // Update local gameStats state using setFreshStats with the allTimeStats from backend
-             setFreshStats(result.updatedStats);
-             return result; // Return full result if needed elsewhere
-          } else if (result?.success) {
+             setFreshStats(result.data.updatedStats);
+             return result.data; // Return full result if needed elsewhere
+          } else if (result.data?.success) {
              console.warn(`[Stats ${new Date().toISOString()}] Backend reported success but did not return updatedStats.`);
-             return result;
+             return result.data;
           } else {
-             // Handle cases where backend explicitly returned success: false
-             console.error(`[Stats ${new Date().toISOString()}] Backend function reported failure.`);
-             setError(`Failed to update stats: Backend error`);
+             // Handle cases where backend explicitly returned success: false or an error structure
+             const errorMsg = result.data?.error || 'Unknown backend error';
+             console.error(`[Stats ${new Date().toISOString()}] Backend function reported failure: ${errorMsg}`);
+             setError(`Failed to update stats: ${errorMsg}`);
              return null;
           }
       } catch (error: any) {
-          console.error(`[Stats ${new Date().toISOString()}] Error calling updateUserStats:`, error);
-          console.error(`[Stats ${new Date().toISOString()}] Error details:`, error.message, error.code, error.details);
-          setError(`Failed to update stats: ${error.message || 'Unknown error'}`);
+          console.error(`[Stats ${new Date().toISOString()}] Error calling updateUserStats callable:`, error);
+          // Handle specific Firebase Functions errors
+          let message = error.message || 'Unknown error calling function';
+          if (error.code) {
+              message = `(${error.code}) ${message}`;
+          }
+          console.error(`[Stats ${new Date().toISOString()}] Error details:`, error.code, error.details);
+          setError(`Failed to update stats: ${message}`);
           return null;
       }
-  }, [currentUser, setFreshStats]);
-  
-  const fetchAndSetUserStats = useCallback(async () => {
-      if (!currentUser && !(process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost')) {
-          console.error("No Firebase user logged in. Cannot fetch stats.");
-          setError("You must be logged in to view statistics.");
-          return;
-      }
+  }, [setFreshStats]); // Removed currentUser dependency
 
-      console.log("Fetching user stats...");
+  // --- Utility Function (Use getUserStatsCallable) ---
+  const fetchAndSetUserStats = useCallback(async () => {
+      // No need to check currentUser here, callable function requires auth implicitly.
+      console.log("Fetching user stats via callable function...");
       setIsLoadingStats(true);
       try {
-          // Check if we're in the local/development environment
-          const isLocal = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
-          
-          // Prepare auth token
-          let idToken = '';
-          if (currentUser) {
-              try {
-                  idToken = await currentUser.getIdToken();
-              } catch (tokenError) {
-                  console.error(`Failed to get ID token:`, tokenError);
-                  if (!isLocal) throw tokenError; // Only throw in production
-              }
-          }
-          
-          // Determine the API endpoint
-          let apiUrl: string;
-          if (isLocal) {
-              // Use emulator endpoint for local development
-              apiUrl = 'http://localhost:5001/color-lock-prod/us-central1/getUserStatsHttp';
-              console.log(`Using emulator endpoint for stats: ${apiUrl}`);
-          } else {
-              // Use API Gateway in production
-              const gatewayUrl = import.meta.env.VITE_API_GATEWAY_URL;
-              if (!gatewayUrl) {
-                  throw new Error('API Gateway URL is not configured');
-              }
-              apiUrl = `${gatewayUrl}/getUserStats`;
-              console.log(`Using API Gateway for stats: ${apiUrl}`);
-          }
-          
-          // Prepare headers
-          const headers: Record<string, string> = {
-              'Content-Type': 'application/json',
-          };
-          
-          if (idToken) {
-              headers['Authorization'] = `Bearer ${idToken}`;
-          }
-          
-          // For emulator testing
-          if (isLocal && currentUser?.uid) {
-              headers['X-Emulator-User-Id'] = currentUser.uid;
-          }
-          
-          // Make the fetch request
-          const response = await fetch(apiUrl, {
-              method: 'POST',
-              headers,
-              body: JSON.stringify({}),
-          });
-          
-          if (!response.ok) {
-              const errorText = await response.text();
-              console.error(`API responded with error ${response.status}:`, errorText);
-              throw new Error(`API Error (${response.status}): ${errorText}`);
-          }
-          
-          const statsData = await response.json();
-          console.log("getUserStats result:", statsData);
-          
-          if (statsData && statsData.success && statsData.stats) {
-              const currentTodayStats = gameStats.todayStats;
-              setFreshStats(statsData.stats);
+          const result = await getUserStatsCallable(); // No data needed for this call
+          console.log("getUserStats callable result:", result.data);
+
+          if (result.data && result.data.success && result.data.stats) {
+              // const currentTodayStats = gameStats.todayStats; // Keep this if you want to preserve client-side today's stats
+              setFreshStats(result.data.stats);
               setError(null);
           } else {
-              throw new Error(statsData?.error || 'Failed to fetch stats');
+              throw new Error(result.data?.error || 'Failed to fetch stats');
           }
       } catch (error: any) {
-          console.error("Error fetching user stats:", error);
-          setError(`Failed to fetch stats: ${error.message || 'Unknown error'}`);
+          console.error("Error fetching user stats via callable:", error);
+          let message = error.message || 'Unknown error fetching stats';
+          if (error.code) {
+              message = `(${error.code}) ${message}`;
+          }
+          setError(`Failed to fetch stats: ${message}`);
       } finally {
           setIsLoadingStats(false);
       }
-  }, [currentUser, setIsLoadingStats, setFreshStats, gameStats.todayStats]);
-
+  }, [setIsLoadingStats, setFreshStats]); // Removed currentUser dependency
+  
   // --- Helper function to clear pending moves ---
   const clearPendingMoves = useCallback(() => {
     console.log('Clearing pending moves from localStorage');
@@ -327,76 +223,54 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   // --- Effects ---
 
-  // Load puzzle on mount
+  // Load puzzle on mount (Use fetchPuzzleCallable)
   useEffect(() => {
     const loadPuzzle = async () => {
       try {
         setLoading(true);
         setError(null); // Clear previous errors
-        console.log(`Attempting to fetch puzzle for date: ${DATE_TO_USE}`);
-        
-        // Add retry logic with timeout
-        let fetchedFirestoreData = null;
-        let retryCount = 0;
-        const maxRetries = 3;
-        
-        while (retryCount < maxRetries && !fetchedFirestoreData) {
-          try {
-            if (retryCount > 0) {
-              console.log(`Retrying puzzle fetch (attempt ${retryCount + 1}/${maxRetries})...`);
-              // Small delay before retry to allow auth to complete
-              await new Promise(r => setTimeout(r, 1500));
-            }
-            
-            fetchedFirestoreData = await fetchPuzzle(DATE_TO_USE);
-            console.log('Successfully fetched puzzle data');
-          } catch (fetchErr) {
-            retryCount++;
-            const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-            
-            // If this is the final retry, throw to be caught by outer try/catch
-            if (retryCount >= maxRetries) {
-              console.error(`Failed to fetch puzzle after ${maxRetries} attempts:`, fetchErr);
-              throw fetchErr;
-            }
-            
-            // For auth errors, wait longer to give auth time to initialize
-            if (errMsg.includes('Authentication required')) {
-              console.warn('Authentication not ready, waiting before retry...');
-              await new Promise(r => setTimeout(r, 2000));
-            }
-          }
-        }
-        
-        if (!fetchedFirestoreData) {
-          throw new Error('Failed to fetch puzzle data after multiple attempts');
-        }
+        console.log(`Attempting to fetch puzzle for date: ${DATE_TO_USE} via callable function`);
 
-        setFirestoreData(fetchedFirestoreData);
-        const newPuzzle = generatePuzzleFromDB(fetchedFirestoreData, DATE_TO_USE, settings);
-        setPuzzle(newPuzzle);
+        // Call the callable function
+        const result = await fetchPuzzleCallable({ date: DATE_TO_USE });
 
-        // Reset attempt state for the new puzzle/day
-        setAttemptNumberToday(1); // Assume 1st attempt until loaded otherwise
-        setIsFirstTryOfDay(true);
-        setHintsUsedThisGame(0);
-        setMovesThisAttempt(0);
-        setHasMadeFirstMove(false);
-        setIsLostReported(false); // Reset loss reported flag
+        if (result.data.success && result.data.data) {
+          console.log('Successfully fetched puzzle data via callable');
+          const fetchedFirestoreData = result.data.data;
+          setFirestoreData(fetchedFirestoreData);
+          const newPuzzle = generatePuzzleFromDB(fetchedFirestoreData, DATE_TO_USE, settings);
+          setPuzzle(newPuzzle);
 
-      } catch (err) {
-        console.error('Error fetching puzzle:', err);
-        const errMsg = err instanceof Error ? err.message : String(err);
-        if (errMsg.includes('Authentication required')) {
-             setError('Authentication failed. Please log in or play as guest.');
-        } else if (errMsg.includes('Puzzle not found')) {
-             setError(`Today's puzzle (${DATE_TO_USE}) is not available yet. Please check back later.`);
-        } else if (window.location.hostname === 'localhost') {
-             console.error('Puzzle fetch failed in local development. Ensure emulators are running and seeded (`npm run cursor-dev` or `npm run local-test`).');
-             setError('Local dev: Failed to load puzzle. Check emulators and console.');
+          // Reset attempt state for the new puzzle/day
+          setAttemptNumberToday(1);
+          setIsFirstTryOfDay(true);
+          setHintsUsedThisGame(0);
+          setMovesThisAttempt(0);
+          setHasMadeFirstMove(false);
+          setIsLostReported(false);
+
         } else {
-             setError('Unable to load puzzle. Please check your connection and try again.');
+           // Handle specific errors returned by the function
+           throw new Error(result.data.error || 'Failed to fetch puzzle data');
         }
+
+      } catch (err: any) {
+        console.error('Error fetching puzzle via callable:', err);
+        let errMsg = err.message || String(err);
+        // Map Firebase error codes to user-friendly messages
+        if (err.code === 'auth/unauthenticated') {
+             errMsg = 'Authentication failed. Please log in or play as guest.';
+        } else if (err.code === 'auth/not-found') {
+             errMsg = `Today's puzzle (${DATE_TO_USE}) is not available yet. Please check back later.`;
+        } else if (err.code === 'failed-precondition') {
+             errMsg = 'App verification failed. Please ensure your app is registered and up-to-date.';
+        } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+             console.error('Puzzle fetch failed in local development. Ensure emulators are running and seeded (`npm run cursor-dev`).');
+             errMsg = 'Local dev: Failed to load puzzle. Check emulators and console.';
+        } else {
+             errMsg = 'Unable to load puzzle. Please check your connection and try again.';
+        }
+        setError(errMsg);
       } finally {
         setLoading(false);
       }
@@ -406,7 +280,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     loadInitialStats(); // Load stats from storage
 
     loadPuzzle();
-  }, [DATE_TO_USE, settings.difficultyLevel, loadInitialStats]); // Rerun if difficulty changes to regen puzzle
+  }, [DATE_TO_USE, settings.difficultyLevel, loadInitialStats]); // Rerun if difficulty changes
 
   // When the puzzle is first loaded, set the game start time
   useEffect(() => {
