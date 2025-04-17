@@ -154,26 +154,42 @@ export const fetchPuzzleFromCloudFunction = async (date: string): Promise<Firest
     throw new Error("Authentication required to call Cloud Function");
   }
   
-  // Get ID token for authorization with timeout protection
-  let idToken: string;
-  try {
-    const tokenPromise = user.getIdToken();
-    const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error("Getting ID token timed out after 5 seconds")), 5000)
-    );
-    
-    idToken = await Promise.race([tokenPromise, timeoutPromise]);
-  } catch (tokenError) {
-    console.error("Failed to get ID token:", tokenError);
-    
-    // In development/emulator environment, allow an empty token as a fallback
-    if (process.env.NODE_ENV === 'development' || 
-        window.location.hostname === 'localhost' || 
-        window.location.hostname === '127.0.0.1') {
-      console.warn("In development environment - proceeding with empty token");
-      idToken = "emulator-bypass-token";
-    } else {
-      throw new Error("Failed to get authentication token");
+  // Get ID token for authorization with timeout protection and retry logic
+  let idToken: string = ""; // Initialize with empty string to fix linter error
+  let retryCount = 0;
+  const maxRetries = 3;
+  
+  while (retryCount < maxRetries) {
+    try {
+      const tokenPromise = user.getIdToken(retryCount > 0); // Force refresh on retry
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error(`Getting ID token timed out after ${retryCount > 0 ? 8 : 5} seconds`)), 
+          retryCount > 0 ? 8000 : 5000) // Longer timeout on retry
+      );
+      
+      idToken = await Promise.race([tokenPromise, timeoutPromise]);
+      console.log(`Successfully retrieved ID token${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
+      break; // Token retrieved successfully, exit loop
+    } catch (tokenError) {
+      retryCount++;
+      console.warn(`Failed to get ID token (attempt ${retryCount}/${maxRetries}):`, tokenError);
+      
+      if (retryCount >= maxRetries) {
+        // In development/emulator environment, allow an empty token as a fallback
+        if (process.env.NODE_ENV === 'development' || 
+            window.location.hostname === 'localhost' || 
+            window.location.hostname === '127.0.0.1') {
+          console.warn("In development environment - proceeding with empty token");
+          idToken = "emulator-bypass-token";
+          break;
+        } else {
+          throw new Error(`Failed to get authentication token after ${maxRetries} attempts`);
+        }
+      }
+      
+      // Wait before retrying
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log(`Retrying token retrieval, attempt ${retryCount + 1}/${maxRetries}`);
     }
   }
   
@@ -222,6 +238,13 @@ export const fetchPuzzleFromCloudFunction = async (date: string): Promise<Firest
     if (!response.ok) {
       const errorBody = await response.text();
       console.error(`HTTP error: ${response.status} - ${response.statusText}`, errorBody);
+      
+      // Special handling for 401/403 errors that might be token-related
+      if (response.status === 401 || response.status === 403) {
+        console.warn("Authentication error - token may be invalid. Will throw specific error.");
+        throw new Error(`Authentication failed (${response.status}): Token may be invalid or expired`);
+      }
+      
       throw new Error(`Failed to fetch puzzle (${response.status}): ${response.statusText}`);
     }
     
