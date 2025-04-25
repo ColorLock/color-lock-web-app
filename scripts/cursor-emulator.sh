@@ -98,7 +98,7 @@ echo -e "${BLUE}Project: color-lock-prod${NC}"
 echo -e "${YELLOW}IMPORTANT: The frontend must connect to project 'color-lock-prod' in region 'us-central1'${NC}"
 
 # Start Firebase emulators in the background
-firebase emulators:start --only auth,functions,firestore --project color-lock-prod --inspect-functions &
+firebase emulators:start --only auth,functions,firestore,pubsub --project color-lock-prod --inspect-functions &
 
 # Store the emulator process ID
 EMULATOR_PID=$!
@@ -128,12 +128,18 @@ else
   echo -e "${YELLOW}You should now see data in the getDailyScoresStats function responses.${NC}"
 fi
 
+# Set PUBSUB_EMULATOR_HOST for convenience in this terminal session
+export PUBSUB_EMULATOR_HOST=localhost:8085
+echo -e "${BLUE}Set PUBSUB_EMULATOR_HOST=${PUBSUB_EMULATOR_HOST} for this terminal session${NC}"
+
 # Notify user
 echo -e "\n${GREEN}=== Setup Complete! ===${NC}"
 echo -e "Firebase emulators are running with test data."
 echo -e "Emulator UI: ${BLUE}http://localhost:4000${NC}"
 echo -e "You can now run your app with:"
 echo -e "${BLUE}npm run dev${NC}"
+echo -e "\nTo trigger scheduled functions, run:"
+echo -e "${BLUE}npm run trigger:elo:emulator${NC} or ${BLUE}npm run trigger:leaderboard:emulator${NC}"
 echo -e "\nPress Ctrl+C to stop the emulators when done testing."
 
 # Keep script running until Ctrl+C

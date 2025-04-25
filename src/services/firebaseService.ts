@@ -6,8 +6,16 @@ import { getFunctions, connectFunctionsEmulator, Functions, httpsCallable } from
 import { initializeAppCheck, ReCaptchaV3Provider, AppCheck } from 'firebase/app-check';
 // Import FirestorePuzzleData from the main types index file
 import { FirestorePuzzleData } from '../types';
-// Use default import for firebaseConfig
-import firebaseConfig from '../env/firebaseConfig'; // Assumed default export
+// Change default import to a direct object definition
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID as string,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET as string,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID as string,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID as string,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID as string | undefined,
+};
 import { Analytics, getAnalytics, logEvent } from 'firebase/analytics';
 // GameStatistics and LeaderboardEntry come from stats.ts
 import { GameStatistics, LeaderboardEntry } from '../types/stats';
