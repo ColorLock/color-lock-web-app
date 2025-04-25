@@ -1,11 +1,12 @@
-import React, { useState, useEffect, memo, useCallback } from 'react';
+import React, { useState, useEffect, memo, useCallback, useMemo } from 'react';
 import '../scss/main.scss';
 import { TileColor } from '../types';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faXmark, faShareNodes, faCopy, faEnvelope, faShare } from '@fortawesome/free-solid-svg-icons';
 import { faTwitter, faFacebookF } from '@fortawesome/free-brands-svg-icons';
-import { GameStatistics, defaultStats } from '../types/stats';
+import { GameStatistics, defaultStats, LeaderboardEntry } from '../types/stats';
 import { dateKeyForToday } from '../utils/dateUtils';
+import { getGlobalLeaderboardCallable } from '../services/firebaseService';
 
 interface StatsModalProps {
   isOpen: boolean;
@@ -15,6 +16,9 @@ interface StatsModalProps {
   isLoading?: boolean;
 }
 
+// Define the type for sorting state
+type SortConfig = { key: keyof LeaderboardEntry; direction: 'asc' | 'desc' } | null;
+
 // Use React.memo to wrap the component
 const StatsModal: React.FC<StatsModalProps> = memo(({ 
   isOpen, 
@@ -23,9 +27,11 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
   onShareStats,
   isLoading = false // Default to false
 }) => {
-  if (!isOpen) return null;
-  
-  // State for sharing functionality
+  const [activeTab, setActiveTab] = useState<'personal' | 'global'>('personal');
+  const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
+  const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState<boolean>(false);
+  const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'totalMovesUsed', direction: 'asc' });
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
   const [isWebShareSupported, setIsWebShareSupported] = useState<boolean>(false);
   
@@ -34,9 +40,40 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
     setIsWebShareSupported(typeof navigator.share === 'function');
   }, []);
   
+  // Fetch leaderboard data when the global tab is active and modal is open
+  useEffect(() => {
+    const fetchLeaderboard = async () => {
+      if (activeTab === 'global' && leaderboardData.length === 0 && !isLoadingLeaderboard) {
+        console.log("[StatsModal] Attempting to fetch global leaderboard...");
+        setIsLoadingLeaderboard(true);
+        setLeaderboardError(null);
+        try {
+          console.log("[StatsModal] Invoking getGlobalLeaderboardCallable()...");
+          const result = await getGlobalLeaderboardCallable();
+          console.log("[StatsModal] Callable function call returned (raw):", result);
+          
+          if (result.data.success && result.data.leaderboard) {
+            setLeaderboardData(result.data.leaderboard);
+          } else {
+            throw new Error(result.data.error || 'Failed to fetch leaderboard');
+          }
+        } catch (error: any) {
+          console.error("[StatsModal] Error calling getGlobalLeaderboard callable:", error);
+          setLeaderboardError(error.message || 'Could not load leaderboard data.');
+        } finally {
+          setIsLoadingLeaderboard(false);
+        }
+      }
+    };
+
+    if (isOpen) {
+      fetchLeaderboard();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, isOpen]); // Dependencies simplified
+  
   // Handle outside click
   const handleOverlayClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    // Only close if the click is directly on the overlay, not its children
     if (e.target === e.currentTarget) {
       onClose();
     }
@@ -44,16 +81,22 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
   
   // Use defaultStats if stats prop is null or undefined
   const currentStats = stats || defaultStats;
-  const allTimeStats = currentStats.allTimeStats || defaultStats.allTimeStats; // Ensure allTimeStats exists
   const todayKey = dateKeyForToday(); // Get today's date key
   
   // Helper to safely display values, using defaultStats as fallback
-  const safelyDisplay = (value: any, type: 'number' | 'arrayLength' | 'mapKeys' | 'bestScoreToday' = 'number'): string | number => {
-    // Handle different types with fallbacks
+  const safelyDisplay = useCallback((value: any, type: 'number' | 'arrayLength' | 'mapKeys' | 'bestScoreToday' | 'attemptsToday' = 'number'): string | number => {
     try {
       if (type === 'bestScoreToday') {
-        const score = allTimeStats?.bestScoresByDay?.[todayKey];
+        const score = currentStats?.bestScoresByDay?.[todayKey];
         return score !== null && score !== undefined && !isNaN(Number(score)) ? Number(score) : 'N/A';
+      }
+      if (type === 'attemptsToday') {
+        const attemptsAchieve = currentStats?.attemptsToAchieveBotScore?.[todayKey];
+        const attemptsBeat = currentStats?.attemptsToBeatBotScore?.[todayKey];
+        const attemptsWin = currentStats?.attemptsToWinByDay?.[todayKey]; // Get win attempts
+        // Determine which attempt value to show based on context (this might need refinement)
+        const attempts = value; // Assuming `value` holds the relevant attempts data for the item
+        return attempts !== null && attempts !== undefined && !isNaN(Number(attempts)) ? Number(attempts) : 'N/A';
       }
       if (type === 'number') {
         const num = Number(value);
@@ -67,80 +110,134 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
       }
     } catch (e) {
       console.error("Error displaying stat:", e, { value, type });
-      return type === 'bestScoreToday' ? 'N/A' : 0; // Fallback on error
+      return (type === 'bestScoreToday' || type === 'attemptsToday') ? 'N/A' : 0;
     }
-    return String(value ?? (type === 'bestScoreToday' ? 'N/A' : 0)); // Final fallback
+    return String(value ?? ((type === 'bestScoreToday' || type === 'attemptsToday') ? 'N/A' : 0));
+  }, [currentStats, todayKey]);
+  
+  // Memoized sorted leaderboard data
+  const sortedLeaderboardData = useMemo(() => {
+    let sortableItems = [...leaderboardData];
+    if (sortConfig !== null) {
+      sortableItems.sort((a, b) => {
+        // Handle potentially undefined values during sorting
+        const aValue = a[sortConfig.key] ?? (sortConfig.direction === 'asc' ? Infinity : -Infinity);
+        const bValue = b[sortConfig.key] ?? (sortConfig.direction === 'asc' ? Infinity : -Infinity);
+
+        // Compare values
+        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+
+        // Secondary sort by username if primary values are equal
+        if (a.username && b.username && a.username < b.username) return -1;
+        if (a.username && b.username && a.username > b.username) return 1;
+
+        return 0; // Keep original order if all else fails
+      });
+    }
+    return sortableItems;
+  }, [leaderboardData, sortConfig]);
+  
+  // Request sorting function
+  const requestSort = (key: keyof LeaderboardEntry) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    } else if (!sortConfig || sortConfig.key !== key) {
+      // Define default sort directions for specific keys
+      const descKeys: (keyof LeaderboardEntry)[] = [
+        'totalWins', 'longestPuzzleCompletedStreak', 'currentPuzzleCompletedStreak',
+        'longestTieBotStreak', 'currentTieBotStreak', 'currentFirstTryStreak',
+        'longestFirstTryStreak', 'eloScoreTotal', 'eloScoreTotalLast30'
+      ];
+      const ascKeys: (keyof LeaderboardEntry)[] = [
+        'totalMovesUsed', 'eloScoreAvg', 'eloScoreAvgLast30'
+      ];
+      if (descKeys.includes(key)) direction = 'desc';
+      else if (ascKeys.includes(key)) direction = 'asc';
+      else direction = 'asc'; // Default to ascending for other keys (like username)
+    }
+    setSortConfig({ key, direction });
+  };
+  
+  // Get sorting indicator arrow
+  const getSortIndicator = (key: keyof LeaderboardEntry) => {
+    if (!sortConfig || sortConfig.key !== key) return null;
+    return sortConfig.direction === 'asc' ? ' ▲' : ' ▼';
   };
   
   // Generate formatted share text using the passed callback
-  // We still need a local version for direct sharing actions like copy/social
   const getFormattedShareText = useCallback(() => {
+    // Use the generateShareableStats function from the useGameStats hook
+    // This ensures consistency between the modal display and shared text
     const safeNum = (val: any) => (typeof val === 'number' && !isNaN(val) ? val : 0);
     const safeArrLen = (val: any) => (Array.isArray(val) ? val.length : 0);
 
     let shareText = `🔒 Color Lock Stats 🔒\n\n`;
     shareText += `Today's Game (${todayKey}):\n`;
-    const bestToday = allTimeStats?.bestScoresByDay?.[todayKey] ?? 'N/A';
+    const bestToday = currentStats?.bestScoresByDay?.[todayKey] ?? 'N/A';
     shareText += `Best Score: ${bestToday}\n`;
-    const attemptsToday = allTimeStats?.attemptsPerDay?.[todayKey] ?? 0;
+    const attemptsToday = currentStats?.attemptsPerDay?.[todayKey] ?? 0;
     shareText += `Attempts Today: ${attemptsToday}\n`;
-    const winsToday = allTimeStats?.winsPerDay?.[todayKey] ?? 0;
+    const winsToday = currentStats?.winsPerDay?.[todayKey] ?? 0;
     shareText += `Wins Today: ${winsToday}\n\n`;
 
     shareText += `All-time Stats:\n`;
-    shareText += `Current Streak: ${safeNum(allTimeStats?.currentStreak)}\n`;
-    shareText += `Longest Streak: ${safeNum(allTimeStats?.longestStreak)}\n`;
-    shareText += `Days Played: ${safeArrLen(allTimeStats?.playedDays)}\n`;
-    shareText += `Goals Achieved: ${safeArrLen(allTimeStats?.goalAchievedDays)}\n`;
-    shareText += `Total Wins: ${safeNum(allTimeStats?.totalWins)}\n`;
-    shareText += `Total Games Played: ${safeNum(allTimeStats?.totalGamesPlayed)}\n`;
-    shareText += `Total Moves: ${safeNum(allTimeStats?.totalMovesUsed)}\n`;
-    shareText += `Total Hints: ${safeNum(allTimeStats?.totalHintsUsed)}\n\n`;
-    shareText += `First Try Streak: ${safeNum(allTimeStats?.firstTryStreak)}\n`;
-    shareText += `Longest First Try: ${safeNum(allTimeStats?.longestFirstTryStreak)}\n\n`;
+    shareText += `Current Win Streak: ${safeNum(currentStats?.currentPuzzleCompletedStreak)}\n`; // Separated
+    shareText += `Longest Win Streak: ${safeNum(currentStats?.longestPuzzleCompletedStreak)}\n`; // Separated
+    shareText += `Current Tie/Beat Streak: ${safeNum(currentStats?.currentTieBotStreak)}\n`;
+    shareText += `Longest Tie/Beat Streak: ${safeNum(currentStats?.longestTieBotStreak)}\n`;
+    shareText += `Days Played: ${safeArrLen(currentStats?.playedDays)}\n`;
+    shareText += `Goals Achieved: ${safeArrLen(currentStats?.goalAchievedDays)}\n`;
+    shareText += `Goals Beaten: ${safeArrLen(currentStats?.goalBeatenDays)}\n`;
+    shareText += `Total Wins: ${safeNum(currentStats?.totalWins)}\n`;
+    shareText += `Total Games Played: ${safeNum(currentStats?.totalGamesPlayed)}\n`;
+    shareText += `Total Moves: ${safeNum(currentStats?.totalMovesUsed)}\n`;
+    shareText += `Total Hints: ${safeNum(currentStats?.totalHintsUsed)}\n\n`;
+    shareText += `First Try Streak: ${safeNum(currentStats?.currentFirstTryStreak)}\n`;
+    shareText += `Longest First Try: ${safeNum(currentStats?.longestFirstTryStreak)}\n\n`;
 
     shareText += `Play at: ${window.location.origin}`;
     return shareText;
-  }, [allTimeStats, todayKey]); // Depend on allTimeStats
+  }, [currentStats, todayKey]);
 
   const formattedShareText = getFormattedShareText();
   const shareTitle = "Color Lock - Game Statistics";
   const shareUrl = window.location.href;
   
-  // --- Sharing Handlers (using formattedShareText) ---
-   const handleWebShare = useCallback(async () => { // Wrap in useCallback
+  // --- Sharing Handlers ---
+   const handleWebShare = useCallback(async () => {
     if (navigator.share) {
-      try {
-        await navigator.share({ title: shareTitle, text: formattedShareText });
-      } catch (err) { console.error('Error sharing:', err); }
-    } else {
-      handleCopyToClipboard(); // Fallback
-    }
+      try { await navigator.share({ title: shareTitle, text: formattedShareText }); }
+      catch (err) { console.error('Error sharing:', err); }
+    } else { handleCopyToClipboard(); }
   }, [formattedShareText, shareTitle]); // Dependencies
 
-  const handleTwitterShare = useCallback(() => { // Wrap in useCallback
+  const handleTwitterShare = useCallback(() => {
     const text = encodeURIComponent(formattedShareText);
     window.open(`https://twitter.com/intent/tweet?text=${text}&url=${encodeURIComponent(shareUrl)}`, '_blank');
   }, [formattedShareText, shareUrl]); // Dependencies
 
-  const handleFacebookShare = useCallback(() => { // Wrap in useCallback
+  const handleFacebookShare = useCallback(() => {
     window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}"e=${encodeURIComponent(formattedShareText)}`, '_blank');
   }, [formattedShareText, shareUrl]); // Dependencies
 
-  const handleEmailShare = useCallback(() => { // Wrap in useCallback
+  const handleEmailShare = useCallback(() => {
     window.location.href = `mailto:?subject=${encodeURIComponent(shareTitle)}&body=${encodeURIComponent(formattedShareText)}`;
   }, [formattedShareText, shareTitle]); // Dependencies
 
-  const handleCopyToClipboard = useCallback(() => { // Wrap in useCallback
+  const handleCopyToClipboard = useCallback(() => {
     navigator.clipboard.writeText(formattedShareText).then(() => {
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
     }).catch(err => console.error('Could not copy text: ', err));
   }, [formattedShareText]); // Dependency
 
+  if (!isOpen) return null;
+
   return (
     <div className="modal-overlay" onClick={handleOverlayClick}>
-      <div className="modal-content stats-modal">
+      <div className="modal-content stats-modal stats-modal-large">
         <button className="close-button" onClick={onClose} aria-label="Close">
           <FontAwesomeIcon icon={faXmark} />
         </button>
@@ -149,128 +246,283 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
           <h2 className="modal-title">Statistics</h2>
         </div>
         
-        {isLoading ? (
-          // Loading state
-          <div className="stats-loading">
-            <div className="spinner"></div>
-            <p>Loading statistics...</p>
-          </div>
-        ) : (
-          // Stats content when loaded
-          <>
-            <div className="stats-section">
-              <h3>Today's Game ({todayKey})</h3>
-              <div className="stats-grid">
-                <div className="stat-item">
-                  <div className="stat-value">{safelyDisplay(allTimeStats?.bestScoresByDay, 'bestScoreToday')}</div>
-                  <div className="stat-label">Best Score</div>
+        {/* Tabs */} 
+        <div className="stats-tabs">
+          <button
+            className={`stats-tab ${activeTab === 'personal' ? 'active' : ''}`}
+            onClick={() => setActiveTab('personal')}
+            aria-selected={activeTab === 'personal'}
+            role="tab"
+          >
+            Personal Stats
+          </button>
+          <button
+            className={`stats-tab ${activeTab === 'global' ? 'active' : ''}`}
+            onClick={() => setActiveTab('global')}
+            aria-selected={activeTab === 'global'}
+            role="tab"
+          >
+            Global Leaderboard
+          </button>
+        </div>
+
+        {/* Tab Content */} 
+        <div className="stats-tab-content">
+          {/* Personal Stats Tab */} 
+          {activeTab === 'personal' && (
+            <div role="tabpanel" aria-labelledby="personal-tab">
+              {isLoading ? (
+                <div className="stats-loading">
+                  <div className="spinner"></div>
+                  <p>Loading statistics...</p>
                 </div>
-                <div className="stat-item">
-                  <div className="stat-value">{safelyDisplay(allTimeStats?.attemptsPerDay?.[todayKey], 'number')}</div>
-                  <div className="stat-label">Attempts</div>
-                </div>
-                <div className="stat-item">
-                  <div className="stat-value">{safelyDisplay(allTimeStats?.winsPerDay?.[todayKey], 'number')}</div>
-                  <div className="stat-label">Wins Today</div>
-                </div>
-                <div className="stat-item">
-                  <div className="stat-value">{safelyDisplay(allTimeStats?.hintUsageByDay?.[todayKey], 'number')}</div>
-                  <div className="stat-label">Hints Today</div>
-                </div>
-              </div>
+              ) : (
+                <>
+                  <div className="stats-section">
+                    <h3>Today's Game ({todayKey})</h3>
+                    <div className="stats-grid today-stats-grid">
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.bestScoresByDay, 'bestScoreToday')}</div>
+                        <div className="stat-label">Best Score</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.attemptsPerDay?.[todayKey], 'number')}</div>
+                        <div className="stat-label">Attempts</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.winsPerDay?.[todayKey], 'number')}</div>
+                        <div className="stat-label">Wins Today</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.hintUsageByDay?.[todayKey], 'number')}</div>
+                        <div className="stat-label">Hints Today</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.attemptsToAchieveBotScore?.[todayKey], 'attemptsToday')}</div>
+                        <div className="stat-label">Attempts to Achieve Bot</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.attemptsToBeatBotScore?.[todayKey], 'attemptsToday')}</div>
+                        <div className="stat-label">Attempts to Beat Bot</div>
+                      </div>
+                       <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.attemptsToWinByDay?.[todayKey], 'attemptsToday')}</div>
+                        <div className="stat-label">Attempts to Win</div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="stats-section">
+                    <h3>All-time Stats</h3>
+                    <div className="stats-grid all-time-stats-grid">
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.currentPuzzleCompletedStreak, 'number')}</div>
+                        <div className="stat-label">Current Win Streak</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.longestPuzzleCompletedStreak, 'number')}</div>
+                        <div className="stat-label">Longest Win Streak</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.currentTieBotStreak, 'number')}</div>
+                        <div className="stat-label">Current Tie/Beat Streak</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.longestTieBotStreak, 'number')}</div>
+                        <div className="stat-label">Longest Tie/Beat Streak</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.playedDays, 'arrayLength')}</div>
+                        <div className="stat-label">Days Played</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.goalAchievedDays, 'arrayLength')}</div>
+                        <div className="stat-label">Goals Achieved</div>
+                        <div className="stat-description">(Met or Beat Bot)</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.goalBeatenDays, 'arrayLength')}</div>
+                        <div className="stat-label">Goals Beaten</div>
+                        <div className="stat-description">(Beat Bot)</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.totalWins, 'number')}</div>
+                        <div className="stat-label">Total Wins</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.totalGamesPlayed, 'number')}</div>
+                        <div className="stat-label">Total Games</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.totalMovesUsed, 'number')}</div>
+                        <div className="stat-label">Total Moves</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.totalHintsUsed, 'number')}</div>
+                        <div className="stat-label">Total Hints</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.currentFirstTryStreak, 'number')}</div>
+                        <div className="stat-label">First Try Streak</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{safelyDisplay(currentStats?.longestFirstTryStreak, 'number')}</div>
+                        <div className="stat-label">Longest 1st Try</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{currentStats?.eloScoreAvg?.toFixed(0) ?? 'N/A'}</div>
+                        <div className="stat-label">Elo Avg (All)</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{currentStats?.eloScoreAvgLast30?.toFixed(0) ?? 'N/A'}</div>
+                        <div className="stat-label">Elo Avg (30d)</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{currentStats?.eloScoreTotal ?? 'N/A'}</div>
+                        <div className="stat-label">Elo Total</div>
+                      </div>
+                      <div className="stat-item">
+                        <div className="stat-value">{currentStats?.eloScoreTotalLast30 ?? 'N/A'}</div>
+                        <div className="stat-label">Elo Total (30d)</div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="share-section">
+                    <p>Share your statistics:</p>
+                    <div className="social-buttons">
+                      <button 
+                        className="social-button twitter-button" 
+                        onClick={handleTwitterShare}
+                        aria-label="Share to Twitter"
+                      >
+                        <FontAwesomeIcon icon={faTwitter} />
+                      </button>
+                      <button 
+                        className="social-button facebook-button" 
+                        onClick={handleFacebookShare}
+                        aria-label="Share to Facebook"
+                      >
+                        <FontAwesomeIcon icon={faFacebookF} />
+                      </button>
+                      <button 
+                        className="social-button email-button" 
+                        onClick={handleEmailShare}
+                        aria-label="Share via Email"
+                      >
+                        <FontAwesomeIcon icon={faEnvelope} />
+                      </button>
+                      <button 
+                        className="social-button copy-button" 
+                        onClick={handleCopyToClipboard}
+                        aria-label="Copy to Clipboard"
+                      >
+                        <FontAwesomeIcon icon={faCopy} />
+                        {copySuccess && <span className="copy-success-tooltip">Copied!</span>}
+                      </button>
+                      {isWebShareSupported && (
+                        <button 
+                          className="social-button web-share-button" 
+                          onClick={handleWebShare}
+                          aria-label="Share"
+                        >
+                          <FontAwesomeIcon icon={faShare} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-            
-            <div className="stats-section">
-              <h3>All-time Stats</h3>
-              <div className="stats-grid">
-                <div className="stat-item">
-                  <div className="stat-value">{safelyDisplay(allTimeStats?.currentStreak, 'number')}</div>
-                  <div className="stat-label">Current Streak</div>
+          )}
+
+          {/* Global Leaderboard Tab */} 
+          {activeTab === 'global' && (
+            <div className="stats-section global-stats-section" role="tabpanel" aria-labelledby="global-tab">
+              {isLoadingLeaderboard ? (
+                <div className="stats-loading">
+                  <div className="spinner"></div>
+                  <p>Loading leaderboard...</p>
                 </div>
-                <div className="stat-item">
-                  <div className="stat-value">{safelyDisplay(allTimeStats?.longestStreak, 'number')}</div>
-                  <div className="stat-label">Longest Streak</div>
+              ) : leaderboardError ? (
+                <div className="error-message">Error: {leaderboardError}</div>
+              ) : (
+                <div className="table-container">
+                  <table className="global-stats-table">
+                    <thead>
+                      <tr>
+                        <th onClick={() => requestSort('username')} aria-sort={sortConfig?.key === 'username' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                          Username{getSortIndicator('username')}
+                        </th>
+                        <th onClick={() => requestSort('totalWins')} aria-sort={sortConfig?.key === 'totalWins' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                          Wins{getSortIndicator('totalWins')}
+                        </th>
+                        <th onClick={() => requestSort('totalMovesUsed')} aria-sort={sortConfig?.key === 'totalMovesUsed' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                          Moves{getSortIndicator('totalMovesUsed')}
+                        </th>
+                        <th onClick={() => requestSort('currentPuzzleCompletedStreak')} aria-sort={sortConfig?.key === 'currentPuzzleCompletedStreak' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                          Win Strk{getSortIndicator('currentPuzzleCompletedStreak')}
+                        </th>
+                         <th onClick={() => requestSort('longestPuzzleCompletedStreak')} aria-sort={sortConfig?.key === 'longestPuzzleCompletedStreak' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                          Max Win Strk{getSortIndicator('longestPuzzleCompletedStreak')}
+                        </th>
+                        <th onClick={() => requestSort('currentTieBotStreak')} aria-sort={sortConfig?.key === 'currentTieBotStreak' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                          Tie/Beat Strk{getSortIndicator('currentTieBotStreak')}
+                        </th>
+                        <th onClick={() => requestSort('longestTieBotStreak')} aria-sort={sortConfig?.key === 'longestTieBotStreak' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                          Max Tie/Beat{getSortIndicator('longestTieBotStreak')}
+                        </th>
+                        <th onClick={() => requestSort('currentFirstTryStreak')} aria-sort={sortConfig?.key === 'currentFirstTryStreak' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                          1st Try Strk{getSortIndicator('currentFirstTryStreak')}
+                        </th>
+                        <th onClick={() => requestSort('longestFirstTryStreak')} aria-sort={sortConfig?.key === 'longestFirstTryStreak' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                          Max 1st Try{getSortIndicator('longestFirstTryStreak')}
+                        </th>
+                        <th onClick={() => requestSort('eloScoreAvg')} aria-sort={sortConfig?.key === 'eloScoreAvg' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                          Elo Avg{getSortIndicator('eloScoreAvg')}
+                        </th>
+                        <th onClick={() => requestSort('eloScoreTotal')} aria-sort={sortConfig?.key === 'eloScoreTotal' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                          Elo Total{getSortIndicator('eloScoreTotal')}
+                        </th>
+                        <th onClick={() => requestSort('eloScoreAvgLast30')} aria-sort={sortConfig?.key === 'eloScoreAvgLast30' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                          Elo Avg (30d){getSortIndicator('eloScoreAvgLast30')}
+                        </th>
+                        <th onClick={() => requestSort('eloScoreTotalLast30')} aria-sort={sortConfig?.key === 'eloScoreTotalLast30' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                          Elo Total (30d){getSortIndicator('eloScoreTotalLast30')}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedLeaderboardData.length > 0 ? (
+                          sortedLeaderboardData.map((entry) => (
+                            <tr key={entry.userId}>
+                              <td>{entry.username || 'Anonymous'}</td>
+                              <td>{entry.totalWins}</td>
+                              <td>{entry.totalMovesUsed}</td>
+                              <td>{entry.currentPuzzleCompletedStreak}</td>
+                              <td>{entry.longestPuzzleCompletedStreak}</td>
+                              <td>{entry.currentTieBotStreak}</td>
+                              <td>{entry.longestTieBotStreak}</td>
+                              <td>{entry.currentFirstTryStreak}</td>
+                              <td>{entry.longestFirstTryStreak}</td>
+                              <td>{entry.eloScoreAvg !== null ? entry.eloScoreAvg.toFixed(0) : 'N/A'}</td>
+                              <td>{entry.eloScoreTotal !== null ? entry.eloScoreTotal : 'N/A'}</td>
+                              <td>{entry.eloScoreAvgLast30 !== null ? entry.eloScoreAvgLast30.toFixed(0) : 'N/A'}</td>
+                              <td>{entry.eloScoreTotalLast30 !== null ? entry.eloScoreTotalLast30 : 'N/A'}</td>
+                            </tr>
+                          ))
+                      ) : (
+                        <tr>
+                          <td colSpan={13} style={{ textAlign: 'center' }}>No leaderboard data available.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
-                <div className="stat-item">
-                  <div className="stat-value">{safelyDisplay(allTimeStats?.playedDays, 'arrayLength')}</div>
-                  <div className="stat-label">Days Played</div>
-                </div>
-                <div className="stat-item">
-                  <div className="stat-value">{safelyDisplay(allTimeStats?.goalAchievedDays, 'arrayLength')}</div>
-                  <div className="stat-label">Goals Achieved</div>
-                </div>
-                <div className="stat-item">
-                  <div className="stat-value">{safelyDisplay(allTimeStats?.totalWins, 'number')}</div>
-                  <div className="stat-label">Total Wins</div>
-                </div>
-                <div className="stat-item">
-                  <div className="stat-value">{safelyDisplay(allTimeStats?.totalGamesPlayed, 'number')}</div>
-                  <div className="stat-label">Total Games</div>
-                </div>
-                <div className="stat-item">
-                  <div className="stat-value">{safelyDisplay(allTimeStats?.totalMovesUsed, 'number')}</div>
-                  <div className="stat-label">Total Moves</div>
-                </div>
-                <div className="stat-item">
-                  <div className="stat-value">{safelyDisplay(allTimeStats?.totalHintsUsed, 'number')}</div>
-                  <div className="stat-label">Total Hints</div>
-                </div>
-                <div className="stat-item">
-                  <div className="stat-value">{safelyDisplay(allTimeStats?.firstTryStreak, 'number')}</div>
-                  <div className="stat-label">First Try Streak</div>
-                </div>
-                <div className="stat-item">
-                  <div className="stat-value">{safelyDisplay(allTimeStats?.longestFirstTryStreak, 'number')}</div>
-                  <div className="stat-label">Longest 1st Try</div>
-                </div>
-              </div>
+              )}
             </div>
-            
-            <div className="share-section">
-              <p>Share your statistics:</p>
-              <div className="social-buttons">
-                <button 
-                  className="social-button twitter-button" 
-                  onClick={handleTwitterShare}
-                  aria-label="Share to Twitter"
-                >
-                  <FontAwesomeIcon icon={faTwitter} />
-                </button>
-                <button 
-                  className="social-button facebook-button" 
-                  onClick={handleFacebookShare}
-                  aria-label="Share to Facebook"
-                >
-                  <FontAwesomeIcon icon={faFacebookF} />
-                </button>
-                <button 
-                  className="social-button email-button" 
-                  onClick={handleEmailShare}
-                  aria-label="Share via Email"
-                >
-                  <FontAwesomeIcon icon={faEnvelope} />
-                </button>
-                <button 
-                  className="social-button copy-button" 
-                  onClick={handleCopyToClipboard}
-                  aria-label="Copy to Clipboard"
-                >
-                  <FontAwesomeIcon icon={faCopy} />
-                  {copySuccess && <span className="copy-success-tooltip">Copied!</span>}
-                </button>
-                {isWebShareSupported && (
-                  <button 
-                    className="social-button web-share-button" 
-                    onClick={handleWebShare}
-                    aria-label="Share"
-                  >
-                    <FontAwesomeIcon icon={faShare} />
-                  </button>
-                )}
-              </div>
-            </div>
-          </>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

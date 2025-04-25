@@ -2,17 +2,22 @@ import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getAuth, signInAnonymously, User, Auth, connectAuthEmulator, getIdToken } from 'firebase/auth';
 import { getFirestore, Firestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getFunctions, connectFunctionsEmulator, Functions, httpsCallable } from 'firebase/functions';
-// Import AppCheck types and ReCaptchaEnterpriseProvider
-import { initializeAppCheck, ReCaptchaEnterpriseProvider, AppCheck } from 'firebase/app-check';
+// Import AppCheck types and ReCaptchaV3Provider
+import { initializeAppCheck, ReCaptchaV3Provider, AppCheck } from 'firebase/app-check';
+// Import FirestorePuzzleData from the main types index file
 import { FirestorePuzzleData } from '../types';
-// Import the Firebase configuration
-import firebaseConfig from '../env/firebaseConfig';
+// Use default import for firebaseConfig
+import firebaseConfig from '../env/firebaseConfig'; // Assumed default export
+import { Analytics, getAnalytics, logEvent } from 'firebase/analytics';
+// GameStatistics and LeaderboardEntry come from stats.ts
+import { GameStatistics, LeaderboardEntry } from '../types/stats';
 
 // Initialize Firebase with error handling
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 let db: Firestore | null = null;
 let functions: Functions | null = null;
+let analytics: Analytics | null = null;
 let appCheck: AppCheck | null = null; // Add AppCheck instance
 
 // Check if we're in development mode
@@ -25,6 +30,7 @@ const useEmulators = isDevelopment;
 
 // --- App Check Debug Token (Development ONLY) ---
 if (useEmulators) {
+  // IMPORTANT: Set the debug token flag *before* initializing App Check
   (self as any).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
   console.warn("App Check debug token generation enabled for emulator testing. Ensure this is not active in production.");
   console.log("To get the debug token, check the console logs for a message starting with 'App Check debug token:'");
@@ -37,20 +43,29 @@ try {
   console.log("Firebase App initialized.");
 
   // --- Initialize App Check ---
-  // Ensure the site key is available (this should be your reCAPTCHA Enterprise Site Key)
-  if (import.meta.env.VITE_RECAPTCHA_SITE_KEY) {
-    try {
+  if (app) { // Ensure app is initialized before using it
+    // --- REVISED LOGIC START ---
+    if (!useEmulators && import.meta.env.VITE_RECAPTCHA_SITE_KEY) {
+      // Only initialize with ReCaptcha if NOT using emulators AND site key exists
+      try {
         appCheck = initializeAppCheck(app, {
-          // Use ReCaptchaEnterpriseProvider instead of ReCaptchaV3Provider
-          provider: new ReCaptchaEnterpriseProvider(import.meta.env.VITE_RECAPTCHA_SITE_KEY),
+          provider: new ReCaptchaV3Provider(import.meta.env.VITE_RECAPTCHA_SITE_KEY),
           isTokenAutoRefreshEnabled: true
         });
-        console.log("Firebase App Check initialized successfully with reCAPTCHA Enterprise provider.");
-    } catch (appCheckError) {
-        console.error("Firebase App Check (Enterprise) initialization error:", appCheckError);
+        console.log("Firebase App Check initialized successfully with reCAPTCHA v3 provider (Production mode).");
+      } catch (appCheckError) {
+        console.error("Firebase App Check (Production) initialization error:", appCheckError);
+      }
+    } else if (useEmulators) {
+      // When using emulators, rely on the debug token flag set above.
+      // Explicit initialization might interfere or cause errors if provider is incorrect/missing.
+      console.log("Skipping explicit App Check initialization in emulator mode; relying on debug token flag.");
+      // No explicit appCheck = initializeAppCheck(...) call here for emulators.
+    } else if (!useEmulators && !import.meta.env.VITE_RECAPTCHA_SITE_KEY) {
+      // Not using emulators, but no site key provided.
+      console.warn("VITE_RECAPTCHA_SITE_KEY is not set. App Check initialization skipped. This is required for production.");
     }
-  } else {
-    console.warn("VITE_RECAPTCHA_SITE_KEY is not set. App Check initialization skipped. This is OK for emulator testing but required for production.");
+    // --- REVISED LOGIC END ---
   }
   // --- End App Check Initialization ---
 
@@ -64,26 +79,35 @@ try {
 
   // Initialize Functions
   functions = getFunctions(app, 'us-central1'); // Specify region
-  console.log("Firebase Functions initialized for region us-central1.");
+  console.log("[FirebaseService] Firebase Functions service initialized for region us-central1."); // Log init
 
   // Connect to emulators if in development
   if (useEmulators) {
-    console.log("Connecting to Firebase emulators...");
-    try {
-        connectAuthEmulator(auth, "http://localhost:9099", { disableWarnings: true });
-        console.log("Connected to Auth emulator (localhost:9099)");
-    } catch (e) { console.error("Failed to connect to Auth emulator:", e); }
-    try {
-        connectFirestoreEmulator(db, "localhost", 8080);
-        console.log("Connected to Firestore emulator (localhost:8080)");
-    } catch (e) { console.error("Failed to connect to Firestore emulator:", e); }
-    try {
-        connectFunctionsEmulator(functions, "localhost", 5001);
-        console.log("Connected to Functions emulator (localhost:5001)");
-    } catch (e) { console.error("Failed to connect to Functions emulator:", e); }
+      console.log("[FirebaseService] Connecting to Emulators...");
+      try {
+          connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+          console.log("[FirebaseService] Connected to Auth emulator (127.0.0.1:9099)");
+
+          connectFirestoreEmulator(db, "localhost", 8080);
+          console.log("[FirebaseService] Connected to Firestore emulator (localhost:8080)");
+
+          if (functions) {
+              console.log("[FirebaseService] Connecting to Functions emulator...");
+              try {
+                  connectFunctionsEmulator(functions, "localhost", 5001);
+                  console.log("[FirebaseService] Connected to Functions emulator (localhost:5001)"); // Log connection
+              } catch (e) { console.error("[FirebaseService] Failed to connect to Functions emulator:", e); }
+          }
+      } catch (e) {
+          console.error("[FirebaseService] Failed to connect to emulators:", e);
+      }
   }
 
-  console.log("Firebase initialized successfully", useEmulators ? "(development mode with emulators)" : "(production mode)");
+  console.log("[FirebaseService] Firebase initialized successfully", useEmulators ? "(development mode with emulators)" : "(production mode)");
+
+  // Initialize Analytics
+  analytics = getAnalytics(app);
+  console.log("Firebase Analytics initialized.");
 
 } catch (error) {
   console.error("Firebase core initialization error:", error);
@@ -92,55 +116,27 @@ try {
   db = null;
   functions = null;
   appCheck = null;
+  analytics = null;
 }
 
-export { auth, db, functions, useEmulators, appCheck };
+export { auth, db, functions, useEmulators, appCheck, analytics };
 
-// Function to ensure user is authenticated with better error handling
-export const ensureAuthenticated = async (): Promise<User | null> => {
-  if (!auth) {
-    console.error("Firebase Auth not initialized, cannot ensure authentication.");
-    return null;
-  }
-
-  if (auth.currentUser) {
-    console.log("User already authenticated:", auth.currentUser.uid, "Anonymous:", auth.currentUser.isAnonymous);
-    try {
-      await getIdToken(auth.currentUser, true); // Force refresh
-      console.log("ID token refreshed silently.");
-    } catch (refreshError) {
-      console.warn("Silent token refresh failed:", refreshError);
-    }
-    return auth.currentUser;
-  }
-
-  console.log("No current user, attempting anonymous sign-in...");
-  try {
-    const signInPromise = signInAnonymously(auth);
-    const timeoutPromise = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error("Anonymous sign-in timed out (8s)")), 8000)
-    );
-
-    const userCredential = await Promise.race([signInPromise, timeoutPromise as Promise<any>]);
-    if (userCredential && userCredential.user) {
-        console.log("Anonymous sign-in successful:", userCredential.user.uid);
-        return userCredential.user;
-    } else {
-        console.warn("Sign-in promise resolved after timeout or returned unexpected structure.");
-        return auth.currentUser;
-    }
-  } catch (error) {
-    console.error("Anonymous sign-in error:", error);
-    return auth.currentUser || null;
-  }
-};
-
-// --- Define httpsCallable functions ---
+// Helper function for callables
 const getCallableFunction = <RequestData, ResponseData>(name: string) => {
+    console.log(`[FirebaseService] Creating callable function reference for: ${name}`); // Log creation attempt
     if (!functions) {
-        throw new Error("Firebase Functions is not initialized.");
+        console.error(`[FirebaseService] Firebase Functions is not initialized. Cannot create callable function: ${name}`);
+        return () => { throw new Error(`Firebase Functions not initialized. Cannot call function: ${name}`); };
     }
-    return httpsCallable<RequestData, ResponseData>(functions, name);
+    console.log(`[FirebaseService] Using functions instance:`, functions); // Log the instance being used
+    try {
+        const callable = httpsCallable<RequestData, ResponseData>(functions, name);
+        console.log(`[FirebaseService] Successfully created callable reference for: ${name}`);
+        return callable;
+    } catch (error) {
+        console.error(`[FirebaseService] Error creating callable function ${name}:`, error);
+        throw error; // Re-throw error
+    }
 };
 
 // Define callable function for fetching puzzle
@@ -154,6 +150,16 @@ export const getUserStatsCallable = getCallableFunction<void, { success: boolean
 
 // Define callable function for getting daily score stats
 export const getDailyScoresStatsCallable = getCallableFunction<{ puzzleId: string }, { success: boolean; stats?: any; error?: string }>('getDailyScoresStats');
+
+// Define callable function for getting global leaderboard
+interface GetGlobalLeaderboardResponse {
+  success: boolean;
+  leaderboard?: LeaderboardEntry[];
+  error?: string;
+}
+
+export const getGlobalLeaderboardCallable = getCallableFunction<void, GetGlobalLeaderboardResponse>('getGlobalLeaderboard');
+
 // --- End httpsCallable functions ---
 
 export default app; 

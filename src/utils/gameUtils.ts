@@ -1,5 +1,5 @@
 import { TileColor, DailyPuzzle, FirestorePuzzleData } from '../types';
-import { HintResult, getHint, getValidActions, computeActionDifference, NUM_COLORS } from './hintUtils';
+import { HintResult, getHint, getValidActions, computeActionDifference, NUM_COLORS, decodeActionId } from './hintUtils';
 import { floodFill, findLargestRegion, isBoardUnified } from './gameLogic';
 
 // Grid size constant
@@ -98,11 +98,53 @@ export const checkIfOnOptimalPath = (
   return true;
 };
 
-// Apply a color change to the grid with flooding
+/**
+ * Helper function to apply a single action (move) to a grid state.
+ * This is used for generating difficulty-adjusted starting boards.
+ * It does NOT update game state like moves used or check win/loss.
+ *
+ * @param grid The current grid state.
+ * @param actionId The action ID from the Firestore 'actions' array.
+ * @param firestoreData The Firestore puzzle data (needed for color mapping).
+ * @returns The new grid state after applying the action.
+ */
+export function applyActionToGrid(
+    grid: TileColor[][],
+    actionId: number,
+    firestoreData: FirestorePuzzleData
+): TileColor[][] {
+    // Use the existing decoder from hintUtils
+    const hint = decodeActionId(actionId, firestoreData);
+
+    if (!hint || !hint.valid) {
+        console.warn(`applyActionToGrid: Invalid actionId ${actionId} provided.`);
+        return grid; // Return original grid if action is invalid
+    }
+
+    const { row, col, newColor } = hint;
+    const oldColor = grid[row][col];
+
+    // If the new color is the same as the old, no change needed
+    if (oldColor === newColor) {
+        return grid;
+    }
+
+    // Create a copy of the grid to modify
+    const newGrid = grid.map(r => [...r]);
+    const [rowsChanged, colsChanged] = floodFill(newGrid, row, col, oldColor);
+
+    rowsChanged.forEach((r, i) => {
+        newGrid[r][colsChanged[i]] = newColor;
+    });
+
+    return newGrid;
+}
+
+// Apply a color change to the grid based on user interaction
 export const applyColorChange = (
-  puzzle: DailyPuzzle, 
-  row: number, 
-  col: number, 
+  puzzle: DailyPuzzle,
+  row: number,
+  col: number,
   newColor: TileColor
 ): DailyPuzzle => {
   // If the selected color is the same as the current color, no change
@@ -110,7 +152,7 @@ export const applyColorChange = (
   if (oldColor === newColor) {
     return puzzle;
   }
-  
+
   // Create a copy of the grid to modify
   const newGrid = puzzle.grid.map(r => [...r]);
   const [rowsChanged, colsChanged] = floodFill(newGrid, row, col, oldColor);
@@ -118,44 +160,47 @@ export const applyColorChange = (
     newGrid[r][colsChanged[i]] = newColor;
   });
 
-  let newLockedCells = puzzle.lockedCells;
-  let newIsSolved = puzzle.isSolved;
-  let newIsLost = puzzle.isLost;
+  const newLockedCells = findLargestRegion(newGrid); // Recalculate largest region based on the new grid
+  let newIsSolved = false;
+  let newIsLost = false;
   const newUserMoves = puzzle.userMovesUsed + 1;
 
-  // Update largest region
-  const largestRegion = findLargestRegion(newGrid);
-  if (largestRegion.size > newLockedCells.size) {
-    newLockedCells = largestRegion;
-  }
+  // Determine which set of locked cells to use:
+  // Only update if the new largest region is STRICTLY larger than the previous one.
+  const finalLockedCells = newLockedCells.size > puzzle.lockedCells.size
+    ? newLockedCells
+    : puzzle.lockedCells; // Keep the old locked cells if the new region isn't bigger
 
-  // If the largest region (>= 13) is not the target color, mark as lost.
-  if (largestRegion.size >= 13) {
-    const firstCell = largestRegion.values().next().value as string;
-    const [fr, fc] = firstCell.split(',').map(Number);
-    if (newGrid[fr][fc] !== puzzle.targetColor) {
-      newIsLost = true;
-    }
-  }
-
-  // Check if board is unified.
+  // Check win/loss conditions based on the NEW grid state
   if (isBoardUnified(newGrid)) {
     if (newGrid[0][0] === puzzle.targetColor) {
       newIsSolved = true;
-      newLockedCells = new Set();
+      // On win, locked cells will be cleared below
     } else {
-      newIsLost = true;
+      newIsLost = true; // Unified but wrong color
+    }
+  } else if (finalLockedCells.size >= 13) { // Check based on the potentially updated locked cells
+    // Check if the determined largest region (whether old or new) is the wrong color
+    // Ensure finalLockedCells is not empty before accessing its first element
+    if (finalLockedCells.size > 0) {
+        const firstCellKey = finalLockedCells.values().next().value as string;
+        const [fr, fc] = firstCellKey.split(',').map(Number);
+        if (newGrid[fr][fc] !== puzzle.targetColor) {
+          newIsLost = true; // Locked region >= 13 and wrong color
+        }
     }
   }
 
   // Return updated puzzle state
   return {
     ...puzzle,
-    grid: newGrid,
-    lockedCells: newLockedCells,
+    grid: newGrid, // The grid reflects the latest user move
+    // Use the conditionally determined locked cells, unless solved
+    lockedCells: newIsSolved ? new Set() : finalLockedCells,
     userMovesUsed: newUserMoves,
     isSolved: newIsSolved,
-    isLost: newIsLost
+    isLost: newIsLost,
+    // startingGrid and effectiveStartingMoveIndex remain unchanged by user moves
   };
 };
 
@@ -204,70 +249,43 @@ export const decodeActionIdToHint = (
 
 // Get a hint for the current puzzle state
 export const getGameHint = (
-  puzzle: DailyPuzzle, 
+  puzzle: DailyPuzzle,
   firestoreData: FirestorePuzzleData | null,
-  isOnOptimalPath: boolean
+  isOnOptimalPath: boolean // Note: This might become less reliable with difficulty changes
 ): HintResult | null => {
-  if (!puzzle || !firestoreData) {
+  if (!puzzle || !firestoreData || !firestoreData.actions || puzzle.isSolved || puzzle.isLost) {
     return null;
   }
 
-  if (puzzle.isSolved || puzzle.isLost) {
-    return null;
-  }
+  // Calculate the index in the optimal actions array based on user moves and difficulty start
+  const optimalActionIndex = puzzle.userMovesUsed + puzzle.effectiveStartingMoveIndex;
 
-  let hint: HintResult | null = null;
-  
-  if (isOnOptimalPath) {
-    // User is on the optimal path, use the predefined next action
-    hint = getHint(firestoreData, puzzle.userMovesUsed);
-    
-    // If we got a hint, add connected cells info
-    if (hint && hint.valid) {
-      const currentColor = puzzle.grid[hint.row][hint.col];
-      const [rowIndices, colIndices] = floodFill(puzzle.grid, hint.row, hint.col, currentColor);
-      hint.connectedCells = rowIndices.map((r, i) => [r, colIndices[i]]);
-    }
-  } else {
-    // User has deviated, calculate the best action dynamically
-    
-    // Get all valid actions
-    const validActions = getValidActions(puzzle.grid, puzzle.lockedCells, firestoreData);
-    
-    if (validActions.length === 0) {
+  // Check if the calculated index is valid
+  if (optimalActionIndex < 0 || optimalActionIndex >= firestoreData.actions.length) {
+      console.warn(`Calculated optimalActionIndex ${optimalActionIndex} is out of bounds (actions length: ${firestoreData.actions.length}). Cannot provide optimal hint.`);
+      // Optional: Implement dynamic hint calculation here as a fallback if needed
+      // For now, return null if off the known optimal path for this difficulty start
       return null;
-    }
-    
-    // Evaluate each action and find the best one(s)
-    let bestActions: number[] = [];
-    let bestDifference = -Infinity;
-    
-    validActions.forEach(actionIdx => {
-      const difference = computeActionDifference(
-        puzzle.grid, 
-        puzzle.lockedCells, 
-        puzzle.targetColor, 
-        actionIdx,
-        firestoreData
-      );
-      
-      if (difference > bestDifference) {
-        bestDifference = difference;
-        bestActions = [actionIdx];
-      } else if (difference === bestDifference) {
-        bestActions.push(actionIdx);
-      }
-    });
-    
-    if (bestActions.length > 0) {
-      // If there are ties, choose randomly
-      const randomIndex = Math.floor(Math.random() * bestActions.length);
-      const bestActionIdx = bestActions[randomIndex];
-      
-      // Create a hint result from the best action
-      hint = decodeActionIdToHint(bestActionIdx, firestoreData, puzzle.grid);
+  }
+
+  // Get the next optimal action ID based on the effective index
+  const nextActionId = firestoreData.actions[optimalActionIndex];
+
+  // Decode the action ID into a hint
+  const hint = decodeActionId(nextActionId, firestoreData);
+
+  // Add connected cells information if the hint is valid
+  if (hint && hint.valid) {
+    // Ensure row/col are valid before accessing grid
+    if (hint.row >= 0 && hint.row < puzzle.grid.length && hint.col >= 0 && hint.col < puzzle.grid[0].length) {
+        const currentColor = puzzle.grid[hint.row][hint.col];
+        const [rowIndices, colIndices] = floodFill(puzzle.grid, hint.row, hint.col, currentColor);
+        hint.connectedCells = rowIndices.map((r, i) => [r, colIndices[i]]);
+    } else {
+        console.warn(`Hint coordinates (${hint.row}, ${hint.col}) are out of bounds for the grid.`);
+        hint.valid = false; // Mark hint as invalid if coordinates are bad
     }
   }
-  
+
   return hint && hint.valid ? hint : null;
 }; 

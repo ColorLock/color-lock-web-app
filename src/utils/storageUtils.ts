@@ -57,12 +57,13 @@ export function saveDailyPuzzle(puzzle: DailyPuzzle) {
  * Load game statistics from localStorage (used for initial state / cache)
  */
 export function loadGameStats(fallbackStats: GameStatistics): GameStatistics {
-  const savedStats = localStorage.getItem(STATS_STORAGE_KEY);
-  if (savedStats) {
+  const savedStatsStr = localStorage.getItem(STATS_STORAGE_KEY);
+  if (savedStatsStr) {
     try {
-      const parsedStats = JSON.parse(savedStats);
-      // Merge with defaults to ensure all fields exist, prioritizing saved data
-      return mergeWithDefaults(parsedStats, fallbackStats);
+      const parsedStats = JSON.parse(savedStatsStr);
+      // Merge loaded stats with defaults to ensure all keys exist
+      // Prioritize loaded values over defaults
+      return { ...fallbackStats, ...parsedStats };
     } catch (e) {
       console.error('Failed to parse saved stats, using defaults.', e);
       return { ...fallbackStats }; // Return a fresh copy of defaults
@@ -76,8 +77,8 @@ export function loadGameStats(fallbackStats: GameStatistics): GameStatistics {
  */
 export function saveGameStats(stats: GameStatistics): void {
   try {
-      // Ensure stats object is valid before saving
-      const statsToSave = mergeWithDefaults(stats, defaultStats);
+      // Ensure all default keys are present before saving
+      const statsToSave = { ...defaultStats, ...stats };
       localStorage.setItem(STATS_STORAGE_KEY, JSON.stringify(statsToSave));
       // Update last played date marker when saving stats
       localStorage.setItem(LAST_PLAYED_DATE_KEY, new Date().toISOString().split('T')[0]);
@@ -113,27 +114,4 @@ export function saveSettings(settings: AppSettings): void {
    } catch (e) {
        console.error('Failed to save settings to localStorage', e);
    }
-}
-
-// Helper function to merge loaded stats with defaults, ensuring all keys exist
-function mergeWithDefaults(loaded: any, defaults: GameStatistics): GameStatistics {
-    const merged: GameStatistics = JSON.parse(JSON.stringify(defaults)); // Deep clone defaults
-
-    // Merge todayStats
-    if (loaded.todayStats) {
-        merged.todayStats.bestScore = loaded.todayStats.bestScore ?? defaults.todayStats.bestScore;
-        merged.todayStats.timesPlayed = loaded.todayStats.timesPlayed ?? defaults.todayStats.timesPlayed;
-    }
-
-    // Merge allTimeStats
-    if (loaded.allTimeStats) {
-        for (const key in defaults.allTimeStats) {
-            if (Object.prototype.hasOwnProperty.call(defaults.allTimeStats, key)) {
-                const k = key as keyof GameStatistics['allTimeStats'];
-                (merged.allTimeStats as any)[k] = loaded.allTimeStats[k] ?? (defaults.allTimeStats as any)[k];
-            }
-        }
-    }
-
-    return merged;
 } 

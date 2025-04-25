@@ -55,13 +55,12 @@ const WinModal: React.FC<WinModalProps> = ({
 
   // Use defaultStats if gameStats is somehow null/undefined
   const currentStats = gameStats || defaultStats;
-  const allTimeStats = currentStats.allTimeStats || defaultStats.allTimeStats;
   
   // Get today's date key
   const todayKey = dateKeyForToday();
   
-  // Get attempts for today from allTimeStats
-  const attemptsToday = allTimeStats.attemptsPerDay?.[todayKey] ?? 1; // Default to 1 if not found
+  // Get attempts for today directly from currentStats
+  const attemptsToday = currentStats.attemptsPerDay?.[todayKey] ?? 1; // Default to 1 if not found
 
   // Check if Web Share API is supported
   useEffect(() => {
@@ -141,6 +140,12 @@ const WinModal: React.FC<WinModalProps> = ({
     }
   };
   
+  // Get hints used for today
+  const hintsUsedToday = currentStats.hintUsageByDay?.[todayKey] || 0;
+  const hintsText = hintsUsedToday > 0 
+    ? `Hints Used: ${hintsUsedToday}` 
+    : `No hints used! 🧠`;
+  
   // Generate properly formatted share text
   const getFormattedShareText = () => {
     // Get the emoji representation directly from the puzzle's starting grid
@@ -151,12 +156,6 @@ const WinModal: React.FC<WinModalProps> = ({
     // Get difficulty level from settings
     const difficultyLevel = settings?.difficultyLevel || 'medium';
     const difficultyText = difficultyLevel.charAt(0).toUpperCase() + difficultyLevel.slice(1);
-    
-    // Get hints used for today
-    const hintsUsedToday = allTimeStats?.hintUsageByDay?.[todayKey] || 0;
-    const hintsText = hintsUsedToday > 0 
-      ? `Hints Used: ${hintsUsedToday}` 
-      : `No hints used! 🧠`;
     
     // Create formatted text that matches the required format
     return `Color Lock - ${formatDate()}
@@ -341,7 +340,7 @@ ${boardRows}`;
             {isTutorialMode ? "Play Today's Puzzle" : "Play Again"}
           </button>
           
-          <button className="close-button" onClick={onClose}>Close</button>
+          <button className="win-close-button" onClick={onClose}>Close</button>
         </div>
       </div>
     </div>

@@ -280,7 +280,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     loadInitialStats(); // Load stats from storage
 
     loadPuzzle();
-  }, [DATE_TO_USE, settings.difficultyLevel, loadInitialStats]); // Rerun if difficulty changes
+  }, [DATE_TO_USE, settings, loadInitialStats]); // Ensure settings is a dependency
 
   // When the puzzle is first loaded, set the game start time
   useEffect(() => {
@@ -434,11 +434,12 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     if (hint) {
       setHintCell(hint);
       setHintsUsedThisGame(prev => prev + 1);
-      console.log(`[STATS-EVENT ${new Date().toISOString()}] Hint used at position [${hint.row},${hint.col}] - puzzle ID: ${puzzle.dateString}. Local movesThisAttempt NOT incremented.`);
+      console.log(`[STATS-EVENT ${new Date().toISOString()}] Hint used at position [${hint.row},${hint.col}] - puzzle ID: ${puzzle.dateString}. Attempt number: ${attemptNumberToday}`);
       callUpdateStats({
         eventType: 'hint',
         puzzleId: puzzle.dateString,
         hintsUsedInGame: 1,
+        attemptNumberToday: attemptNumberToday,
       });
     } else {
       console.log("No valid hint could be generated.");
@@ -449,16 +450,17 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     // Clear pending moves *before* sending the final win event
     clearPendingMoves();
 
-    console.log(`[STATS-EVENT ${new Date().toISOString()}] Game won - puzzle ID: ${solvedPuzzle.dateString}, userScore: ${solvedPuzzle.userMovesUsed}, algoScore: ${solvedPuzzle.algoScore}, total moves this attempt: ${movesThisAttempt}, hints: ${hintsUsedThisGame}, first try: ${isFirstTryOfDay}, attempt #: ${attemptNumberToday}`);
+    console.log(`[STATS-EVENT ${new Date().toISOString()}] Game won - puzzle ID: ${solvedPuzzle.dateString}, userScore: ${solvedPuzzle.userMovesUsed}, algoScore: ${solvedPuzzle.algoScore}, difficulty: ${settings.difficultyLevel}`);
     callUpdateStats({
       eventType: 'win',
       puzzleId: solvedPuzzle.dateString,
       userScore: solvedPuzzle.userMovesUsed,
       algoScore: solvedPuzzle.algoScore,
-      movesUsedInGame: movesThisAttempt, // Send final count for this attempt
+      movesUsedInGame: movesThisAttempt,
       hintsUsedInGame: hintsUsedThisGame,
       isFirstTryOfDay: isFirstTryOfDay,
       attemptNumberToday: attemptNumberToday,
+      difficultyLevel: settings.difficultyLevel,
     });
     setShowWinModal(true);
   };
@@ -528,20 +530,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   };
 
   const handleSettingsChange = (newSettings: AppSettings) => {
-    const difficultyChanged = newSettings.difficultyLevel !== settings.difficultyLevel;
     updateSettings(newSettings);
-
-    if (difficultyChanged && firestoreData) {
-      const newPuzzle = generatePuzzleFromDB(firestoreData, DATE_TO_USE, newSettings);
-      setPuzzle(newPuzzle);
-      setAttemptNumberToday(1);
-      setIsFirstTryOfDay(true);
-      setHintsUsedThisGame(0);
-      setMovesThisAttempt(0);
-      setHasMadeFirstMove(false);
-      setIsLostReported(false);
-      setIsOnOptimalPath(true);
-    }
   };
 
   const handleAutoComplete = () => {
@@ -582,16 +571,17 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       setShowAutocompleteModal(false);
 
       // 6. Send the 'win' event with the explicitly calculated total moves for the attempt
-      console.log(`[STATS-EVENT ${new Date().toISOString()}] Game won via Autocomplete - puzzle ID: ${completedPuzzle.dateString}, userScore: ${completedPuzzle.userMovesUsed}, algoScore: ${completedPuzzle.algoScore}, moves this attempt: ${finalMovesForThisAttempt}, hints: ${hintsUsedThisGame}`);
+      console.log(`[STATS-EVENT ${new Date().toISOString()}] Game won via Autocomplete - puzzle ID: ${completedPuzzle.dateString}, difficulty: ${settings.difficultyLevel}`);
       callUpdateStats({
           eventType: 'win',
           puzzleId: completedPuzzle.dateString,
           userScore: completedPuzzle.userMovesUsed,
           algoScore: completedPuzzle.algoScore,
-          movesUsedInGame: finalMovesForThisAttempt, // Use explicit calculated value
+          movesUsedInGame: finalMovesForThisAttempt,
           hintsUsedInGame: hintsUsedThisGame,
           isFirstTryOfDay: isFirstTryOfDay,
           attemptNumberToday: attemptNumberToday,
+          difficultyLevel: settings.difficultyLevel,
       });
 
       // 7. Show win modal

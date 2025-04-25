@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { User, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, EmailAuthProvider, linkWithCredential } from 'firebase/auth';
 import { auth } from '../services/firebaseService';
 
@@ -33,41 +33,85 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Check for stored auth preference
-  useEffect(() => {
-    const checkStoredPreference = () => {
-      const storedPreference = localStorage.getItem('authPreference');
-      
-      if (storedPreference === 'guest') {
-        playAsGuest();
-      }
-    };
-    
-    let unsubscribe = () => {};
-    
-    if (auth) {
-      unsubscribe = onAuthStateChanged(auth, (user) => {
-        console.log("Auth State Changed:", user ? `User UID: ${user.uid}, Anonymous: ${user.isAnonymous}` : "No user");
-        setCurrentUser(user);
-        
-        if (user) {
-          // User is signed in
-          setIsAuthenticated(true);
-          setIsGuest(user.isAnonymous);
-        } else {
-          // User is signed out - check if we should use guest mode
-          checkStoredPreference();
-        }
-        
-        setIsLoading(false);
-      });
-    } else {
-      // If auth is not available, just set loading to false
+  // Memoize playAsGuest to avoid re-creating it unnecessarily
+  const playAsGuest = useCallback(async (): Promise<void> => {
+    if (!auth) {
+      console.error('Auth Service not available for playAsGuest.');
+      throw new Error('Authentication service is not available');
+    }
+    // Double-check if a user logged in while this was being called
+    if (auth.currentUser) {
+      console.log('User already authenticated, skipping guest sign-in.');
+      // Update state just in case it was lagging
+      setCurrentUser(auth.currentUser);
+      setIsAuthenticated(true);
+      setIsGuest(auth.currentUser.isAnonymous);
       setIsLoading(false);
+      return;
     }
 
-    return unsubscribe;
-  }, []);
+    console.log('Attempting anonymous sign-in...');
+    try {
+      const userCredential = await signInAnonymously(auth);
+      console.log('Anonymous sign-in successful:', userCredential.user.uid);
+      // State will be updated by onAuthStateChanged listener
+      localStorage.setItem('authPreference', 'guest'); // Persist preference
+    } catch (error) {
+      console.error('Anonymous sign-in failed:', error);
+      // Set loading to false even if guest sign-in fails, so app doesn't hang
+      setIsLoading(false);
+      throw error; // Re-throw error to indicate failure
+    }
+  }, []); // No dependencies needed as `auth` is stable
+
+  useEffect(() => {
+    if (!auth) {
+      console.error("Auth service not initialized. Cannot set up listener.");
+      setIsLoading(false); // Stop loading if auth isn't available
+      return;
+    }
+
+    console.log("Setting up onAuthStateChanged listener...");
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      console.log("Auth State Changed:", user ? `User UID: ${user.uid}, Anonymous: ${user.isAnonymous}` : "No user");
+      setCurrentUser(user);
+
+      if (user) {
+        // User is signed in (either guest or permanent)
+        setIsAuthenticated(true);
+        setIsGuest(user.isAnonymous);
+        setIsLoading(false);
+        // If it's a permanent user, ensure preference is set
+        if (!user.isAnonymous) {
+           localStorage.setItem('authPreference', 'user');
+        }
+      } else {
+        // No user is signed in
+        setIsAuthenticated(false);
+        setIsGuest(false);
+
+        // --- Attempt Guest Sign-in Automatically ---
+        // Remove the isLoading check here. If the listener fires and finds no user,
+        // we *always* want to attempt guest sign-in on the initial load sequence.
+        // The listener itself implies the SDK is ready.
+        console.log("No user found, attempting guest sign-in...");
+        playAsGuest().catch(err => {
+            console.error("Failed to automatically sign in as guest:", err);
+            // Still need to stop loading indicator if guest sign-in fails
+            setIsLoading(false);
+        });
+        // --- End Guest Sign-in Logic ---
+      }
+    });
+
+    // Cleanup listener on unmount
+    return () => {
+      console.log("Cleaning up onAuthStateChanged listener.");
+      unsubscribe();
+    };
+  // Remove isLoading from dependency array, as its check inside is removed.
+  // Keep playAsGuest as it's used inside.
+  }, [playAsGuest]);
 
   // Sign in with email and password
   const signIn = async (email: string, password: string): Promise<User> => {
@@ -89,44 +133,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Sign up with email and password - Updated to use account linking
   const signUp = async (email: string, password: string): Promise<User> => {
-    if (!auth) {
-      throw new Error('Authentication service is not available');
-    }
-    
-    // Get the currently signed-in user *at this moment*
-    const currentAuthUser = auth.currentUser;
+    if (!auth) throw new Error('Authentication service is not available');
+
+    const currentAuthUser = auth.currentUser; // Check current user *at this moment*
 
     try {
-      // Check if the current user exists and is anonymous
       if (currentAuthUser && currentAuthUser.isAnonymous) {
         console.log(`Attempting to link anonymous user (${currentAuthUser.uid}) with email: ${email}`);
-        // Create the email/password credential
         const credential = EmailAuthProvider.credential(email, password);
-
-        // Link the credential to the existing anonymous user account
-        // This upgrades the anonymous account, preserving the UID
         const userCredential = await linkWithCredential(currentAuthUser, credential);
         console.log(`Successfully linked anonymous user. UID remains: ${userCredential.user.uid}`);
-
-        // Update local state
-        setCurrentUser(userCredential.user);
-        setIsAuthenticated(true);
-        setIsGuest(false);
+        // State updates handled by onAuthStateChanged
         localStorage.setItem('authPreference', 'user');
-
         return userCredential.user;
       } else {
-        // No user is signed in, or the signed-in user is not anonymous
-        // Proceed with creating a completely new user account
         console.log(`No anonymous user detected or user not anonymous, creating new user with email: ${email}`);
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         console.log(`Successfully created new user: ${userCredential.user.uid}`);
-        
-        setCurrentUser(userCredential.user);
-        setIsAuthenticated(true);
-        setIsGuest(false);
+        // State updates handled by onAuthStateChanged
         localStorage.setItem('authPreference', 'user');
-        
         return userCredential.user;
       }
     } catch (error: any) {
@@ -158,47 +183,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setIsGuest(false);
       localStorage.removeItem('authPreference');
     } catch (error) {
-      throw error;
-    }
-  };
-
-  // Play as guest
-  const playAsGuest = async (): Promise<void> => {
-    if (!auth) {
-      console.error('Authentication service not available');
-      throw new Error('Authentication service is not available');
-    }
-    
-    try {
-      console.log('Play as guest: Starting authentication flow');
-      // Only sign in anonymously if we're not already authenticated
-      if (!isAuthenticated) {
-        console.log('Play as guest: Not authenticated, attempting anonymous sign-in');
-        // Add timeout to prevent indefinite waiting on auth
-        const signInPromise = signInAnonymously(auth);
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Anonymous sign-in timed out after 10 seconds')), 10000)
-        );
-        
-        try {
-          // Race the sign-in against the timeout
-          await Promise.race([signInPromise, timeoutPromise]);
-          console.log('Play as guest: Anonymous sign-in successful');
-        } catch (signInError) {
-          console.error('Play as guest: Anonymous sign-in failed', signInError);
-          throw signInError;
-        }
-      } else {
-        console.log('Play as guest: Already authenticated, skipping sign-in');
-      }
-      
-      console.log('Play as guest: Setting auth state to guest');
-      setIsGuest(true);
-      setIsAuthenticated(true);
-      localStorage.setItem('authPreference', 'guest');
-      console.log('Play as guest: Flow completed successfully');
-    } catch (error) {
-      console.error('Play as guest: Fatal error:', error);
       throw error;
     }
   };

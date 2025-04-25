@@ -18,113 +18,91 @@ export default function useGameStats(initialDefaultStats: GameStatistics) {
   /**
    * Load initial stats from local storage. This provides a quick display
    * while potentially fresher data is fetched from the backend.
-   * It also handles resetting the client-side 'todayStats' if it's a new day.
    */
   const loadInitialStats = useCallback(() => {
     setIsLoadingStats(true); // Start loading
     console.log("useGameStats: Loading initial stats from storage...");
     try {
-      const storedStats = loadGameStats(initialDefaultStats); // Use the utility
-      const lastPlayedDate = localStorage.getItem('lastPlayedDate'); // Get last *saved* date
-      const currentDate = dateKeyForToday();
-
-      // Reset client-side todayStats if it's a new day compared to the last save date
-      if (lastPlayedDate !== currentDate) {
-          console.log(`useGameStats: New day detected (Current: ${currentDate}, Last Played: ${lastPlayedDate}). Resetting todayStats for display.`);
-          // Reset only the todayStats part for the display state
-          storedStats.todayStats = {
-              bestScore: null,
-              timesPlayed: 0, // Reset client-side attempt counter
-          };
-          // Update the last played date marker in storage
-          localStorage.setItem('lastPlayedDate', currentDate);
-          // Save the potentially modified stats (with reset todayStats) back to storage
-          // This ensures the reset todayStats persists if the app is reloaded before backend sync
-          saveGameStats(storedStats);
-      }
-
+      // Use the updated loadGameStats which merges with defaults
+      const storedStats = loadGameStats(initialDefaultStats);
       console.log("useGameStats: Loaded initial stats state:", storedStats);
       setGameStats(storedStats);
-
     } catch (error) {
       console.error("useGameStats: Error loading initial stats:", error);
       setGameStats(initialDefaultStats); // Fallback to defaults
     } finally {
       // Don't set isLoadingStats to false here, let the fetch control it
-      // setIsLoadingStats(false);
     }
   }, [initialDefaultStats]);
 
   /**
    * Function to update the gameStats state with fresh data fetched from the backend.
-   * Now accepts just the allTimeStats object returned by the backend function.
+   * Now accepts the entire flattened stats object returned by the backend function.
    */
-  const setFreshStats = useCallback((freshAllTimeStats: Record<string, any>) => {
-      console.log("useGameStats: Updating state with fresh allTimeStats:", freshAllTimeStats);
-      
+  const setFreshStats = useCallback((freshStats: Record<string, any>) => {
+      console.log("useGameStats: Updating state with fresh stats:", freshStats);
+
       // Validate and extract the correct data
-      if (!freshAllTimeStats || typeof freshAllTimeStats !== 'object') {
-          console.error("useGameStats: Invalid data received in setFreshStats:", freshAllTimeStats);
+      if (!freshStats || typeof freshStats !== 'object') {
+          console.error("useGameStats: Invalid data received in setFreshStats:", freshStats);
           setIsLoadingStats(false);
           return;
       }
-      
-      // Handle the case where we might receive {todayStats, allTimeStats} structure
-      // instead of just the allTimeStats object
-      const actualAllTimeStats = 
-          ('allTimeStats' in freshAllTimeStats && freshAllTimeStats.allTimeStats) 
-              ? freshAllTimeStats.allTimeStats 
-              : freshAllTimeStats;
-              
+
+      // Directly set the new stats, merging with defaults to ensure all keys
       setGameStats(prevStats => {
-          // Create a new state object, preserving the existing todayStats
-          // and updating the allTimeStats
-          const newState = {
-              ...prevStats, // Keep existing structure (includes todayStats)
-              allTimeStats: {
-                  ...defaultStats.allTimeStats, // Start with defaults to ensure all keys
-                  ...actualAllTimeStats // Overwrite with fresh data from backend
-              }
+          const newState: GameStatistics = { // Ensure type safety
+              ...defaultStats, // Start with defaults
+              ...freshStats, // Overwrite with fresh data from backend
+              // Ensure new fields are present, falling back if necessary
+              currentTieBotStreak: freshStats.currentTieBotStreak ?? 0,
+              longestTieBotStreak: freshStats.longestTieBotStreak ?? 0,
+              tieBotStreakDate: freshStats.tieBotStreakDate ?? null,
+              currentPuzzleCompletedStreak: freshStats.currentPuzzleCompletedStreak ?? 0, // Add new
+              longestPuzzleCompletedStreak: freshStats.longestPuzzleCompletedStreak ?? 0, // Add new
+              puzzleCompletedStreakDate: freshStats.puzzleCompletedStreakDate ?? null, // Add new
           };
           console.log("useGameStats: Constructed new gameStats state:", newState);
           // Optionally save the updated stats back to local storage as a cache
-          // saveGameStats(newState); // Be cautious if todayStats shouldn't be cached this way
+          saveGameStats(newState);
           return newState;
       });
       setIsLoadingStats(false); // Mark loading as complete when fresh stats arrive
-  }, [setIsLoadingStats]);
+  }, [setIsLoadingStats]); // Removed dependency on defaultStats as it's included inside
 
   /**
    * Generate shareable text based on the current gameStats state.
-   * This remains client-side as it's purely for display/sharing formatting.
    */
   const generateShareableStats = useCallback(() => {
-    // Keep the existing logic from useGameStats.ts for formatting share text
-    // based on the current `gameStats` state.
-    const { todayStats, allTimeStats } = gameStats;
+    // Read directly from the gameStats object (flattened structure)
     const safeNum = (val: number | null | undefined) => (typeof val === 'number' && !isNaN(val) ? val : 0);
+    const safeArrLen = (val: any) => (Array.isArray(val) ? val.length : 0);
+    const todayKey = dateKeyForToday();
 
     let shareText = `🔒 Color Lock Stats 🔒\n\n`;
-    shareText += `Today's Game:\n`;
-    // Use bestScoresByDay for today's best score if available, otherwise fallback
-    const todayKey = dateKeyForToday();
-    const bestToday = allTimeStats?.bestScoresByDay?.[todayKey] ?? null;
-    shareText += `Best Score: ${bestToday !== null ? bestToday : 'N/A'}\n`;
-    // Use attemptsPerDay for today's plays if available
-    const attemptsToday = allTimeStats?.attemptsPerDay?.[todayKey] ?? 0;
-    shareText += `Times Played Today: ${attemptsToday}\n\n`;
+    shareText += `Today's Game (${todayKey}):\n`;
+    const bestToday = gameStats.bestScoresByDay?.[todayKey] ?? 'N/A';
+    shareText += `Best Score: ${bestToday}\n`;
+    const attemptsToday = gameStats.attemptsPerDay?.[todayKey] ?? 0;
+    shareText += `Attempts Today: ${attemptsToday}\n`;
+    const winsToday = gameStats.winsPerDay?.[todayKey] ?? 0;
+    shareText += `Wins Today: ${winsToday}\n\n`;
 
     shareText += `All-time Stats:\n`;
-    shareText += `Current Streak: ${safeNum(allTimeStats?.currentStreak)}\n`;
-    shareText += `Longest Streak: ${safeNum(allTimeStats?.longestStreak)}\n`;
-    shareText += `Days Played: ${safeNum(allTimeStats?.playedDays?.length)}\n`; // Use length of array
-    shareText += `Goals Achieved: ${safeNum(allTimeStats?.goalAchievedDays?.length)}\n`; // Use length of array
-    shareText += `Total Wins: ${safeNum(allTimeStats?.totalWins)}\n`;
-    shareText += `Total Games Played: ${safeNum(allTimeStats?.totalGamesPlayed)}\n`;
-    shareText += `Total Moves: ${safeNum(allTimeStats?.totalMovesUsed)}\n`;
-    shareText += `Total Hints: ${safeNum(allTimeStats?.totalHintsUsed)}\n\n`;
-    shareText += `First Try Streak: ${safeNum(allTimeStats?.firstTryStreak)}\n`;
-    shareText += `Longest First Try: ${safeNum(allTimeStats?.longestFirstTryStreak)}\n\n`;
+    // Use new field names for streaks
+    shareText += `Current Win Streak: ${safeNum(gameStats.currentPuzzleCompletedStreak)}\n`; // Separated
+    shareText += `Longest Win Streak: ${safeNum(gameStats.longestPuzzleCompletedStreak)}\n`; // Separated
+    shareText += `Current Tie/Beat Streak: ${safeNum(gameStats.currentTieBotStreak)}\n`;
+    shareText += `Longest Tie/Beat Streak: ${safeNum(gameStats.longestTieBotStreak)}\n`;
+    shareText += `Days Played: ${safeArrLen(gameStats.playedDays)}\n`;
+    shareText += `Goals Achieved: ${safeArrLen(gameStats.goalAchievedDays)}\n`; // Met or Beat
+    shareText += `Goals Beaten: ${safeArrLen(gameStats.goalBeatenDays)}\n`; // Strictly Beat
+    shareText += `Total Wins: ${safeNum(gameStats.totalWins)}\n`;
+    shareText += `Total Games Played: ${safeNum(gameStats.totalGamesPlayed)}\n`;
+    shareText += `Total Moves: ${safeNum(gameStats.totalMovesUsed)}\n`;
+    shareText += `Total Hints: ${safeNum(gameStats.totalHintsUsed)}\n\n`;
+    shareText += `First Try Streak: ${safeNum(gameStats.currentFirstTryStreak)}\n`;
+    shareText += `Longest First Try: ${safeNum(gameStats.longestFirstTryStreak)}\n\n`;
 
     shareText += `Play at: ${window.location.origin}`;
 
