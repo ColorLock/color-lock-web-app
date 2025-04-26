@@ -544,10 +544,17 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
                           sortedLeaderboardData.map((entry) => {
                             // --- Change: Check if this row is the current user ---
                             const isCurrentUser = currentUser && entry.userId === currentUser.uid;
+                            
+                            // --- New: Determine the display name for this row ---
+                            let displayedName = entry.username || 'Anonymous';
+                            if (isCurrentUser && currentUser && currentUser.displayName) {
+                              displayedName = currentUser.displayName;
+                            }
+                            
                             return (
                               // --- Change: Add 'current-user-row' class conditionally ---
                               <tr key={entry.userId} className={isCurrentUser ? 'current-user-row' : ''}>
-                                <td>{entry.username || 'Anonymous'}</td>
+                                <td>{displayedName}</td>
                                 <td>{entry.totalWins}</td>
                                 <td>{entry.totalMovesUsed}</td>
                                 <td>{entry.currentPuzzleCompletedStreak}</td>
