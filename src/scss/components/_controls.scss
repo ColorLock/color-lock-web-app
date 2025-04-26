@@ -32,6 +32,7 @@
   margin-bottom: $spacing-lg;
   max-width: 500px;
   width: 100%;
+  position: relative;
   
   h1 {
     margin: 0 0 $spacing-xs 0;
@@ -199,5 +200,103 @@ input:checked + .toggle-slider:before {
   
   &.fade-out {
     opacity: 0;
+  }
+}
+
+// --- Difficulty Indicator Styles ---
+.difficulty-indicator-container {
+  position: absolute;
+  top: $spacing-md;
+  right: $spacing-md;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: $color-text-secondary;
+}
+
+.difficulty-text {
+  font-size: 10px;
+  font-weight: 300;
+  text-transform: lowercase;
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+
+.difficulty-columns {
+  display: flex;
+  gap: 3px;
+}
+
+.difficulty-column {
+  width: 6px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid $color-text-secondary;
+  background-color: transparent;
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  box-sizing: border-box;
+  
+  /* Button resets */
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  
+  /* Improved focus state without outline */
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 3px rgba(0, 0, 0, 0.3);
+    transform: scale(1.1);
+  }
+  
+  &:hover {
+    opacity: 0.8;
+  }
+}
+
+/* Progressive difficulty indicators */
+/* Easy difficulty - only first column active */
+.difficulty-indicator-container.difficulty-easy {
+  .difficulty-column.easy {
+    border: none;
+    background-color: #2ecc71; /* Green */
+  }
+}
+
+/* Medium difficulty - first and second columns active */
+.difficulty-indicator-container.difficulty-medium {
+  .difficulty-column.easy,
+  .difficulty-column.medium {
+    border: none;
+  }
+  
+  .difficulty-column.easy {
+    background-color: #2ecc71; /* Green */
+  }
+  
+  .difficulty-column.medium {
+    background-color: #f1c40f; /* Yellow */
+  }
+}
+
+/* Hard difficulty - all columns active */
+.difficulty-indicator-container.difficulty-hard {
+  .difficulty-column {
+    border: none;
+  }
+  
+  .difficulty-column.easy {
+    background-color: #2ecc71; /* Green */
+  }
+  
+  .difficulty-column.medium {
+    background-color: #f1c40f; /* Yellow */
+  }
+  
+  .difficulty-column.hard {
+    background-color: #e74c3c; /* Red */
   }
 } 

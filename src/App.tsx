@@ -5,7 +5,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faHome, faGear, faTrophy, faInfoCircle } from '@fortawesome/free-solid-svg-icons';
 
 // Types
-import { AppSettings } from './types/settings';
+import { AppSettings, DifficultyLevel } from './types/settings';
 import { TileColor } from './types';
 
 // Components
@@ -173,6 +173,18 @@ const GameContainer = () => {
   const handleStatsClickAction = () => setShowStats(true);
   const handleInfoClickAction = () => setShowTutorialModal(true);
 
+  // Define the handler function for difficulty changes from GameHeader
+  const handleDifficultyChangeFromHeader = (newDifficulty: DifficultyLevel) => {
+    // Create the new settings object by merging the new difficulty
+    // with the existing settings.
+    const newSettings: AppSettings = {
+      ...settings, // Spread the current settings
+      difficultyLevel: newDifficulty, // Update the difficulty level
+    };
+    // Call the context's update function
+    handleSettingsChange(newSettings);
+  };
+
   // Show loading indicator while fetching puzzle data
   if (loading || !puzzle) {
     return (
@@ -268,6 +280,7 @@ const GameContainer = () => {
             algoScore: 7,
             userMovesUsed: currentMoveIndex
           } : puzzle}
+          settings={settings}
           getColorCSS={getColorCSSWithSettings}
           onHintClick={handleHint}
           showHintButton={!isTutorialMode || useTutorialContext().showHintButton}
@@ -279,6 +292,8 @@ const GameContainer = () => {
           onSettingsClick={() => handleMenuItemClick(handleSettingsClickAction)}
           onStatsClick={() => handleMenuItemClick(handleStatsClickAction)}
           onInfoClick={() => handleMenuItemClick(handleInfoClickAction)}
+          // Pass the difficulty change handler
+          onDifficultyChange={handleDifficultyChangeFromHeader}
         />
 
         {/* Game Grid */}

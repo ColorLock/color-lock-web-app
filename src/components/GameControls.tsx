@@ -1,8 +1,8 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faGear, faTrophy, faInfoCircle, faHome } from '@fortawesome/free-solid-svg-icons';
+import { faGear, faTrophy, faInfoCircle, faHome, faBrain } from '@fortawesome/free-solid-svg-icons';
 import { TileColor, DailyPuzzle } from '../types';
-import { AppSettings } from '../types/settings';
+import { AppSettings, DifficultyLevel } from '../types/settings';
 import { useTutorialContext } from '../contexts/TutorialContext';
 import HamburgerMenu from './HamburgerMenu';
 import SignUpButton from './SignUpButton';
@@ -10,6 +10,7 @@ import SignUpButton from './SignUpButton';
 // Updated GameHeader Props to include menu state/handlers
 interface GameHeaderProps {
   puzzle: DailyPuzzle;
+  settings: AppSettings;
   getColorCSS: (color: TileColor) => string;
   onHintClick: () => void;
   showHintButton?: boolean;
@@ -21,10 +22,13 @@ interface GameHeaderProps {
   onSettingsClick?: () => void;
   onStatsClick?: () => void;
   onInfoClick?: () => void;
+  // Add callback for difficulty change
+  onDifficultyChange?: (difficulty: DifficultyLevel) => void;
 }
 
 export const GameHeader: React.FC<GameHeaderProps> = ({
   puzzle,
+  settings = {} as AppSettings,
   getColorCSS,
   onHintClick,
   showHintButton = true,
@@ -35,9 +39,19 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
   onHomeClick = () => {},
   onSettingsClick = () => {},
   onStatsClick = () => {},
-  onInfoClick = () => {}
+  onInfoClick = () => {},
+  // Destructure difficulty change callback
+  onDifficultyChange = () => {}
 }) => {
   const { isTutorialMode } = useTutorialContext();
+  
+  // Use the difficulty level from settings with a fallback to prevent errors
+  const currentDifficulty = settings?.difficultyLevel || DifficultyLevel.Medium;
+  
+  // Handle difficulty column click
+  const handleDifficultyClick = (difficulty: DifficultyLevel) => {
+    onDifficultyChange(difficulty);
+  };
   
   return (
     <div className="top-card">
@@ -65,6 +79,34 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
           )}
         </HamburgerMenu>
       </div>
+
+      {/* Difficulty Indicator (Desktop/Tablet) */}
+      {/* Only show outside tutorial mode */}
+      {!isTutorialMode && (
+        <div className={`difficulty-indicator-container difficulty-${currentDifficulty}`}>
+          <span className="difficulty-text">difficulty</span>
+          <div className="difficulty-columns">
+            <button 
+              className="difficulty-column easy"
+              title="Set to Easy Difficulty"
+              aria-label={`Difficulty: Easy ${currentDifficulty === DifficultyLevel.Easy ? '(Active)' : '(Inactive)'}`}
+              onClick={() => handleDifficultyClick(DifficultyLevel.Easy)}
+            ></button>
+            <button 
+              className="difficulty-column medium"
+              title="Set to Medium Difficulty"
+              aria-label={`Difficulty: Medium ${currentDifficulty === DifficultyLevel.Medium ? '(Active)' : '(Inactive)'}`}
+              onClick={() => handleDifficultyClick(DifficultyLevel.Medium)}
+            ></button>
+            <button 
+              className="difficulty-column hard"
+              title="Set to Hard Difficulty"
+              aria-label={`Difficulty: Hard ${currentDifficulty === DifficultyLevel.Hard ? '(Active)' : '(Inactive)'}`}
+              onClick={() => handleDifficultyClick(DifficultyLevel.Hard)}
+            ></button>
+          </div>
+        </div>
+      )}
 
       {/* Top Card Content */}
       <div className="top-card-content">
@@ -158,6 +200,8 @@ interface GameControlsProps {
   onSettingsClick?: () => void;
   onStatsClick?: () => void;
   onInfoClick?: () => void;
+  // Add difficulty change handler
+  onDifficultyChange?: (difficulty: DifficultyLevel) => void;
 }
 
 const GameControls: React.FC<GameControlsProps> = (props) => {
@@ -167,6 +211,7 @@ const GameControls: React.FC<GameControlsProps> = (props) => {
     <>
       <GameHeader 
         puzzle={props.puzzle}
+        settings={props.settings}
         getColorCSS={props.getColorCSS}
         onHintClick={props.onHintClick}
         showHintButton={!isTutorialMode || showHintButton}
@@ -177,6 +222,7 @@ const GameControls: React.FC<GameControlsProps> = (props) => {
         onSettingsClick={props.onSettingsClick}
         onStatsClick={props.onStatsClick}
         onInfoClick={props.onInfoClick}
+        onDifficultyChange={props.onDifficultyChange}
       />
       <GameFooter
         puzzle={props.puzzle}
