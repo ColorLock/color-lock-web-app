@@ -3,8 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigation } from '../App';
 import '../scss/main.scss';
 import { dateKeyForToday } from '../utils/dateUtils';
-import firebaseConfig from '../env/firebaseConfig'; // Needed for project ID fallback
-import { auth, useEmulators, ensureAuthenticated, getDailyScoresStatsCallable } from '../services/firebaseService'; // Import auth and useEmulators
+import { useDataCache } from '../contexts/DataCacheContext'; // Import the new context hook
 
 interface DailyScoreStats {
   lowestScore: number | null;
@@ -20,98 +19,30 @@ interface LandingScreenProps {
 const LandingScreen: React.FC<LandingScreenProps> = () => {
   const { signIn, signUp, playAsGuest, logOut, currentUser, isGuest, isAuthenticated } = useAuth();
   const { setShowLandingPage } = useNavigation();
+  const { dailyScoresStats, loadingStates, errorStates } = useDataCache(); // Use the cache context
+
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [statsLoading, setStatsLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null); // Rename error state for clarity
+  const [authLoading, setAuthLoading] = useState(false); // Rename loading state
   const [showAppContent, setShowAppContent] = useState(false);
-  const [stats, setStats] = useState<DailyScoreStats>({
-    lowestScore: null,
-    averageScore: null,
-    totalPlayers: 0,
-    playersWithLowestScore: 0
-  });
-  const [usersWithBestScore, setUsersWithBestScore] = useState<number>(0);
 
-  // Check if user is authenticated as a regular user (not guest)
-  const isRegularUser = isAuthenticated && !isGuest;
-
-  // Fetch global stats on component mount using callable function
-  useEffect(() => {
-    const fetchDailyScoresStats = async () => {
-      setStatsLoading(true); // Start loading stats
-      const today = dateKeyForToday();
-      console.log(`Attempting to fetch daily scores stats for ${today} via callable function`);
-
-      try {
-        // Call the callable function
-        const result = await getDailyScoresStatsCallable({ puzzleId: today });
-
-        console.log('getDailyScoresStats callable result:', result.data);
-
-        if (result.data.success && result.data.stats) {
-          console.log('Setting stats from callable response');
-          setStats(result.data.stats);
-          setUsersWithBestScore(result.data.stats.playersWithLowestScore || 0);
-        } else {
-          console.error('Stats fetch failed or returned invalid data:', result.data.error || 'No stats data');
-          fallbackToSampleData();
-        }
-      } catch (error: any) {
-        console.error('Error calling getDailyScoresStats callable:', error);
-        // Handle specific Firebase Functions errors
-        let message = error.message || 'Failed to load daily stats';
-        if (error.code === 'failed-precondition') {
-            message = 'App verification failed. Cannot load stats.';
-        } else if (error.code === 'unauthenticated') {
-            message = 'Authentication error. Cannot load stats.'; // Should not happen if guests allowed
-        }
-        setError(message); // Set error state to display to user
-        fallbackToSampleData();
-      } finally {
-        setStatsLoading(false); // Finish loading stats
-      }
-    };
-
-    // Helper function to use sample data when API calls fail
-    const fallbackToSampleData = () => {
-      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        console.log('Using sample data for development');
-        setStats({
-          lowestScore: 6,
-          averageScore: 9.5,
-          totalPlayers: 10,
-          playersWithLowestScore: 3
-        });
-        setUsersWithBestScore(3);
-      } else {
-         // Set to empty/default in production if fetch fails
-         setStats({ lowestScore: null, averageScore: null, totalPlayers: 0, playersWithLowestScore: 0 });
-         setUsersWithBestScore(0);
-         // Optionally set an error message here if not already set
-         if (!error) setError("Could not load today's stats.");
-      }
-    };
-
-    fetchDailyScoresStats();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run only once on mount
+  // Use loading/error state from context
+  const statsLoading = loadingStates.dailyScores;
+  const statsError = errorStates.dailyScores;
 
   // Simplified loading - just show content directly
   useEffect(() => {
     setShowAppContent(true);
   }, []);
 
-  // Show loading spinner if still processing authentication OR stats
-  if (loading || statsLoading) { // Check both loading states
+  // Show loading spinner if still processing authentication
+  if (authLoading) { // Check auth loading state
     return (
       <div className="loading-container">
         <div className="spinner"></div>
-        {/* Optional: Differentiate loading messages */}
-        {/* <p>{loading ? 'Authenticating...' : 'Loading Stats...'}</p> */}
       </div>
     );
   }
@@ -127,8 +58,8 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    setLoading(true);
+    setAuthError(null);
+    setAuthLoading(true);
 
     try {
       if (authMode === 'signin') {
@@ -136,46 +67,38 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
       } else {
         await signUp(email, password);
       }
-      // Navigate to the game after successful authentication
       setShowLandingPage(false);
     } catch (err: any) {
       console.error('Authentication error:', err);
-      setError(err.message || 'An error occurred during authentication');
+      setAuthError(err.message || 'An error occurred during authentication');
     } finally {
-      setLoading(false);
+      setAuthLoading(false);
     }
   };
 
   const handleGuestMode = async () => {
-    setError(null);
-    setLoading(true);
-
+    setAuthError(null);
+    setAuthLoading(true);
     console.log('LandingScreen: Starting guest mode flow');
-
     const safetyTimeout = setTimeout(() => {
       console.warn('LandingScreen: Guest mode safety timeout triggered after 15 seconds');
-      setLoading(false);
-      setError('Operation timed out. Please try again.');
+      setAuthLoading(false);
+      setAuthError('Operation timed out. Please try again.');
     }, 15000);
 
     try {
       console.log('LandingScreen: Calling playAsGuest()');
       await playAsGuest();
       console.log('LandingScreen: Guest login successful, navigating to game');
-
       clearTimeout(safetyTimeout);
-
-      // Check if we have a user before navigating
-      // Use a small delay to allow auth state to propagate if needed
       setTimeout(() => {
-          if (isAuthenticated) { // Check isAuthenticated flag from context
+          if (isAuthenticated) {
               setShowLandingPage(false);
           } else {
               console.error('LandingScreen: Authentication succeeded but state not updated');
-              setError('Authentication succeeded but failed to initialize user. Please refresh.');
+              setAuthError('Authentication succeeded but failed to initialize user. Please refresh.');
           }
-      }, 100); // 100ms delay
-
+      }, 100);
     } catch (err: any) {
       console.error('LandingScreen: Guest mode error:', err);
       clearTimeout(safetyTimeout);
@@ -185,25 +108,22 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
       } else if (err.code) {
         errorMessage = `Error code: ${err.code}`;
       }
-      setError(errorMessage);
-    } finally {
-      // Don't set loading false immediately if navigation might happen
-      // setLoading(false); // Let navigation handle the loading state implicitly
+      setAuthError(errorMessage);
+      setAuthLoading(false); // Ensure loading stops on error
     }
   };
 
   const handleSignOut = async () => {
-    setError(null);
-    setLoading(true);
-
+    setAuthError(null);
+    setAuthLoading(true);
     try {
       await logOut();
       console.log("User signed out successfully");
     } catch (err: any) {
       console.error('Sign out error:', err);
-      setError(err.message || 'An error occurred while signing out');
+      setAuthError(err.message || 'An error occurred while signing out');
     } finally {
-      setLoading(false);
+      setAuthLoading(false);
     }
   };
 
@@ -213,10 +133,16 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
 
   const toggleAuthMode = () => {
     setAuthMode(prevMode => (prevMode === 'signin' ? 'signup' : 'signin'));
-    setError(null);
+    setAuthError(null);
   };
 
+  // Check if user is authenticated as a regular user (not guest)
+  const isRegularUser = isAuthenticated && !isGuest;
   console.log("Auth state:", { isAuthenticated, isGuest, isRegularUser });
+
+  // Get derived stats values from context
+  const displayStats = dailyScoresStats || { lowestScore: null, averageScore: null, totalPlayers: 0, playersWithLowestScore: 0 };
+  const usersWithBestScore = displayStats.playersWithLowestScore;
 
   return (
     <div className="landing-container app-fade-in">
@@ -229,8 +155,11 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
         </h1>
       </div>
 
-      {/* Display error if stats failed to load */}
-      {error && !showAuthModal && <div className="auth-error" style={{ maxWidth: '400px', margin: '0 auto 1.5rem auto' }}>{error}</div>}
+      {/* Display stats error if present */}
+      {statsError && !showAuthModal && <div className="auth-error" style={{ maxWidth: '400px', margin: '0 auto 1.5rem auto' }}>{statsError}</div>}
+      {/* Display auth error if present */}
+      {authError && !showAuthModal && <div className="auth-error" style={{ maxWidth: '400px', margin: '0 auto 1.5rem auto' }}>{authError}</div>}
+
 
       <div className="global-stats-container">
         <h2>Today's Global Stats</h2>
@@ -241,22 +170,22 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
             <div className="stats-grid">
               <div className="stat-card">
                 <div className="stat-value">
-                  {stats.averageScore !== null
-                    ? Number(stats.averageScore).toFixed(1)
+                  {displayStats.averageScore !== null
+                    ? Number(displayStats.averageScore).toFixed(1)
                     : '—'}
                 </div>
                 <div className="stat-label">Average Score</div>
               </div>
               <div className="stat-card">
-                <div className="stat-value">{stats.lowestScore !== null ? stats.lowestScore : '—'}</div>
+                <div className="stat-value">{displayStats.lowestScore !== null ? displayStats.lowestScore : '—'}</div>
                 <div className="stat-label">Best Score</div>
               </div>
             </div>
             <p className="stats-highlight">
-              {stats.totalPlayers > 0 ? (
-                `${usersWithBestScore} out of ${stats.totalPlayers} players ${usersWithBestScore === 1 ? 'has' : 'have'} achieved the best score`
+              {displayStats.totalPlayers > 0 ? (
+                `${usersWithBestScore} out of ${displayStats.totalPlayers} players ${usersWithBestScore === 1 ? 'has' : 'have'} achieved the best score`
               ) : (
-                'Be the first to play today!'
+                statsError ? 'Stats unavailable' : 'Be the first to play today!' // Show error or default message
               )}
             </p>
           </>
@@ -269,14 +198,14 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
             <button
               className="landing-signin-button"
               onClick={handlePlayGame}
-              disabled={loading} // Disable if auth action in progress
+              disabled={authLoading}
             >
               Play Color Lock
             </button>
             <button
               className="landing-guest-button"
               onClick={handleSignOut}
-              disabled={loading} // Disable if auth action in progress
+              disabled={authLoading}
             >
               Sign Out
             </button>
@@ -285,15 +214,15 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
           <>
             <button
               className="landing-signin-button"
-              onClick={() => { setError(null); setShowAuthModal(true); }} // Clear error when opening modal
-              disabled={loading} // Disable if auth action in progress
+              onClick={() => { setAuthError(null); setShowAuthModal(true); }}
+              disabled={authLoading}
             >
               Sign In / Sign Up
             </button>
             <button
               className="landing-guest-button"
               onClick={handleGuestMode}
-              disabled={loading} // Disable if auth action in progress
+              disabled={authLoading}
             >
               Play as Guest
             </button>
@@ -309,8 +238,9 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
             <form className="auth-form" onSubmit={handleSubmit}>
               <h2>{authMode === 'signin' ? 'Sign In' : 'Create Account'}</h2>
 
-              {error && <div className="auth-error">{error}</div>}
+              {authError && <div className="auth-error">{authError}</div>}
 
+              {/* Email Input */}
               <div className="form-group">
                 <label htmlFor="email">Email</label>
                 <input
@@ -324,6 +254,7 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
                 />
               </div>
 
+              {/* Password Input */}
               <div className="form-group">
                 <label htmlFor="password">Password</label>
                 <input
@@ -337,12 +268,13 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
                 />
               </div>
 
+              {/* Submit Button */}
               <button
                 type="submit"
                 className="auth-button primary-button"
-                disabled={loading}
+                disabled={authLoading}
               >
-                {loading
+                {authLoading
                   ? 'Loading...'
                   : authMode === 'signin'
                     ? 'Sign In'
@@ -351,18 +283,21 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
               </button>
             </form>
 
+            {/* Separator */}
             <div className="auth-separator">
               <span>OR</span>
             </div>
 
+            {/* Guest Button */}
             <button
               onClick={handleGuestMode}
               className="auth-button guest-button"
-              disabled={loading}
+              disabled={authLoading}
             >
               Continue as Guest
             </button>
 
+            {/* Toggle Auth Mode */}
             <div className="auth-toggle">
               {authMode === 'signin' ? (
                 <p>

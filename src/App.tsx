@@ -33,6 +33,7 @@ import { getLockedColorCSS } from './utils/colorUtils';
 import { GameProvider, useGameContext } from './contexts/GameContext';
 import { TutorialProvider, useTutorialContext, TutorialStep } from './contexts/TutorialContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { DataCacheProvider, useDataCache } from './contexts/DataCacheContext';
 
 // Create a context for navigating between screens
 interface NavigationContextType {
@@ -474,17 +475,28 @@ const App: React.FC = () => {
   return (
     <NavigationContext.Provider value={{ showLandingPage, setShowLandingPage }}>
       <AuthProvider>
-        <AuthenticatedApp />
+        <DataCacheProvider>
+          <AuthenticatedApp />
+        </DataCacheProvider>
       </AuthProvider>
     </NavigationContext.Provider>
   );
 };
 
 const AuthenticatedApp: React.FC = () => {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, currentUser } = useAuth();
   const { showLandingPage } = useNavigation();
-  
-  // Show loading indicator while checking authentication
+  const { fetchAndCacheData, isInitialFetchDone } = useDataCache();
+  const fetchInitiated = useRef(false);
+
+  useEffect(() => {
+    if (!isLoading && !fetchInitiated.current && !isInitialFetchDone) {
+        console.log("AuthenticatedApp: Auth ready, initiating data fetch...");
+        fetchInitiated.current = true;
+        fetchAndCacheData(currentUser);
+    }
+  }, [isLoading, fetchAndCacheData, currentUser, isInitialFetchDone]);
+
   if (isLoading) {
     return (
       <div className="loading-container">
@@ -495,26 +507,20 @@ const AuthenticatedApp: React.FC = () => {
     );
   }
 
-  // If authenticated, decide between Game and Landing
   if (isAuthenticated) {
-    // If user explicitly navigated to landing page, show it
     if (showLandingPage) {
       return <LandingScreen />;
     } else {
-      // Otherwise (authenticated and not navigating home), show the game
       return (
         <GameProvider>
           <TutorialProvider>
-            <SettingsContext.Provider value={null}>
-              <GameContainer />
-            </SettingsContext.Provider>
+            <GameContainer />
           </TutorialProvider>
         </GameProvider>
       );
     }
   }
 
-  // If not authenticated (and not loading), always show LandingScreen
   return <LandingScreen />;
 };
 

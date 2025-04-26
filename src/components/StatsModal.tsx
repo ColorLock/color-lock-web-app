@@ -7,6 +7,8 @@ import { faTwitter, faFacebookF } from '@fortawesome/free-brands-svg-icons';
 import { GameStatistics, defaultStats, LeaderboardEntry } from '../types/stats';
 import { dateKeyForToday } from '../utils/dateUtils';
 import { getGlobalLeaderboardCallable } from '../services/firebaseService';
+import { useDataCache } from '../contexts/DataCacheContext';
+import { useAuth } from '../contexts/AuthContext';
 
 interface StatsModalProps {
   isOpen: boolean;
@@ -23,14 +25,22 @@ type SortConfig = { key: keyof LeaderboardEntry; direction: 'asc' | 'desc' } | n
 const StatsModal: React.FC<StatsModalProps> = memo(({ 
   isOpen, 
   onClose, 
-  stats, 
+  stats: gameContextStats,
   onShareStats,
-  isLoading = false // Default to false
+  isLoading: isLoadingPersonalStats = false
 }) => {
+  const { currentUser } = useAuth();
+  const {
+      userStats: cachedUserStats,
+      globalLeaderboard: cachedLeaderboard,
+      loadingStates: cacheLoadingStates,
+      errorStates: cacheErrorStates
+  } = useDataCache();
+
   const [activeTab, setActiveTab] = useState<'personal' | 'global'>('personal');
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
-  const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState<boolean>(false);
-  const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
+  const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState<boolean>(cacheLoadingStates.leaderboard);
+  const [leaderboardError, setLeaderboardError] = useState<string | null>(cacheErrorStates.leaderboard);
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'totalMovesUsed', direction: 'asc' });
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
   const [isWebShareSupported, setIsWebShareSupported] = useState<boolean>(false);
@@ -40,11 +50,27 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
     setIsWebShareSupported(typeof navigator.share === 'function');
   }, []);
   
+  // Determine which stats to display (prioritize cache, fallback to props)
+  // Use cachedUserStats if available and user is logged in
+  const displayUserStats = (currentUser && cachedUserStats) ? cachedUserStats : gameContextStats;
+  const currentStats = displayUserStats || defaultStats;
+  const todayKey = dateKeyForToday(); // Get today's date key
+  
   // Fetch leaderboard data when the global tab is active and modal is open
   useEffect(() => {
     const fetchLeaderboard = async () => {
-      if (activeTab === 'global' && leaderboardData.length === 0 && !isLoadingLeaderboard) {
-        console.log("[StatsModal] Attempting to fetch global leaderboard...");
+      // Check cache first
+      if (cachedLeaderboard) {
+        console.log("[StatsModal] Using cached global leaderboard.");
+        setLeaderboardData(cachedLeaderboard);
+        setIsLoadingLeaderboard(false);
+        setLeaderboardError(null);
+        return;
+      }
+
+      // If not cached and tab is activated
+      if (activeTab === 'global' && !isLoadingLeaderboard) {
+        console.log("[StatsModal] No cached leaderboard, attempting fetch...");
         setIsLoadingLeaderboard(true);
         setLeaderboardError(null);
         try {
@@ -70,7 +96,16 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
       fetchLeaderboard();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, isOpen]); // Dependencies simplified
+  }, [activeTab, isOpen, cachedLeaderboard]);
+  
+  // Update local state if cache updates while modal is open
+  useEffect(() => {
+    if (isOpen && cachedLeaderboard) {
+      setLeaderboardData(cachedLeaderboard);
+      setIsLoadingLeaderboard(cacheLoadingStates.leaderboard);
+      setLeaderboardError(cacheErrorStates.leaderboard);
+    }
+  }, [cachedLeaderboard, cacheLoadingStates.leaderboard, cacheErrorStates.leaderboard, isOpen]);
   
   // Handle outside click
   const handleOverlayClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -78,10 +113,6 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
       onClose();
     }
   }, [onClose]);
-  
-  // Use defaultStats if stats prop is null or undefined
-  const currentStats = stats || defaultStats;
-  const todayKey = dateKeyForToday(); // Get today's date key
   
   // Helper to safely display values, using defaultStats as fallback
   const safelyDisplay = useCallback((value: any, type: 'number' | 'arrayLength' | 'mapKeys' | 'bestScoreToday' | 'attemptsToday' = 'number'): string | number => {
@@ -235,6 +266,9 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
 
   if (!isOpen) return null;
 
+  // Use combined loading state for personal stats tab
+  const showPersonalStatsLoader = isLoadingPersonalStats || cacheLoadingStates.userStats;
+
   return (
     <div className="modal-overlay" onClick={handleOverlayClick}>
       <div className="modal-content stats-modal stats-modal-large">
@@ -271,11 +305,13 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
           {/* Personal Stats Tab */} 
           {activeTab === 'personal' && (
             <div role="tabpanel" aria-labelledby="personal-tab">
-              {isLoading ? (
+              {showPersonalStatsLoader ? (
                 <div className="stats-loading">
                   <div className="spinner"></div>
                   <p>Loading statistics...</p>
                 </div>
+              ) : cacheErrorStates.userStats ? (
+                <div className="error-message">Error loading stats: {cacheErrorStates.userStats}</div>
               ) : (
                 <>
                   <div className="stats-section">

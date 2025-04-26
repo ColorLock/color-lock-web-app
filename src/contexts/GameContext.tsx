@@ -19,6 +19,7 @@ import { getColorCSS, getLockedColorCSS, getLockedSquaresColor } from '../utils/
 import { shouldShowAutocomplete, autoCompletePuzzle } from '../utils/autocompleteUtils';
 import { useNavigation } from '../App';
 import { useAuth } from './AuthContext';
+import { useDataCache } from './DataCacheContext'; // Import the cache context hook
 import { 
   PENDING_MOVES_PUZZLE_ID_KEY, 
   PENDING_MOVES_COUNT_KEY, 
@@ -88,6 +89,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const DATE_TO_USE = dateKeyForToday();
   const { setShowLandingPage } = useNavigation();
   const { currentUser } = useAuth();
+  const { puzzleData: cachedPuzzleData, userStats: cachedUserStats, loadingStates: cacheLoadingStates, errorStates: cacheErrorStates } = useDataCache(); // Use cache hook
 
   // Game state
   const [puzzle, setPuzzle] = useState<DailyPuzzle | null>(null);
@@ -178,31 +180,47 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   // --- Utility Function (Use getUserStatsCallable) ---
   const fetchAndSetUserStats = useCallback(async () => {
-      // No need to check currentUser here, callable function requires auth implicitly.
-      console.log("Fetching user stats via callable function...");
-      setIsLoadingStats(true);
-      try {
-          const result = await getUserStatsCallable(); // No data needed for this call
-          console.log("getUserStats callable result:", result.data);
+    // Check cache first
+    if (cachedUserStats) {
+        console.log("GameContext: Using cached user stats.");
+        setFreshStats(cachedUserStats);
+        setIsLoadingStats(false);
+        setError(null);
+        return;
+    }
 
-          if (result.data && result.data.success && result.data.stats) {
-              // const currentTodayStats = gameStats.todayStats; // Keep this if you want to preserve client-side today's stats
-              setFreshStats(result.data.stats);
-              setError(null);
-          } else {
-              throw new Error(result.data?.error || 'Failed to fetch stats');
-          }
-      } catch (error: any) {
-          console.error("Error fetching user stats via callable:", error);
-          let message = error.message || 'Unknown error fetching stats';
-          if (error.code) {
-              message = `(${error.code}) ${message}`;
-          }
-          setError(`Failed to fetch stats: ${message}`);
-      } finally {
-          setIsLoadingStats(false);
-      }
-  }, [setIsLoadingStats, setFreshStats]); // Removed currentUser dependency
+    // If not in cache or user is guest/unauthenticated, fetch (if applicable)
+    if (!currentUser) {
+        console.log("GameContext: Skipping user stats fetch (no user logged in).");
+        setFreshStats({...defaultStats}); // Reset to default if no cache and no user
+        setIsLoadingStats(false);
+        return;
+    }
+
+    console.log("GameContext: No cached user stats, fetching from backend...");
+    setIsLoadingStats(true);
+    
+    try {
+        const result = await getUserStatsCallable();
+        if (result.data.success) {
+            if (result.data.stats) {
+                console.log("GameContext: User stats fetched successfully.");
+                setFreshStats(result.data.stats);
+            } else {
+                console.log("GameContext: No stats found for user, using defaults.");
+                setFreshStats({...defaultStats});
+            }
+        } else {
+            throw new Error(result.data.error || 'Failed to fetch user stats');
+        }
+    } catch (error: any) {
+        console.error("GameContext: Error fetching user stats:", error);
+        setError(error.message || 'Failed to load user stats');
+        setFreshStats({...defaultStats}); // Use defaults on error
+    } finally {
+        setIsLoadingStats(false);
+    }
+  }, [cachedUserStats, currentUser, setFreshStats, setIsLoadingStats]);
   
   // --- Helper function to clear pending moves ---
   const clearPendingMoves = useCallback(() => {
@@ -226,36 +244,54 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   // Load puzzle on mount (Use fetchPuzzleCallable)
   useEffect(() => {
     const loadPuzzle = async () => {
+      setLoading(true);
+      setError(null); // Clear previous errors
+
+      // 1. Check Cache
+      if (cachedPuzzleData) {
+        console.log("GameContext: Using cached puzzle data.");
+        try {
+            setFirestoreData(cachedPuzzleData); // Store raw data
+            const newPuzzle = generatePuzzleFromDB(cachedPuzzleData, DATE_TO_USE, settings);
+            setPuzzle(newPuzzle);
+            // Reset attempt state for the new puzzle/day
+            setAttemptNumberToday(1);
+            setIsFirstTryOfDay(true);
+            setHintsUsedThisGame(0);
+            setMovesThisAttempt(0);
+            setHasMadeFirstMove(false);
+            setIsLostReported(false);
+            setLoading(false);
+            return; // Exit early, used cache
+        } catch (genError) {
+             console.error("GameContext: Error generating puzzle from cached data:", genError);
+             setError("Failed to process cached puzzle data.");
+             // Continue to fetch as fallback
+        }
+      }
+
+      // 2. Fetch if not in cache (or cache processing failed)
+      console.log(`GameContext: No cached puzzle data, fetching for date: ${DATE_TO_USE} via callable function`);
       try {
-        setLoading(true);
-        setError(null); // Clear previous errors
-        console.log(`Attempting to fetch puzzle for date: ${DATE_TO_USE} via callable function`);
-
-        // Call the callable function
-        const result = await fetchPuzzleCallable({ date: DATE_TO_USE });
-
+        const result = await fetchPuzzleCallable({ date: DATE_TO_USE }); // Use imported callable
         if (result.data.success && result.data.data) {
-          console.log('Successfully fetched puzzle data via callable');
+          console.log('GameContext: Successfully fetched puzzle data via callable (fallback)');
           const fetchedFirestoreData = result.data.data;
-          setFirestoreData(fetchedFirestoreData);
+          setFirestoreData(fetchedFirestoreData); // Store raw data
           const newPuzzle = generatePuzzleFromDB(fetchedFirestoreData, DATE_TO_USE, settings);
           setPuzzle(newPuzzle);
-
-          // Reset attempt state for the new puzzle/day
+          // Reset attempt state
           setAttemptNumberToday(1);
           setIsFirstTryOfDay(true);
           setHintsUsedThisGame(0);
           setMovesThisAttempt(0);
           setHasMadeFirstMove(false);
           setIsLostReported(false);
-
         } else {
-           // Handle specific errors returned by the function
-           throw new Error(result.data.error || 'Failed to fetch puzzle data');
+          throw new Error(result.data.error || 'Failed to fetch puzzle data');
         }
-
       } catch (err: any) {
-        console.error('Error fetching puzzle via callable:', err);
+        console.error('GameContext: Error fetching puzzle via callable (fallback):', err);
         let errMsg = err.message || String(err);
         // Map Firebase error codes to user-friendly messages
         if (err.code === 'auth/unauthenticated') {
@@ -276,11 +312,10 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       }
     };
 
-    // Load initial stats for display
-    loadInitialStats(); // Load stats from storage
+    loadInitialStats(); // Load stats from storage (cache)
+    loadPuzzle(); // Load puzzle (checks cache first)
 
-    loadPuzzle();
-  }, [DATE_TO_USE, settings, loadInitialStats]); // Ensure settings is a dependency
+  }, [DATE_TO_USE, settings, loadInitialStats, cachedPuzzleData]); // Add cachedPuzzleData dependency
 
   // When the puzzle is first loaded, set the game start time
   useEffect(() => {
@@ -598,7 +633,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const handleSetShowStats = (show: boolean) => {
       setShowStatsState(show);
       if (show) {
-          // Fetch fresh stats when the modal is opened
+          // Fetch fresh stats when the modal is opened (checks cache first)
           fetchAndSetUserStats();
       }
   };
