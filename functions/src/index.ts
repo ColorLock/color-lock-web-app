@@ -77,6 +77,49 @@ export const getGlobalLeaderboard = onCall(
             logger.info(`[getGlobalLeaderboard] Retrieved ${snapshot.size} documents from userStats collection`);
             
             const leaderboard: LeaderboardEntry[] = [];
+            
+            // Create a map to store user display names
+            const userDisplayNames = new Map<string, string>();
+            
+            // First, collect all the user IDs we need to fetch
+            const userIds: string[] = [];
+            snapshot.forEach(doc => {
+                userIds.push(doc.id);
+            });
+            
+            // Batch fetch user profiles to get display names (in chunks of 100)
+            logger.info(`[getGlobalLeaderboard] Fetching display names for ${userIds.length} users`);
+            try {
+                // Process in chunks of 100 (Firebase Auth getUsers limit)
+                for (let i = 0; i < userIds.length; i += 100) {
+                    const chunk = userIds.slice(i, i + 100);
+                    const userRecords = await admin.auth().getUsers(
+                        chunk.map(uid => ({ uid }))
+                    );
+                    
+                    // Store display names in our map
+                    userRecords.users.forEach(user => {
+                        // Use display name if available, otherwise use a portion of UID
+                        userDisplayNames.set(
+                            user.uid, 
+                            user.displayName || `User_${user.uid.substring(0, 6)}`
+                        );
+                    });
+                    
+                    // Handle users not found (might be deleted)
+                    userRecords.notFound.forEach(userIdentifier => {
+                        // Fix: Check if the identifier is a UidIdentifier
+                        if ('uid' in userIdentifier) {
+                            const uid = userIdentifier.uid;
+                            userDisplayNames.set(uid, `User_${uid.substring(0, 6)}`);
+                        }
+                    });
+                }
+                logger.info(`[getGlobalLeaderboard] Successfully fetched display names for ${userDisplayNames.size} users`);
+            } catch (authError) {
+                logger.error("[getGlobalLeaderboard] Error fetching user display names:", authError);
+                // Continue with generated names if auth lookup fails
+            }
 
             snapshot.forEach(doc => {
                 const userId = doc.id;
@@ -84,8 +127,8 @@ export const getGlobalLeaderboard = onCall(
                 const stats = doc.data() as GameStatistics | undefined;
 
                 if (stats) {
-                    // TODO: Fetch real username if available
-                    const username = `User_${userId.substring(0, 6)}`;
+                    // Get display name from our map, or fall back to generated name
+                    const username = userDisplayNames.get(userId) || `User_${userId.substring(0, 6)}`;
 
                     // Cast stats to a type that includes the new fields
                     const typedStats = stats as GameStatistics; // Use the updated type

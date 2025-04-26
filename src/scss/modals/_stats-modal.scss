@@ -269,6 +269,19 @@
     &:hover {
       background-color: $color-gray-lighter;
     }
+
+    &.current-user-row {
+      background-color: rgba($color-primary, 0.1);
+      font-weight: $font-weight-bold;
+
+      td {
+         color: $color-primary-dark;
+      }
+
+      &:hover {
+        background-color: rgba($color-primary, 0.2);
+      }
+    }
   }
 
   td {

@@ -2,7 +2,8 @@ import {
   connectAuthEmulator, 
   signInAnonymously, 
   User, 
-  getIdToken 
+  getIdToken,
+  onAuthStateChanged
 } from 'firebase/auth';
 import { 
   connectFirestoreEmulator 
@@ -100,6 +101,29 @@ interface GetGlobalLeaderboardResponse {
 }
 
 export const getGlobalLeaderboardCallable = getCallableFunction<void, GetGlobalLeaderboardResponse>('getGlobalLeaderboard');
+
+// Add a helper function to verify auth state - useful for debugging
+export const verifyAuthState = () => {
+  if (!firebaseAuth) {
+    console.error("[FirebaseService] Auth service not initialized");
+    return Promise.resolve(null);
+  }
+  
+  const currentUser = firebaseAuth.currentUser;
+  console.log("[FirebaseService] Current auth state:", {
+    user: currentUser ? {
+      uid: currentUser.uid,
+      isAnonymous: currentUser.isAnonymous,
+      displayName: currentUser.displayName,
+      email: currentUser.email,
+      emailVerified: currentUser.emailVerified,
+      providerId: currentUser.providerId,
+      providerData: currentUser.providerData
+    } : null
+  });
+  
+  return Promise.resolve(currentUser);
+};
 
 // Export the Firebase app instance as default
 export default firebaseApp; 

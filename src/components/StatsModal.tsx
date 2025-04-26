@@ -41,7 +41,7 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
   const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState<boolean>(cacheLoadingStates.leaderboard);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(cacheErrorStates.leaderboard);
-  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'totalMovesUsed', direction: 'asc' });
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'totalMovesUsed', direction: 'desc' });
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
   const [isWebShareSupported, setIsWebShareSupported] = useState<boolean>(false);
   
@@ -79,7 +79,9 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
           console.log("[StatsModal] Callable function call returned (raw):", result);
           
           if (result.data.success && result.data.leaderboard) {
-            setLeaderboardData(result.data.leaderboard);
+            // Apply the initial sort config to the fetched data
+            const initialSortedData = sortLeaderboard(result.data.leaderboard, sortConfig);
+            setLeaderboardData(initialSortedData);
           } else {
             throw new Error(result.data.error || 'Failed to fetch leaderboard');
           }
@@ -101,11 +103,13 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
   // Update local state if cache updates while modal is open
   useEffect(() => {
     if (isOpen && cachedLeaderboard) {
-      setLeaderboardData(cachedLeaderboard);
+      // Sort cached leaderboard data when it updates
+      const sortedCachedData = sortLeaderboard(cachedLeaderboard, sortConfig);
+      setLeaderboardData(sortedCachedData);
       setIsLoadingLeaderboard(cacheLoadingStates.leaderboard);
       setLeaderboardError(cacheErrorStates.leaderboard);
     }
-  }, [cachedLeaderboard, cacheLoadingStates.leaderboard, cacheErrorStates.leaderboard, isOpen]);
+  }, [cachedLeaderboard, cacheLoadingStates.leaderboard, cacheErrorStates.leaderboard, isOpen, sortConfig]);
   
   // Handle outside click
   const handleOverlayClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -146,27 +150,34 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
     return String(value ?? ((type === 'bestScoreToday' || type === 'attemptsToday') ? 'N/A' : 0));
   }, [currentStats, todayKey]);
   
-  // Memoized sorted leaderboard data
-  const sortedLeaderboardData = useMemo(() => {
-    let sortableItems = [...leaderboardData];
-    if (sortConfig !== null) {
+  // --- Change: Extracted sorting logic to a reusable function ---
+  const sortLeaderboard = (data: LeaderboardEntry[], config: SortConfig): LeaderboardEntry[] => {
+    let sortableItems = [...data];
+    if (config !== null) {
       sortableItems.sort((a, b) => {
         // Handle potentially undefined values during sorting
-        const aValue = a[sortConfig.key] ?? (sortConfig.direction === 'asc' ? Infinity : -Infinity);
-        const bValue = b[sortConfig.key] ?? (sortConfig.direction === 'asc' ? Infinity : -Infinity);
+        const aValue = a[config.key] ?? (config.direction === 'asc' ? Infinity : -Infinity);
+        const bValue = b[config.key] ?? (config.direction === 'asc' ? Infinity : -Infinity);
 
         // Compare values
-        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
-        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+        if (aValue < bValue) return config.direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return config.direction === 'asc' ? 1 : -1;
 
         // Secondary sort by username if primary values are equal
-        if (a.username && b.username && a.username < b.username) return -1;
-        if (a.username && b.username && a.username > b.username) return 1;
+        const aUsername = a.username?.toLowerCase() || '';
+        const bUsername = b.username?.toLowerCase() || '';
+        if (aUsername < bUsername) return -1;
+        if (aUsername > bUsername) return 1;
 
         return 0; // Keep original order if all else fails
       });
     }
     return sortableItems;
+  };
+
+  // Memoized sorted leaderboard data using the extracted function
+  const sortedLeaderboardData = useMemo(() => {
+    return sortLeaderboard(leaderboardData, sortConfig);
   }, [leaderboardData, sortConfig]);
   
   // Request sorting function
@@ -179,14 +190,14 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
       const descKeys: (keyof LeaderboardEntry)[] = [
         'totalWins', 'longestPuzzleCompletedStreak', 'currentPuzzleCompletedStreak',
         'longestTieBotStreak', 'currentTieBotStreak', 'currentFirstTryStreak',
-        'longestFirstTryStreak', 'eloScoreTotal', 'eloScoreTotalLast30'
+        'longestFirstTryStreak', 'eloScoreTotal', 'eloScoreTotalLast30', 'totalMovesUsed'
       ];
       const ascKeys: (keyof LeaderboardEntry)[] = [
-        'totalMovesUsed', 'eloScoreAvg', 'eloScoreAvgLast30'
+        'eloScoreAvg', 'eloScoreAvgLast30'
       ];
       if (descKeys.includes(key)) direction = 'desc';
       else if (ascKeys.includes(key)) direction = 'asc';
-      else direction = 'asc'; // Default to ascending for other keys (like username)
+      else direction = 'asc'; // Default to ascending for username
     }
     setSortConfig({ key, direction });
   };
@@ -530,23 +541,28 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
                     </thead>
                     <tbody>
                       {sortedLeaderboardData.length > 0 ? (
-                          sortedLeaderboardData.map((entry) => (
-                            <tr key={entry.userId}>
-                              <td>{entry.username || 'Anonymous'}</td>
-                              <td>{entry.totalWins}</td>
-                              <td>{entry.totalMovesUsed}</td>
-                              <td>{entry.currentPuzzleCompletedStreak}</td>
-                              <td>{entry.longestPuzzleCompletedStreak}</td>
-                              <td>{entry.currentTieBotStreak}</td>
-                              <td>{entry.longestTieBotStreak}</td>
-                              <td>{entry.currentFirstTryStreak}</td>
-                              <td>{entry.longestFirstTryStreak}</td>
-                              <td>{entry.eloScoreAvg !== null ? entry.eloScoreAvg.toFixed(0) : 'N/A'}</td>
-                              <td>{entry.eloScoreTotal !== null ? entry.eloScoreTotal : 'N/A'}</td>
-                              <td>{entry.eloScoreAvgLast30 !== null ? entry.eloScoreAvgLast30.toFixed(0) : 'N/A'}</td>
-                              <td>{entry.eloScoreTotalLast30 !== null ? entry.eloScoreTotalLast30 : 'N/A'}</td>
-                            </tr>
-                          ))
+                          sortedLeaderboardData.map((entry) => {
+                            // --- Change: Check if this row is the current user ---
+                            const isCurrentUser = currentUser && entry.userId === currentUser.uid;
+                            return (
+                              // --- Change: Add 'current-user-row' class conditionally ---
+                              <tr key={entry.userId} className={isCurrentUser ? 'current-user-row' : ''}>
+                                <td>{entry.username || 'Anonymous'}</td>
+                                <td>{entry.totalWins}</td>
+                                <td>{entry.totalMovesUsed}</td>
+                                <td>{entry.currentPuzzleCompletedStreak}</td>
+                                <td>{entry.longestPuzzleCompletedStreak}</td>
+                                <td>{entry.currentTieBotStreak}</td>
+                                <td>{entry.longestTieBotStreak}</td>
+                                <td>{entry.currentFirstTryStreak}</td>
+                                <td>{entry.longestFirstTryStreak}</td>
+                                <td>{entry.eloScoreAvg !== null ? entry.eloScoreAvg.toFixed(0) : 'N/A'}</td>
+                                <td>{entry.eloScoreTotal !== null ? entry.eloScoreTotal : 'N/A'}</td>
+                                <td>{entry.eloScoreAvgLast30 !== null ? entry.eloScoreAvgLast30.toFixed(0) : 'N/A'}</td>
+                                <td>{entry.eloScoreTotalLast30 !== null ? entry.eloScoreTotalLast30 : 'N/A'}</td>
+                              </tr>
+                            );
+                          })
                       ) : (
                         <tr>
                           <td colSpan={13} style={{ textAlign: 'center' }}>No leaderboard data available.</td>

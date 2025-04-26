@@ -935,4 +935,12 @@
   top: $spacing-md;   // Adjust vertical position within card
   left: $spacing-md;  // Adjust horizontal position within card
   z-index: $z-index-modal + 1; // Ensure it appears above other elements
+}
+
+// Welcome message styling
+.welcome-message {
+  margin-top: 0.5rem;
+  font-size: 1.1rem;
+  color: #555;
+  font-weight: 500;
 } 

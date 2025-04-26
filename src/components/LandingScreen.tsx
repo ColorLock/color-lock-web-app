@@ -25,6 +25,7 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [authError, setAuthError] = useState<string | null>(null); // Rename error state for clarity
   const [authLoading, setAuthLoading] = useState(false); // Rename loading state
   const [showAppContent, setShowAppContent] = useState(false);
@@ -65,9 +66,16 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
       if (authMode === 'signin') {
         await signIn(email, password);
       } else {
-        await signUp(email, password);
+        await signUp(email, password, displayName);
+        console.log("Sign up completed successfully in LandingScreen");
       }
-      setShowLandingPage(false);
+      setShowAuthModal(false);
+      
+      // Add a small delay before navigation to ensure auth state is updated
+      setTimeout(() => {
+        console.log("Navigating away from landing page after auth");
+        setShowLandingPage(false);
+      }, 500);
     } catch (err: any) {
       console.error('Authentication error:', err);
       setAuthError(err.message || 'An error occurred during authentication');
@@ -134,11 +142,22 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
   const toggleAuthMode = () => {
     setAuthMode(prevMode => (prevMode === 'signin' ? 'signup' : 'signin'));
     setAuthError(null);
+    setEmail('');
+    setPassword('');
+    setDisplayName('');
+  };
+
+  const handleCloseModal = () => {
+    setShowAuthModal(false);
+    setAuthError(null);
+    setEmail('');
+    setPassword('');
+    setDisplayName('');
   };
 
   // Check if user is authenticated as a regular user (not guest)
   const isRegularUser = isAuthenticated && !isGuest;
-  console.log("Auth state:", { isAuthenticated, isGuest, isRegularUser });
+  console.log("Auth state:", { isAuthenticated, isGuest, isRegularUser, displayName: currentUser?.displayName });
 
   // Get derived stats values from context
   const displayStats = dailyScoresStats || { lowestScore: null, averageScore: null, totalPlayers: 0, playersWithLowestScore: 0 };
@@ -153,6 +172,9 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
           <span className="title-space">  </span>
           <span className="title-word color-word-2">Lock</span>
         </h1>
+        {isRegularUser && currentUser?.displayName && (
+            <p className="welcome-message">Welcome, {currentUser.displayName}!</p>
+        )}
       </div>
 
       {/* Display stats error if present */}
@@ -233,12 +255,28 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
       {showAuthModal && (
         <div className="modal-overlay">
           <div className="auth-modal">
-            <button className="modal-close" onClick={() => setShowAuthModal(false)}>×</button>
+            <button className="modal-close" onClick={handleCloseModal}>×</button>
 
             <form className="auth-form" onSubmit={handleSubmit}>
               <h2>{authMode === 'signin' ? 'Sign In' : 'Create Account'}</h2>
 
               {authError && <div className="auth-error">{authError}</div>}
+
+              {/* Display Name Input (only for signup) */}
+              {authMode === 'signup' && (
+                <div className="form-group">
+                  <label htmlFor="display-name">Display Name</label>
+                  <input
+                    type="text"
+                    id="display-name"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="Choose a username"
+                    required
+                    className="auth-input"
+                  />
+                </div>
+              )}
 
               {/* Email Input */}
               <div className="form-group">

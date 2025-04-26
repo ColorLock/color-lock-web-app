@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import { User, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, EmailAuthProvider, linkWithCredential } from 'firebase/auth';
+import { User, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, EmailAuthProvider, linkWithCredential, updateProfile } from 'firebase/auth';
 import { auth } from '../services/firebaseService';
 
 interface AuthContextType {
@@ -8,7 +8,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<User>;
-  signUp: (email: string, password: string) => Promise<User>;
+  signUp: (email: string, password: string, displayName: string) => Promise<User>;
   logOut: () => Promise<void>;
   playAsGuest: () => Promise<void>;
 }
@@ -68,13 +68,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     console.log("Setting up onAuthStateChanged listener...");
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      console.log("Auth State Changed:", user ? `User UID: ${user.uid}, Anonymous: ${user.isAnonymous}` : "No user");
+      console.log("Auth State Changed:", user ? `User UID: ${user.uid}, Anonymous: ${user.isAnonymous}, Name: ${user.displayName}` : "No user");
       setCurrentUser(user);
 
       if (user) {
         setIsAuthenticated(true);
+        const wasAnonymous = isGuest; // capture previous state
         setIsGuest(user.isAnonymous);
         setIsLoading(false); // Auth state determined
+        
+        console.log(`Auth state updated - isAuthenticated: ${true}, isGuest: ${user.isAnonymous}. Changed from guest: ${wasAnonymous && !user.isAnonymous}`);
+        
         if (!user.isAnonymous) {
            localStorage.setItem('authPreference', 'user');
         }
@@ -95,7 +99,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       console.log("Cleaning up onAuthStateChanged listener.");
       unsubscribe();
     };
-  }, [playAsGuest]); // Removed fetchAndCacheData dependency
+  }, [playAsGuest, isGuest]); // Add isGuest dependency
 
   const signIn = async (email: string, password: string): Promise<User> => {
     if (!auth) {
@@ -113,24 +117,50 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
-  const signUp = async (email: string, password: string): Promise<User> => {
+  const signUp = async (email: string, password: string, displayName: string): Promise<User> => {
       if (!auth) throw new Error('Authentication service is not available');
       const currentAuthUser = auth.currentUser;
+      let userCredential; // Declare userCredential outside the blocks
+
       try {
           if (currentAuthUser && currentAuthUser.isAnonymous) {
               console.log(`Attempting to link anonymous user (${currentAuthUser.uid}) with email: ${email}`);
               const credential = EmailAuthProvider.credential(email, password);
-              const userCredential = await linkWithCredential(currentAuthUser, credential);
+              userCredential = await linkWithCredential(currentAuthUser, credential); // Assign here
               console.log(`Successfully linked anonymous user. UID remains: ${userCredential.user.uid}`);
-              localStorage.setItem('authPreference', 'user');
-              return userCredential.user;
+              
+              // Explicitly update state for converted anonymous user
+              setIsGuest(false);
+              setIsAuthenticated(true);
           } else {
               console.log(`No anonymous user detected or user not anonymous, creating new user with email: ${email}`);
-              const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+              userCredential = await createUserWithEmailAndPassword(auth, email, password); // Assign here
               console.log(`Successfully created new user: ${userCredential.user.uid}`);
-              localStorage.setItem('authPreference', 'user');
-              return userCredential.user;
+              
+              // For new users, set these states as well
+              setIsGuest(false);
+              setIsAuthenticated(true);
           }
+
+          // --- Update Profile with Display Name ---
+          if (userCredential.user) {
+              try {
+                  await updateProfile(userCredential.user, { displayName: displayName });
+                  console.log(`Display name "${displayName}" set for user ${userCredential.user.uid}`);
+                  // Update local state immediately to reflect the change faster
+                  // Note: onAuthStateChanged will also fire, but this makes the UI update quicker
+                  setCurrentUser({ ...userCredential.user, displayName: displayName });
+              } catch (profileError) {
+                  console.error("Error setting display name:", profileError);
+                  // Decide how to handle this - maybe log it but don't fail the whole signup?
+                  // For now, just log and continue.
+              }
+          }
+          // --- End Profile Update ---
+
+          localStorage.setItem('authPreference', 'user');
+          return userCredential.user; // Return the user object
+
       } catch (error: any) {
           console.error("Sign Up Error:", error);
           if (error.code === 'auth/credential-already-in-use') {

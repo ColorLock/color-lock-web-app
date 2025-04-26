@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import '../scss/main.scss';
+import { verifyAuthState } from '../services/firebaseService';
 
 interface SignUpButtonProps {
   onClose?: () => void;
@@ -10,13 +11,29 @@ const SignUpButton: React.FC<SignUpButtonProps> = ({ onClose }) => {
   const [showSignUp, setShowSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   
   const { signUp, isGuest } = useAuth();
   
-  if (!isGuest) return null;
+  // Check authentication state when component renders
+  useEffect(() => {
+    verifyAuthState().then(user => {
+      console.log("SignUpButton mounted, current auth state:", { 
+        isGuest, 
+        hasUser: !!user,
+        isAnonymous: user?.isAnonymous
+      });
+    });
+  }, [isGuest]);
+  
+  // If we're not a guest user, don't show this component
+  if (!isGuest) {
+    console.log("User is not a guest, hiding SignUpButton");
+    return null;
+  }
   
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,16 +41,35 @@ const SignUpButton: React.FC<SignUpButtonProps> = ({ onClose }) => {
     setLoading(true);
     
     try {
-      await signUp(email, password);
+      console.log("Starting sign up process...");
+      
+      // Verify auth state before signup
+      await verifyAuthState();
+      
+      const user = await signUp(email, password, displayName);
+      console.log("Sign up successful, user:", user.uid);
+      
+      // Verify auth state after signup
+      await verifyAuthState();
+      
       setSuccess(true);
       setEmail('');
       setPassword('');
+      setDisplayName('');
       
-      // Hide the form after successful signup
-      setTimeout(() => {
+      // Use a longer timeout to ensure Firebase auth state has time to update
+      setTimeout(async () => {
+        console.log("Sign up completion timeout reached");
+        
+        // Verify final auth state
+        await verifyAuthState();
+        
         setShowSignUp(false);
         setSuccess(false);
         if (onClose) onClose();
+        
+        // Force a page refresh to ensure all auth state is properly updated
+        window.location.reload();
       }, 2000);
       
     } catch (err: any) {
@@ -48,6 +84,9 @@ const SignUpButton: React.FC<SignUpButtonProps> = ({ onClose }) => {
     setShowSignUp(prev => !prev);
     setError(null);
     setSuccess(false);
+    setEmail('');
+    setPassword('');
+    setDisplayName('');
   };
   
   return (
@@ -78,6 +117,20 @@ const SignUpButton: React.FC<SignUpButtonProps> = ({ onClose }) => {
             
             <form onSubmit={handleSubmit}>
               <div className="form-group">
+                <label htmlFor="signup-display-name">Display Name</label>
+                <input
+                  type="text"
+                  id="signup-display-name"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="Choose a username"
+                  required
+                  className="auth-input"
+                  disabled={loading || success}
+                />
+              </div>
+              
+              <div className="form-group">
                 <label htmlFor="signup-email">Email</label>
                 <input
                   type="email"
@@ -100,6 +153,7 @@ const SignUpButton: React.FC<SignUpButtonProps> = ({ onClose }) => {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   required
+                  minLength={6}
                   className="auth-input"
                   disabled={loading || success}
                 />
