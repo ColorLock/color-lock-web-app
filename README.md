@@ -11,13 +11,13 @@
 3.  [Core Concepts & Architecture](#core-concepts--architecture)
     *   [Frontend (React + TypeScript + Vite)](#frontend-react--typescript--vite)
     *   [State Management (React Context API)](#state-management-react-context-api)
-    *   [Backend (Firebase Functions on Cloud Run with API Gateway)](#backend-firebase-functions-on-cloud-run-with-api-gateway)
+    *   [Backend (Firebase Functions with App Check)](#backend-firebase-functions-with-app-check)
     *   [Database (Firestore)](#database-firestore)
 4.  [Data Flow](#data-flow)
-    *   [Game Initialization (via API Gateway)](#game-initialization-via-api-gateway)
+    *   [Game Initialization (using Callable Functions)](#game-initialization-using-callable-functions)
     *   [User Actions (Making a Move)](#user-actions-making-a-move)
-    *   [Updating Statistics (via API Gateway)](#updating-statistics-via-api-gateway)
-    *   [Fetching Global Stats (via API Gateway)](#fetching-global-stats-via-api-gateway)
+    *   [Updating Statistics (using Callable Functions)](#updating-statistics-using-callable-functions)
+    *   [Fetching Global Stats (using Callable Functions)](#fetching-global-stats-using-callable-functions)
     *   [Authentication](#authentication)
 5.  [Key Features & Modules](#key-features--modules)
     *   [Game Logic](#game-logic)
@@ -35,12 +35,12 @@
     *   [Emulator UI](#emulator-ui)
 7.  [Testing](#testing)
     *   [Unit & Integration Tests](#unit--integration-tests)
-    *   [Emulator Testing (Functions & Gateway)](#emulator-testing-functions--gateway)
+    *   [Emulator Testing (Functions)](#emulator-testing-functions)
     *   [Debugging Firebase Functions](#debugging-firebase-functions)
 8.  [Deployment](#deployment)
     *   [Frontend (Netlify)](#frontend-netlify)
     *   [Backend (Firebase Functions)](#backend-firebase-functions-1)
-    *   [API Gateway (Google Cloud)](#api-gateway-google-cloud)
+    *   [App Check Setup](#app-check-setup)
 9.  [Contributing Guide](#contributing-guide)
     *   [Code Style](#code-style)
     *   [Branching](#branching)
@@ -59,6 +59,7 @@ The application consists of:
 *   A **Firebase backend** using Cloud Functions (TypeScript) for game logic access, statistics updates, and data validation.
 *   **Firestore** as the database for storing puzzles, user statistics, and daily scores.
 *   **Firebase Authentication** for user management (including guest access).
+*   **Firebase App Check** to verify that requests are coming from your authentic application.
 
 ---
 
@@ -81,7 +82,7 @@ The repository is organized into several key directories:
     *   `useSettings.ts`: Manages application settings and persistence.
     *   `useGameStats.ts`: Manages game statistics and persistence (currently local storage based, interacts with Firestore via `GameContext`).
 *   **`services/`**: Handles interactions with external services:
-    *   `firebaseService.ts`: Initializes Firebase services (Auth, Firestore, Functions) and handles connections, including emulator setup.
+    *   `firebaseService.ts`: Initializes Firebase services (Auth, Firestore, Functions, App Check) and handles connections, including emulator setup.
     *   `firebaseDebug.ts`: Utility functions for debugging Firebase connections in the browser console.
 *   **`types/`**: Contains TypeScript type definitions:
     *   `index.ts`: Core game types (`TileColor`, `DailyPuzzle`, `FirestorePuzzleData`).
@@ -106,10 +107,10 @@ The repository is organized into several key directories:
 
 ### Backend (`functions/`)
 
-*   **`src/index.ts`**: Main entry point for Firebase Cloud Functions. Defines HTTP and Callable functions.
+*   **`src/index.ts`**: Main entry point for Firebase Cloud Functions. Defines callable functions with App Check and Auth verification.
 *   **`package.json`**: Node.js dependencies and scripts for the functions.
 *   **`tsconfig.json`**: TypeScript configuration for the functions.
-*   **`.runtimeconfig.json`**: Local configuration override for functions (e.g., allowed origins for CORS).
+*   **`.runtimeconfig.json`**: Local configuration override for functions.
 *   **`.eslintrc.js`**: ESLint configuration for code linting.
 
 ### Scripts (`scripts/`)
@@ -155,31 +156,37 @@ Global state is managed primarily through React's Context API. Key contexts incl
 *   **`NavigationContext`**: Simple context (defined in `App.tsx`) to toggle between the `LandingScreen` and the main `GameContainer`.
 *   **`SettingsContext`**: (Defined in `App.tsx`, state managed by `useSettings` hook) Holds the current application settings affecting visuals, accessibility, and game difficulty.
 
-### Backend (Firebase Functions on Cloud Run with API Gateway)
+### Backend (Firebase Functions with App Check)
 
-The backend logic resides in Firebase Cloud Functions (Gen 2), which run on Cloud Run. Due to organizational security policies (`constraints/iam.allowedPolicyMemberDomains`), these Cloud Run services are deployed as **private** and cannot be invoked directly by unauthenticated users or services outside the GCP project (like the public internet).
+The backend logic resides in Firebase Cloud Functions, which provide secure, scalable backend functionality. The security architecture is multi-layered:
 
-To securely expose these functions to the authenticated frontend, **API Gateway** is used as a managed proxy:
+1. **Firebase App Check**: Verifies that requests are coming from your authentic application (using reCAPTCHA v3).
+   - Prevents unauthorized scripts, applications, or bots from accessing your backend functions.
+   - Blocks requests not originating from your registered app instances.
+   - The Firebase SDK handles the reCAPTCHA v3 integration automatically.
 
-1.  **API Gateway Endpoint:** A public HTTPS endpoint managed by Google Cloud. The frontend application interacts *only* with this gateway URL.
-2.  **Firebase Auth Validation:** The gateway is configured (via an OpenAPI specification) to validate incoming Firebase ID tokens (`Authorization: Bearer <token>`). It checks the token's signature, issuer, audience, and expiry against your Firebase project's configuration. Only valid tokens are accepted.
-3.  **IAM-Authenticated Backend Calls:** If the Firebase token is valid, the gateway invokes the **private** Cloud Run service URL. It does *not* use the user's token for this call. Instead, it uses a designated **Service Account** (e.g., `api-gateway-invoker@...`) which has been granted the `roles/run.invoker` permission on the Cloud Run service. This invocation uses a Google-signed ID token for the service account, satisfying Cloud Run's IAM authentication requirement.
-4.  **Original Token Forwarding:** The gateway forwards the original user's Firebase ID token in the `X-Forwarded-Authorization` header to the backend function.
-5.  **Backend Function Logic:** The Cloud Function code can optionally re-verify the token from the `X-Forwarded-Authorization` header using the Firebase Admin SDK to get the user's UID and claims for business logic (like accessing user-specific data in Firestore).
+2. **Firebase Authentication**: Verifies user identity.
+   - All functions that modify user data require authentication.
+   - Some functions (like `fetchPuzzle`) allow guest/unauthenticated access.
+
+3. **Callable Functions**: Used instead of HTTP endpoints.
+   - Automatically handle CORS, token management, and serialization.
+   - Provide type safety between client and server via TypeScript.
+   - Include context parameters with verification status (App Check, Auth).
 
 This architecture ensures:
-*   The Cloud Run service itself is not publicly exposed, adhering to security policies.
-*   Only requests from users authenticated via your Firebase project can reach the backend logic.
-*   The gateway handles the complexity of JWT validation and secure backend invocation.
+- Only legitimate instances of your application can access your backend.
+- User data is protected by authentication checks.
+- The communication between frontend and backend is secure and typed.
 
-*Relevant Files:* `functions/src/index.ts`, `openapi.yaml` (API Gateway configuration), `firebase.json` (for emulator config).
+*Relevant Files:* `functions/src/index.ts`, `src/services/firebaseService.ts`
 
 ### Database (Firestore)
 
 Firestore is used to store persistent data:
 
 *   **`puzzles/{date}`**: Stores the daily puzzle configuration, including the initial grid state (`states[0]`), target color, algorithm score (`algoScore`), and the sequence of optimal moves (`actions`). *Client access is blocked by rules; accessed only via `fetchPuzzle` function.*
-*   **`userStats/{userId}`**: Stores individual user statistics (streaks, games played, best scores per day, hints used, etc.). *Accessible only by the authenticated user.* See `prompts/userStats_descriptions.txt` for field details.
+*   **`userStats/{userId}`**: Stores individual user statistics directly at the root level (e.g., `currentPuzzleCompletedStreak`, `totalWins`, `bestScoresByDay`, `eloScoreByDay`, etc.). *Accessible only by the authenticated user.* See `src/types/stats.ts` for the full `GameStatistics` structure.
 *   **`dailyScores/{date}/scores/{userId}`**: Stores the best score achieved by each user for a specific puzzle date. This structure allows efficient querying for daily leaderboards or global stats. *Client access is blocked by rules; written by `updateUserStats` function, read by `getDailyScoresStats` function.*
 *   **`users/{userId}`**: (Optional, based on rules) Could store general user profile information separate from stats.
 
@@ -189,27 +196,23 @@ Firestore is used to store persistent data:
 
 Understanding how data moves through the application is key:
 
-### Game Initialization (via API Gateway)
+### Game Initialization (using Callable Functions)
 
 1.  `App.tsx` mounts -> `AuthProvider` checks auth state.
 2.  If authenticated, `GameProvider` mounts.
-3.  `GameProvider`'s `useEffect` calls `fetchPuzzle` (in `firebaseService.ts`).
-4.  `fetchPuzzle` ensures authentication (signing in anonymously if needed) and retrieves the user's **Firebase ID Token**.
-5.  `fetchPuzzle` makes an HTTPS POST request to the **API Gateway URL** for the `fetchPuzzle` endpoint, including the ID token in the `Authorization: Bearer <token>` header.
-6.  **API Gateway** receives the request:
-    *   Validates the Firebase ID token. If invalid, rejects with 401/403.
-    *   If valid, prepares to call the private Cloud Run service URL for the `fetchPuzzle` function.
-    *   Uses its configured **Invoker Service Account** to generate a Google-signed ID token for the backend call.
-    *   Forwards the request to Cloud Run, replacing the `Authorization` header with the service account token and adding the original user token to the `X-Forwarded-Authorization` header.
-7.  **Cloud Run (fetchPuzzle function)** receives the request:
-    *   Verifies the incoming request has a valid IAM token from the allowed Invoker Service Account (this happens automatically via Cloud Run's built-in auth).
-    *   Reads the `X-Forwarded-Authorization` header to get the original user's Firebase token.
-    *   Verifies the user's token using the Admin SDK (`admin.auth().verifyIdToken(...)`) to confirm identity and get the UID.
-    *   Reads the puzzle data from `puzzles/{date}` in Firestore.
-    *   Returns the puzzle data in the response.
-8.  **API Gateway** forwards the response back to the frontend.
-9.  `GameProvider` receives the data, processes it, and updates state.
-10. Components re-render.
+3.  `GameProvider`'s `useEffect` calls `fetchPuzzleCallable` (in `firebaseService.ts`).
+4.  `fetchPuzzleCallable` is a Firebase callable function that automatically:
+    * Attaches the user's authentication token (if available)
+    * Attaches an App Check token (proving the request is from your app)
+    * Sends the request to the Firebase Functions backend
+5.  **Cloud Functions (fetchPuzzle)** receives the request:
+    * Firebase automatically verifies the App Check token
+    * Firebase validates authentication (though this function allows unauthenticated access)
+    * The function accesses the `context` parameter to get user information
+    * Reads the puzzle data from `puzzles/{date}` in Firestore.
+    * Returns the puzzle data in the response.
+6.  `GameProvider` receives the data, processes it, and updates state.
+7.  Components re-render.
 
 ### User Actions (Making a Move)
 
@@ -217,7 +220,7 @@ Understanding how data moves through the application is key:
 *   `GameContext.handleTileClick` is called, setting `selectedTile` and showing the `ColorPickerModal`.
 *   User clicks a color in the modal -> `ColorPickerModal.onSelect`.
 *   `GameContext.handleColorSelect` is called:
-    *   If it's the first move, calls `callUpdateStats` to trigger the `updateUserStats` function with `eventType: 'firstMove'`.
+    *   If it's the first move, calls `callUpdateStats` to trigger the `updateUserStatsCallable` function with `eventType: 'firstMove'`.
     *   Calls `applyColorChange` (in `gameUtils.ts`) which uses `floodFill` (in `gameLogic.ts`) to update the grid state.
     *   Updates the `puzzle` state (grid, moves used, checks for win/loss).
     *   Calls `checkIfOnOptimalPath` to update `isOnOptimalPath`.
@@ -226,43 +229,43 @@ Understanding how data moves through the application is key:
     *   Closes the color picker.
 *   Components re-render based on the updated `puzzle` state.
 
-### Updating Statistics (via API Gateway)
+### Updating Statistics (using Callable Functions)
 
 1.  **Win/Loss/Try Again/Hint/First Move:** `GameContext` calls `callUpdateStats` with relevant event data.
-2.  `callUpdateStats` retrieves the user's **Firebase ID Token**.
-3.  `callUpdateStats` makes an HTTPS POST request to the **API Gateway URL** for the `updateUserStats` endpoint, including the ID token in the `Authorization: Bearer <token>` header and the event data in the body.
-4.  **API Gateway** validates the token and invokes the private `updateUserStats` Cloud Run function using its **Invoker Service Account**, forwarding the original token in `X-Forwarded-Authorization`.
-5.  **Cloud Run (updateUserStats function)**:
-    *   Verifies the invoker identity (automatic).
-    *   Retrieves the user's UID by verifying the token from `X-Forwarded-Authorization` using the Admin SDK.
-    *   Performs the statistics update logic within a Firestore transaction (`userStats/{userId}`, `dailyScores/{puzzleId}/scores/{userId}`).
-    *   Returns a success/failure response, potentially with updated stats.
-6.  **API Gateway** forwards the response to the frontend.
-7.  `GameContext` (potentially via `useGameStats`) updates the local stats state based on the response.
+2.  `callUpdateStats` invokes the `updateUserStatsCallable` function, passing the event data.
+3.  The Firebase SDK automatically:
+    * Attaches the user's authentication token
+    * Attaches an App Check token (proving the request is from your app)
+    * Sends the request to the Firebase Function
+4.  **Cloud Functions (updateUserStats)**:
+    * Firebase verifies the App Check token (rejecting if invalid)
+    * Firebase authenticates the user (rejecting if invalid or missing)
+    * The function accesses user ID via `context.auth.uid`
+    * Performs the statistics update logic within a Firestore transaction (`userStats/{userId}`, `dailyScores/{puzzleId}/scores/{userId}`).
+    * Returns a success/failure response with updated stats.
+5.  `GameContext` updates the local stats state based on the response.
 
-### Fetching Global Stats (via API Gateway)
+### Fetching Global Stats (using Callable Functions)
 
 1.  `LandingScreen` mounts -> `useEffect` triggers `fetchDailyScoresStats`.
-2.  This function retrieves the user's **Firebase ID Token** (even guest users have tokens).
-3.  It makes an HTTPS POST request to the **API Gateway URL** for the `getDailyScoresStats` endpoint, including the ID token in the `Authorization: Bearer <token>` header and the `puzzleId` in the body.
-4.  **API Gateway** validates the token and invokes the private `getDailyScoresStats` Cloud Run function using its **Invoker Service Account**.
-5.  **Cloud Run (getDailyScoresStats function)**:
-    *   Verifies the invoker identity (automatic).
-    *   Could verify the user token from `X-Forwarded-Authorization` if needed, but likely not necessary for global stats.
-    *   Queries the `dailyScores/{puzzleId}/scores` subcollection.
-    *   Calculates aggregate stats.
-    *   Returns the stats.
-6.  **API Gateway** forwards the response to the frontend.
-7.  `LandingScreen` updates its state and displays the global stats.
+2.  This function calls `getDailyScoresStatsCallable` with the `puzzleId`.
+3.  The Firebase SDK automatically:
+    * Attaches the user's authentication token (even guest users have tokens)
+    * Attaches an App Check token (proving the request is from your app)
+    * Sends the request to the Firebase Function
+4.  **Cloud Functions (getDailyScoresStats)**:
+    * Firebase verifies the App Check token (rejecting if invalid)
+    * The function finds the scores in Firestore, calculates statistics, and returns the result.
+5.  `LandingScreen` updates the local state with the statistics.
 
 ### Authentication
 
-*   User interacts with `SignInScreen` or `SignUpButton` or clicks "Play as Guest" on `LandingScreen`.
-*   These components call functions from `useAuth()` (`signIn`, `signUp`, `playAsGuest`, `logOut`).
-*   `AuthContext` interacts directly with Firebase Authentication (`signInWithEmailAndPassword`, `createUserWithEmailAndPassword`, `signInAnonymously`, `signOut`).
-*   `onAuthStateChanged` listener in `AuthContext` updates `currentUser`, `isGuest`, `isAuthenticated`, and `isLoading` state.
-*   Components consuming `AuthContext` (like `App.tsx`, `SignUpButton`) re-render based on auth state changes.
-*   `AuthContext` also manages `localStorage` for the `authPreference` ('guest' or 'user').
+1.  Auth state is managed through Firebase Auth.
+2.  Initial auth check happens in `AuthContext.tsx` via `onAuthStateChanged` listener.
+3.  Users can sign in via email/password, create a new account, or play as a guest (anonymous auth).
+4.  `ensureAuthenticated` in `firebaseService.ts` ensures a user exists (potentially creating an anonymous user for guest mode).
+5.  All callable functions automatically receive the user's authentication status in the `context` parameter.
+6.  Auth state persistence is managed by Firebase Auth's own systems.
 
 ---
 
@@ -311,7 +314,7 @@ The Firebase configuration is loaded from environment variables prefixed with `V
 
 ### Running Firebase Emulators
 
-The emulators allow you to run Firebase services (Auth, Firestore, Functions) locally.
+The emulators allow you to run Firebase services (Auth, Firestore, Functions, Pub/Sub) locally.
 
 **Recommended Method:**
 
@@ -319,35 +322,53 @@ Use the custom script which handles cleanup and seeding automatically:
 
 ```bash
 npm run cursor-dev
+```
 
 This script will:
 
-1.  Attempt to kill processes using common emulator ports (8080, 9099, 5001, etc.).
-2.  Start the Auth, Firestore, and Functions emulators for the `color-lock-prod` project.
+1.  Attempt to kill processes using common emulator ports (8080, 9099, 5001, 8085, etc.).
+2.  Start the Auth, Firestore, Functions, and Pub/Sub emulators for the `color-lock-prod` project.
 3.  Wait for emulators to initialize.
 4.  Run `scripts/seed-emulator.js` to populate Firestore with test data (a puzzle for today and sample scores).
-5.  Keep the emulators running.
+5.  Set up the PUBSUB_EMULATOR_HOST environment variable.
+6.  Keep the emulators running.
 
 **Alternative Method:**
 
 ```bash
 npm run local-test
-Use code with caution.
-Markdown
+```
+
 This performs similar steps but without the aggressive port cleanup.
 
-Manual Method:
+**Manual Method:**
 
 Start emulators:
 
-firebase emulators:start --only auth,firestore,functions --project color-lock-prod
-Use code with caution.
-Bash
+```bash
+firebase emulators:start --only auth,firestore,functions,pubsub --project color-lock-prod
+```
+
 In a separate terminal, seed data:
 
+```bash
 node scripts/seed-emulator.js
-Use code with caution.
-Bash
+```
+
+**Testing Scheduled Functions:**
+
+To trigger scheduled functions in the emulator environment:
+
+```bash
+# Trigger the daily ELO score calculation function
+npm run trigger:elo:emulator
+
+# Trigger the scheduled leaderboard calculation function
+npm run trigger:leaderboard:emulator
+```
+
+These commands simulate the Pub/Sub events that would normally trigger these scheduled functions in production.
+
 Running the Frontend
 In a separate terminal from the emulators:
 
@@ -371,7 +392,7 @@ To run tests: npm test
 
 Recommendation: Add more tests using Vitest and @testing-library/react for components, hooks, and utility functions. Mock Firebase interactions where necessary.
 
-Emulator Testing (Functions & Gateway)
+Emulator Testing (Functions)
 This is the primary way to test the full application flow locally.
 
 Use the npm run cursor-dev script to ensure a clean environment and seeded data.
@@ -414,59 +435,26 @@ Compile: Build the TypeScript functions: cd functions && npm run build && cd ..
 
 Deploy: Deploy only the functions: firebase deploy --only functions
 
-API Gateway (Google Cloud)
-The API Gateway requires separate deployment steps from the Firebase Functions.
+App Check Setup
+1. **Enable App Check in Firebase Console**
+   - Go to Firebase Console -> Your Project -> App Check
+   - Click "Get started" and follow the setup wizard
+   - For web apps, you'll use reCAPTCHA v3 provider
 
-1. **Prerequisites:**
-   - Google Cloud CLI (`gcloud`) installed and configured
-   - Proper IAM permissions to create API Gateways, manage service accounts, and configure services
+2. **Register Your App With reCAPTCHA v3**
+   - Follow the Firebase console instructions to register your site with reCAPTCHA v3
+   - Get the site key and add it to your environment variables as `VITE_RECAPTCHA_SITE_KEY`
 
-2. **Service Account Setup:**
-   - Create a dedicated service account for API Gateway to invoke Cloud Run functions:
-     ```
-     gcloud iam service-accounts create api-gateway-invoker \
-       --display-name "API Gateway Invoker"
-     ```
-   - Grant this service account the Cloud Run Invoker role on your functions:
-     ```
-     gcloud run services add-iam-policy-binding fetchpuzzle-function \
-       --member="serviceAccount:api-gateway-invoker@PROJECT_ID.iam.gserviceaccount.com" \
-       --role="roles/run.invoker"
-     ```
-     (Repeat for other function services)
+3. **Add Debug Token for Development**
+   - During local development, run your app and check the browser console
+   - Find a message like "App Check debug token: <token>"
+   - In Firebase Console -> App Check -> Apps -> Your web app -> "Manage debug tokens"
+   - Add this token to allow testing from your local environment
 
-3. **Deploy the API Gateway:**
-   - Create an API Definition from the OpenAPI spec:
-     ```
-     gcloud api-gateway api-configs create colorlock-config-v1 \
-       --api=colorlock-api \
-       --openapi-spec=openapi.yaml \
-       --project=PROJECT_ID \
-       --backend-auth-service-account=api-gateway-invoker@PROJECT_ID.iam.gserviceaccount.com
-     ```
-   - Deploy the gateway:
-     ```
-     gcloud api-gateway gateways create colorlock-gateway \
-       --api=colorlock-api \
-       --api-config=colorlock-config-v1 \
-       --location=us-central1 \
-       --project=PROJECT_ID
-     ```
-
-4. **Update Frontend Configuration:**
-   - Update environment variables in the frontend to point to the new gateway URL:
-     ```
-     VITE_API_GATEWAY_URL=https://colorlock-gateway-<hash>.uc.gateway.dev
-     ```
-
-5. **Testing:**
-   - Validate the gateway using curl:
-     ```
-     curl -X POST -H "Authorization: Bearer <valid-firebase-token>" \
-       -H "Content-Type: application/json" \
-       -d '{"date":"2023-07-01"}' \
-       https://colorlock-gateway-<hash>.uc.gateway.dev/fetchPuzzle
-     ```
+4. **Enable Enforcement**
+   - Once you've verified everything works, go to App Check -> APIs in Firebase Console
+   - For Cloud Functions, click "Enforce"
+   - This will reject all requests not coming from verified app instances
 
 9. Contributing Guide
 Code Style
@@ -528,3 +516,59 @@ Check Firebase project configuration in .env is correct.
 Look for specific error messages in the browser console or AuthContext logs.
 
 Missing Environment Variables: Ensure the .env file is correctly set up in the project root with all necessary VITE_FIREBASE_ variables.
+
+## Development & Testing
+
+### Testing Scheduled Functions
+
+There are two ways to test scheduled functions in the development environment:
+
+#### Option 1: Using Pub/Sub Emulator (Recommended)
+
+This method simulates how Firebase schedules functions in production using Pub/Sub.
+
+1.  **Ensure Emulators are Running:** Start the emulators, including Firestore, Functions, and Pub/Sub:
+    ```bash
+    npm run cursor-dev
+    ```
+
+2.  **Trigger the Scheduled Functions:**
+    * **To trigger the daily ELO score calculation:**
+      ```bash
+      npm run trigger:elo:emulator
+      ```
+    * **To trigger the scheduled leaderboard calculation:**
+      ```bash
+      npm run trigger:leaderboard:emulator
+      ```
+
+3.  **Verify:** Check the Functions emulator logs in the terminal or Emulator UI to confirm the function was triggered and executed successfully.
+
+#### Option 2: Using Direct Function Trigger Scripts
+
+This method directly invokes the function logic, bypassing the Pub/Sub mechanism.
+
+1.  **Ensure Emulators are Running:** Start the emulators, including Firestore and Functions:
+    ```bash
+    npm run cursor-dev
+    # or
+    firebase emulators:start --only firestore,functions
+    ```
+    
+2.  **Ensure Data Exists:** Make sure the emulator's Firestore has the necessary data for the date you want to calculate (puzzle, user scores, user stats). You might need to run `npm run seed` or manually add data via the Emulator UI (`http://localhost:4000`).
+    
+3.  **Run the Trigger Script:**
+    *   **To calculate Elo scores for TODAY's date (Default):**
+        ```bash
+        npm run trigger-elo
+        ```
+    *   **To calculate Elo scores for a specific date (e.g., 2025-03-25):**
+        ```bash
+        npm run trigger-elo 2025-03-25
+        ```
+    *   **To calculate leaderboard:**
+        ```bash
+        npm run trigger-leaderboard
+        ```
+        
+4.  **Verify:** Check the script output and inspect the `userStats/{userId}` documents in the Firestore emulator UI to confirm the updates. For Elo calculation, verify the `eloScoreByDay` map has been updated for the target date. Note that the scheduled function in production still calculates for *yesterday*.

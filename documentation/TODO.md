@@ -1,5 +1,13 @@
 # Color Lock Web App - TODO List
 
+1) Fix bug that shows confetti when user chooses difficulty
+2) 
+
+
+
+
+
+
 ## 7. Firebase Security
 
 **Task**: Secure Firestore database connection in production
