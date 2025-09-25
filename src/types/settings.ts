@@ -51,5 +51,5 @@ export const defaultSettings: AppSettings = {
   enableAnimations: true,
   enableSoundEffects: false,
   showLockedRegionCounter: true,
-  difficultyLevel: DifficultyLevel.Medium
+  difficultyLevel: DifficultyLevel.Hard
 }; 
