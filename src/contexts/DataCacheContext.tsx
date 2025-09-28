@@ -116,6 +116,7 @@ export const DataCacheProvider: React.FC<DataCacheProviderProps> = ({ children }
             if (result.data.success && result.data.data) {
                 setPuzzleData(result.data.data);
                 console.log("DataCacheContext: Puzzle Data fetched successfully.");
+                console.log("DataCacheContext: Puzzle Data:", result.data.data);
             } else {
                 throw new Error(result.data.error || 'Failed to fetch puzzle data');
             }

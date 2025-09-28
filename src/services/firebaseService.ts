@@ -84,8 +84,11 @@ const getCallableFunction = <RequestData, ResponseData>(name: string) => {
 // Define callable function for fetching puzzle
 export const fetchPuzzleCallable = getCallableFunction<{ date: string }, { success: boolean; data?: FirestorePuzzleData; error?: string }>('fetchPuzzle');
 
-// Define callable function for updating stats
+// Define callable function for updating stats (legacy)
 export const updateUserStatsCallable = getCallableFunction<any, { success: boolean; updatedStats?: any; error?: string }>('updateUserStats');
+
+// New: Define callable function for recording completed puzzle history
+export const recordPuzzleHistoryCallable = getCallableFunction<any, { success: boolean; error?: string }>('recordPuzzleHistory');
 
 // Define callable function for getting user stats
 export const getUserStatsCallable = getCallableFunction<void, { success: boolean; stats?: any; error?: string }>('getUserStats');

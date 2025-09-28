@@ -51,9 +51,9 @@ export function calculateEloScore(
     let difficultyMultiplier = 1.0; // Default for Hard
 
     if (difficulty === DifficultyLevel.Medium) {
-        difficultyMultiplier = 0.70;
-    } else if (difficulty === DifficultyLevel.Easy) {
         difficultyMultiplier = 0.30;
+    } else if (difficulty === DifficultyLevel.Easy) {
+        difficultyMultiplier = 0.10;
     }
     logger.debug(`Calculating Elo for ${dateStr}: Difficulty=${difficulty}, Multiplier=${difficultyMultiplier}, UserScore=${userScore}, AlgoScore=${algoScore}`);
     // --- End Difficulty Multiplier ---

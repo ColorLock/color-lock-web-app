@@ -130,7 +130,6 @@ The repository is organized into several key directories:
 *   **`netlify.toml`**: Configuration for deploying the frontend to Netlify.
 *   **`package.json`**: Root project dependencies and scripts.
 *   **`vite.config.mjs`**: Configuration for the Vite build tool and development server.
-*   **`nx.json`**: Configuration for the Nx build system (manages tasks like build, serve, test).
 *   **`EMULATOR_TESTING.md`**: Guide specifically for setting up and testing with Firebase emulators.
 *   **`prompts/userStats_descriptions.txt`**: Descriptions of the fields used in the `userStats` Firestore collection.
 

@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect, useContext, ReactNode, useRef, useCallback } from 'react';
+import React, { createContext, useState, useEffect, useContext, ReactNode, useCallback } from 'react';
 import { TileColor, DailyPuzzle, FirestorePuzzleData } from '../types';
 import { AppSettings, defaultSettings, DifficultyLevel } from '../types/settings';
 import { GameStatistics, defaultStats } from '../types/stats';
@@ -6,25 +6,19 @@ import { HintResult } from '../utils/hintUtils';
 import {
     auth, // Keep auth import if needed elsewhere
     fetchPuzzleCallable,
-    updateUserStatsCallable,
-    getUserStatsCallable
+    getUserStatsCallable,
+    recordPuzzleHistoryCallable
 } from '../services/firebaseService';
-import { httpsCallable } from 'firebase/functions'; // Just import httpsCallable
 import { dateKeyForToday } from '../utils/dateUtils';
 import { findLargestRegion, generatePuzzleFromDB } from '../utils/gameLogic';
 import { applyColorChange, checkIfOnOptimalPath, getGameHint } from '../utils/gameUtils';
 import useSettings from '../hooks/useSettings';
 import useGameStats from '../hooks/useGameStats';
-import { getColorCSS, getLockedColorCSS, getLockedSquaresColor } from '../utils/colorUtils';
+import { getColorCSS, getLockedColorCSS } from '../utils/colorUtils';
 import { shouldShowAutocomplete, autoCompletePuzzle } from '../utils/autocompleteUtils';
 import { useNavigation } from '../App';
 import { useAuth } from './AuthContext';
 import { useDataCache } from './DataCacheContext'; // Import the cache context hook
-import { 
-  PENDING_MOVES_PUZZLE_ID_KEY, 
-  PENDING_MOVES_COUNT_KEY, 
-  PENDING_MOVES_TIMESTAMP_KEY 
-} from '../utils/storageUtils';
 
 // Interface for the context value
 interface GameContextValue {
@@ -105,12 +99,12 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [showAutocompleteModal, setShowAutocompleteModal] = useState(false);
   const [hasDeclinedAutocomplete, setHasDeclinedAutocomplete] = useState(false);
   const [isLostReported, setIsLostReported] = useState(false);
+  const [hasRecordedCompletion, setHasRecordedCompletion] = useState(false);
 
   // Local state for tracking attempt details
   const [attemptNumberToday, setAttemptNumberToday] = useState<number>(1);
   const [isFirstTryOfDay, setIsFirstTryOfDay] = useState<boolean>(true);
   const [hintsUsedThisGame, setHintsUsedThisGame] = useState<number>(0);
-  const [hasMadeFirstMove, setHasMadeFirstMove] = useState<boolean>(false);
   const [movesThisAttempt, setMovesThisAttempt] = useState<number>(0);
   
   // Settings and stats
@@ -126,57 +120,26 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setFreshStats 
   } = useGameStats(defaultStats);
 
-  // --- Utility Function (Use updateUserStatsCallable) ---
-  const callUpdateStats = useCallback(async (data: any) => {
-      console.log(`[Stats ${new Date().toISOString()}] callUpdateStats invoked with event: ${data.eventType}, puzzleId: ${data.puzzleId}`);
-
-      // No need to check currentUser here, callable function requires auth implicitly
-      // unless the function backend allows unauthenticated access explicitly.
-      // Our backend function now requires auth for this.
-
-      console.log(`[Stats ${new Date().toISOString()}] Preparing callable request`);
-      console.log(`[Stats ${new Date().toISOString()}] Full payload:`, JSON.stringify(data));
-
-      try {
-          console.log(`[Stats ${new Date().toISOString()}] Sending request via httpsCallable...`);
-          const startTime = performance.now();
-
-          // Call the callable function
-          const result = await updateUserStatsCallable(data);
-
-          const duration = (performance.now() - startTime).toFixed(2);
-          console.log(`[Stats ${new Date().toISOString()}] Callable request completed in ${duration}ms`);
-
-          console.log(`[Stats ${new Date().toISOString()}] Result:`, result.data);
-
-          // Check for success AND updatedStats
-          if (result.data?.success && result.data.updatedStats) {
-             console.log(`[Stats ${new Date().toISOString()}] Backend update successful. Updating local state.`);
-             // Update local gameStats state using setFreshStats with the allTimeStats from backend
-             setFreshStats(result.data.updatedStats);
-             return result.data; // Return full result if needed elsewhere
-          } else if (result.data?.success) {
-             console.warn(`[Stats ${new Date().toISOString()}] Backend reported success but did not return updatedStats.`);
-             return result.data;
-          } else {
-             // Handle cases where backend explicitly returned success: false or an error structure
-             const errorMsg = result.data?.error || 'Unknown backend error';
-             console.error(`[Stats ${new Date().toISOString()}] Backend function reported failure: ${errorMsg}`);
-             setError(`Failed to update stats: ${errorMsg}`);
-             return null;
-          }
-      } catch (error: any) {
-          console.error(`[Stats ${new Date().toISOString()}] Error calling updateUserStats callable:`, error);
-          // Handle specific Firebase Functions errors
-          let message = error.message || 'Unknown error calling function';
-          if (error.code) {
-              message = `(${error.code}) ${message}`;
-          }
-          console.error(`[Stats ${new Date().toISOString()}] Error details:`, error.code, error.details);
-          setError(`Failed to update stats: ${message}`);
-          return null;
+  // --- Utility Function: Record completed puzzle history ---
+  const recordPuzzleHistory = useCallback(async (payload: any) => {
+    try {
+      const startTime = performance.now();
+      const result = await recordPuzzleHistoryCallable(payload);
+      const duration = (performance.now() - startTime).toFixed(2);
+      console.log(`[History ${new Date().toISOString()}] recordPuzzleHistory completed in ${duration}ms`, result.data);
+      if (!result.data?.success) {
+        const errMsg = result.data?.error || 'Unknown backend error';
+        setError(`Failed to record puzzle history: ${errMsg}`);
       }
-  }, [setFreshStats]); // Removed currentUser dependency
+    } catch (error: any) {
+      console.error(`[History ${new Date().toISOString()}] Error calling recordPuzzleHistory:`, error);
+      let message = error.message || 'Unknown error calling function';
+      if (error.code) {
+        message = `(${error.code}) ${message}`;
+      }
+      setError(`Failed to record puzzle history: ${message}`);
+    }
+  }, []);
 
   // --- Utility Function (Use getUserStatsCallable) ---
   const fetchAndSetUserStats = useCallback(async () => {
@@ -222,22 +185,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     }
   }, [cachedUserStats, currentUser, setFreshStats, setIsLoadingStats]);
   
-  // --- Helper function to clear pending moves ---
-  const clearPendingMoves = useCallback(() => {
-    console.log('Clearing pending moves from localStorage');
-    localStorage.removeItem(PENDING_MOVES_PUZZLE_ID_KEY);
-    localStorage.removeItem(PENDING_MOVES_COUNT_KEY);
-    localStorage.removeItem(PENDING_MOVES_TIMESTAMP_KEY);
-  }, []);
-  
-  // --- Effect to clear pending moves if puzzle date changes ---
-  useEffect(() => {
-    const storedPuzzleId = localStorage.getItem(PENDING_MOVES_PUZZLE_ID_KEY);
-    if (puzzle && storedPuzzleId && storedPuzzleId !== puzzle.dateString) {
-      console.log(`Puzzle date changed (${puzzle.dateString} vs stored ${storedPuzzleId}). Clearing old pending moves.`);
-      clearPendingMoves();
-    }
-  }, [puzzle, clearPendingMoves]);
+  // Removed pending-move persistence; we only record at completion now
 
   // --- Effects ---
 
@@ -259,8 +207,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
             setIsFirstTryOfDay(true);
             setHintsUsedThisGame(0);
             setMovesThisAttempt(0);
-            setHasMadeFirstMove(false);
             setIsLostReported(false);
+            setHasRecordedCompletion(false);
             setLoading(false);
             return; // Exit early, used cache
         } catch (genError) {
@@ -285,8 +233,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
           setIsFirstTryOfDay(true);
           setHintsUsedThisGame(0);
           setMovesThisAttempt(0);
-          setHasMadeFirstMove(false);
           setIsLostReported(false);
+          setHasRecordedCompletion(false);
         } else {
           throw new Error(result.data.error || 'Failed to fetch puzzle data');
         }
@@ -349,23 +297,23 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     }
   }, [puzzle, hasDeclinedAutocomplete]);
 
-  // Report loss event
+  // Report loss event (record only on completion)
   useEffect(() => {
       if (puzzle?.isLost && !isLostReported) {
-          // Clear pending moves *before* sending the final loss event
-          clearPendingMoves();
-          
           console.log(`[STATS-EVENT ${new Date().toISOString()}] Game lost detected - puzzle ID: ${puzzle.dateString}, moves: ${movesThisAttempt}, hints: ${hintsUsedThisGame}`);
-          callUpdateStats({
-              eventType: 'loss',
-              puzzleId: puzzle.dateString,
-              movesUsedInGame: movesThisAttempt,
-              hintsUsedInGame: hintsUsedThisGame,
-              algoScore: puzzle.algoScore
+          recordPuzzleHistory({
+            puzzle_id: puzzle.dateString,
+            difficulty: settings.difficultyLevel,
+            attemptNumber: attemptNumberToday,
+            moves: movesThisAttempt,
+            hintUsed: hintsUsedThisGame > 0,
+            botMoves: puzzle.algoScore,
+            win_loss: 'loss'
           });
           setIsLostReported(true);
+          setHasRecordedCompletion(true);
       }
-  }, [puzzle?.isLost, puzzle?.dateString, puzzle?.algoScore, hintsUsedThisGame, isLostReported, callUpdateStats, movesThisAttempt, clearPendingMoves]);
+  }, [puzzle?.isLost, puzzle?.dateString, puzzle?.algoScore, hintsUsedThisGame, isLostReported, movesThisAttempt, recordPuzzleHistory, settings.difficultyLevel, isFirstTryOfDay, attemptNumberToday]);
 
   // Fetch fresh stats when the StatsModal is opened
   useEffect(() => {
@@ -395,46 +343,9 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       return;
     }
 
-    // --- Reconciliation Logic (Before First Move Event) ---
-    if (!hasMadeFirstMove) {
-      const pendingPuzzleId = localStorage.getItem(PENDING_MOVES_PUZZLE_ID_KEY);
-      const pendingMovesStr = localStorage.getItem(PENDING_MOVES_COUNT_KEY);
-      const pendingMoves = pendingMovesStr ? parseInt(pendingMovesStr, 10) : 0;
-
-      // Check if there are pending moves for the *current* puzzle date
-      if (pendingPuzzleId === puzzle.dateString && pendingMoves > 0) {
-        console.log(`[STATS-EVENT ${new Date().toISOString()}] Reconciling ${pendingMoves} abandoned moves for puzzle ${puzzle.dateString}`);
-        callUpdateStats({
-          eventType: 'reconcileAbandonedMoves',
-          puzzleId: puzzle.dateString,
-          movesToAdd: pendingMoves,
-        });
-        // Clear *after* sending reconcile event
-        clearPendingMoves();
-      }
-
-      // Send firstMove event (increments totalGamesPlayed and attemptsPerDay)
-      console.log(`[STATS-EVENT ${new Date().toISOString()}] First move of game detected at position [${row},${col}] - puzzle ID: ${puzzle.dateString}`);
-      callUpdateStats({
-        eventType: 'firstMove',
-        puzzleId: puzzle.dateString,
-      });
-      setHasMadeFirstMove(true);
-    }
-
-    // Increment local move counter *after* potential reconciliation/firstMove events
+    // Increment local move counter
     const newMovesThisAttempt = movesThisAttempt + 1;
     setMovesThisAttempt(newMovesThisAttempt);
-
-    // --- Persist In-Progress Moves ---
-    try {
-      localStorage.setItem(PENDING_MOVES_PUZZLE_ID_KEY, puzzle.dateString);
-      localStorage.setItem(PENDING_MOVES_COUNT_KEY, newMovesThisAttempt.toString());
-      localStorage.setItem(PENDING_MOVES_TIMESTAMP_KEY, Date.now().toString());
-    } catch (e) {
-      console.error("Failed to save pending moves to localStorage", e);
-    }
-    // --- End Persistence ---
 
     const updatedPuzzle = applyColorChange(puzzle, row, col, newColor);
     setPuzzle(updatedPuzzle);
@@ -469,34 +380,24 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     if (hint) {
       setHintCell(hint);
       setHintsUsedThisGame(prev => prev + 1);
-      console.log(`[STATS-EVENT ${new Date().toISOString()}] Hint used at position [${hint.row},${hint.col}] - puzzle ID: ${puzzle.dateString}. Attempt number: ${attemptNumberToday}`);
-      callUpdateStats({
-        eventType: 'hint',
-        puzzleId: puzzle.dateString,
-        hintsUsedInGame: 1,
-        attemptNumberToday: attemptNumberToday,
-      });
+      console.log(`[HINT ${new Date().toISOString()}] Hint used at position [${hint.row},${hint.col}] - puzzle ID: ${puzzle.dateString}. Attempt number: ${attemptNumberToday}`);
     } else {
       console.log("No valid hint could be generated.");
     }
   };
 
   const handlePuzzleSolved = (solvedPuzzle: DailyPuzzle) => {
-    // Clear pending moves *before* sending the final win event
-    clearPendingMoves();
-
     console.log(`[STATS-EVENT ${new Date().toISOString()}] Game won - puzzle ID: ${solvedPuzzle.dateString}, userScore: ${solvedPuzzle.userMovesUsed}, algoScore: ${solvedPuzzle.algoScore}, difficulty: ${settings.difficultyLevel}`);
-    callUpdateStats({
-      eventType: 'win',
-      puzzleId: solvedPuzzle.dateString,
-      userScore: solvedPuzzle.userMovesUsed,
-      algoScore: solvedPuzzle.algoScore,
-      movesUsedInGame: movesThisAttempt,
-      hintsUsedInGame: hintsUsedThisGame,
-      isFirstTryOfDay: isFirstTryOfDay,
-      attemptNumberToday: attemptNumberToday,
-      difficultyLevel: settings.difficultyLevel,
+    recordPuzzleHistory({
+      puzzle_id: solvedPuzzle.dateString,
+      difficulty: settings.difficultyLevel,
+      attemptNumber: attemptNumberToday,
+      moves: solvedPuzzle.userMovesUsed,
+      hintUsed: hintsUsedThisGame > 0,
+      botMoves: solvedPuzzle.algoScore,
+      win_loss: 'win'
     });
+    setHasRecordedCompletion(true);
     setShowWinModal(true);
   };
 
@@ -506,26 +407,21 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       return;
     }
 
-    // Determine if moves were already counted by win/loss
-    const movesAlreadyCounted = puzzle.isSolved || puzzle.isLost;
-    const movesToSend = movesAlreadyCounted ? 0 : movesThisAttempt; // Send 0 if already won/lost
+    console.log(`[STATS-EVENT ${new Date().toISOString()}] User clicked Try Again - puzzle ID: ${puzzle.dateString}, moves: ${movesThisAttempt}, hints: ${hintsUsedThisGame}, isSolved: ${puzzle.isSolved}, isLost: ${puzzle.isLost}.`);
 
-    // Clear pending moves *before* sending the tryAgain event,
-    // but only if moves weren't already counted (i.e., abandoning mid-game)
-    if (!movesAlreadyCounted && movesToSend > 0) {
-      clearPendingMoves();
+    // Always record a loss when the user clicks Try Again if not already recorded
+    if (!hasRecordedCompletion) {
+      recordPuzzleHistory({
+        puzzle_id: puzzle.dateString,
+        difficulty: settings.difficultyLevel,
+        attemptNumber: attemptNumberToday,
+        moves: movesThisAttempt,
+        hintUsed: hintsUsedThisGame > 0,
+        botMoves: puzzle.algoScore,
+        win_loss: 'loss'
+      });
+      setHasRecordedCompletion(true);
     }
-
-    console.log(`[STATS-EVENT ${new Date().toISOString()}] User clicked Try Again - puzzle ID: ${puzzle.dateString}, moves: ${movesThisAttempt}, hints: ${hintsUsedThisGame}, isSolved: ${puzzle.isSolved}, isLost: ${puzzle.isLost}, sending ${movesToSend} moves.`);
-
-    // Conditionally send movesUsedInGame
-    callUpdateStats({
-        eventType: 'tryAgain',
-        puzzleId: puzzle.dateString,
-        movesUsedInGame: movesToSend, // Use the conditional value
-        hintsUsedInGame: hintsUsedThisGame, // Keep sending hints used in attempt
-        algoScore: puzzle.algoScore // Keep sending algoScore if needed by backend logic
-    });
 
     try {
       setLoading(true);
@@ -537,8 +433,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       setIsFirstTryOfDay(false);
       setHintsUsedThisGame(0);
       setMovesThisAttempt(0);
-      setHasMadeFirstMove(false);
       setIsLostReported(false);
+      setHasRecordedCompletion(false);
 
       // Reset UI state
       setHintCell(null);
@@ -584,40 +480,26 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       const additionalMoves = completedPuzzleState.userMovesUsed - tempPuzzleForCalc.userMovesUsed;
       const finalMovesForThisAttempt = movesBeforeAutocomplete + additionalMoves;
 
-      // Clear pending moves *before* sending the final win event
-      clearPendingMoves();
-
       // 3. Update local state with the additional moves for UI/state consistency
       setMovesThisAttempt(finalMovesForThisAttempt);
-
-      // 4. Handle first move event if needed
-      if (!hasMadeFirstMove) {
-          console.log(`[STATS-EVENT ${new Date().toISOString()}] First move via Autocomplete - puzzle ID: ${puzzle.dateString}`);
-          callUpdateStats({
-              eventType: 'firstMove',
-              puzzleId: puzzle.dateString,
-          });
-          setHasMadeFirstMove(true);
-      }
 
       // 5. Apply the autocomplete to the actual puzzle state for UI update
       const completedPuzzle = autoCompletePuzzle(puzzle);
       setPuzzle(completedPuzzle);
       setShowAutocompleteModal(false);
 
-      // 6. Send the 'win' event with the explicitly calculated total moves for the attempt
+      // 6. Record the win with the explicitly calculated total moves for the attempt
       console.log(`[STATS-EVENT ${new Date().toISOString()}] Game won via Autocomplete - puzzle ID: ${completedPuzzle.dateString}, difficulty: ${settings.difficultyLevel}`);
-      callUpdateStats({
-          eventType: 'win',
-          puzzleId: completedPuzzle.dateString,
-          userScore: completedPuzzle.userMovesUsed,
-          algoScore: completedPuzzle.algoScore,
-          movesUsedInGame: finalMovesForThisAttempt,
-          hintsUsedInGame: hintsUsedThisGame,
-          isFirstTryOfDay: isFirstTryOfDay,
-          attemptNumberToday: attemptNumberToday,
-          difficultyLevel: settings.difficultyLevel,
+      recordPuzzleHistory({
+        puzzle_id: completedPuzzle.dateString,
+        difficulty: settings.difficultyLevel,
+        attemptNumber: attemptNumberToday,
+        moves: completedPuzzle.userMovesUsed,
+        hintUsed: hintsUsedThisGame > 0,
+        botMoves: completedPuzzle.algoScore,
+        win_loss: 'win'
       });
+      setHasRecordedCompletion(true);
 
       // 7. Show win modal
       setShowWinModal(true);

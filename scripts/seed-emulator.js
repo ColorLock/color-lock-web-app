@@ -26,8 +26,8 @@ function getOffsetDateString(offsetDays) {
   return `${year}-${month}-${day}`;
 }
 
-// Generate dates around today (e.g., last 5 days and next 5 days)
-const DATES = Array.from({ length: 11 }, (_, i) => getOffsetDateString(i - 5));
+// Generate dates ending today (today and the 10 days before)
+const DATES = Array.from({ length: 11 }, (_, i) => getOffsetDateString(i - 10));
 console.log("Generated Dates for Seeding:", DATES);
 
 // Check if a specific date was provided as a command line argument
@@ -59,277 +59,324 @@ function createSampleEloScores(dates) {
 // Create sample data
 async function seedData() {
   try {
-    console.log('Seeding user stats data with recent dates...');
+    console.log('Seeding puzzles, user histories, leaderboards, and daily scores...');
 
-    // --- USER 1: Existing User (SGD12...) ---
-    const user1Id = 'SGD12BjUImhOYGfsdrZzJFnj2V12';
-    const user1PlayedDays = DATES; // Played all generated days
-    const user1GoalAchievedDays = user1PlayedDays.filter((_, i) => i % 2 === 0); // Achieved goal on even index days
-    const user1GoalBeatenDays = user1GoalAchievedDays.filter((_, i) => i % 3 === 0); // Beat goal on subset of achieved days
-    const user1WonDays = user1PlayedDays; // Won all played days
-    const user1FirstTryWinDays = user1WonDays.filter((d, i) => DATES.slice(-2).includes(d)); // Won first try last 2 days
-
-    const user1BestScores = createDateMap(user1PlayedDays, (d, i) => 15 + (i % 6)); // Scores 10-15
-    // *** Create difficulty map for user 1 ***
-    const user1Difficulties = createDateMap(user1PlayedDays, (d, i) => {
-         // Example: Alternate difficulties
-         const dayIndex = DATES.indexOf(d);
-         if (dayIndex % 3 === 0) return DifficultyLevel.Hard;
-         if (dayIndex % 3 === 1) return DifficultyLevel.Medium;
-         return DifficultyLevel.Easy;
-    });
-
-    await db.collection('userStats').doc(user1Id).set({
-      attemptsPerDay: createDateMap(user1PlayedDays, (d, i) => (user1FirstTryWinDays.includes(d) ? 1 : (i % 4) + 1)), // 1 attempt if first try win
-      bestScoresByDay: user1BestScores,
-      bestScoresByDayDifficulty: user1Difficulties, // *** Add difficulty map ***
-      goalAchievedDays: user1GoalAchievedDays,
-      hintUsageByDay: createDateMap(user1PlayedDays, (d, i) => (i % 5 === 0 ? 1 : 0)), // Hint used every 5th day
-      playedDays: user1PlayedDays,
-      totalGamesPlayed: user1PlayedDays.length, // Assuming one game start per played day for simplicity
-      totalHintsUsed: user1PlayedDays.filter((d, i) => i % 5 === 0).length,
-      totalMovesUsed: user1PlayedDays.reduce((sum, d, i) => sum + (10 + (i % 6)) * (user1FirstTryWinDays.includes(d) ? 1 : (i % 4) + 1), 0), // Estimate moves
-      totalWins: user1WonDays.length,
-      winsPerDay: createDateMap(user1WonDays, () => 1), // 1 win per won day
-      currentFirstTryStreak: user1FirstTryWinDays.length === 2 ? 2 : 0, // Streak if won first try last 2 days played
-      longestFirstTryStreak: 4, // Example
-      firstTryStreakDate: user1FirstTryWinDays.length > 0 ? user1FirstTryWinDays[user1FirstTryWinDays.length - 1] : null, // Date of *last* first try win
-      attemptsToAchieveBotScore: createDateMap(user1GoalAchievedDays, (d, i) => (user1FirstTryWinDays.includes(d) ? 1 : (i % 4) + 1)),
-      attemptsToBeatBotScore: createDateMap(user1GoalBeatenDays, (d, i) => (user1FirstTryWinDays.includes(d) ? 1 : (i % 4) + 1)), // Mimics attemptsToAchieveBotScore
-      goalBeatenDays: user1GoalBeatenDays,
-      attemptsToWinByDay: createDateMap(user1WonDays, (d, i) => (user1FirstTryWinDays.includes(d) ? 1 : (i % 4) + 1)), // Attempt number for win
-      attemptWhenHintUsed: createDateMap(user1PlayedDays, (d, i) => (i % 5 === 0 ? (i % 2) + 1 : null)), // Hint on attempt 1 or 2 if used
-      eloScoreByDay: null, //createSampleEloScores(user1PlayedDays), // Add sample Elo scores
-      // Initialize aggregate fields to null (they will be calculated by the function)
-      eloScoreAvg: null,
-      eloScoreTotal: null,
-      eloScoreAvgLast30: null,
-      eloScoreTotalLast30: null,
-      lastPlayedIsoDate: getOffsetDateString(0), // Set a default last played date
-      // Tie/Beat Bot Streak
-      currentTieBotStreak: user1PlayedDays.slice(-4).every(d => user1GoalAchievedDays.includes(d)) ? 4 : 0, // Example: streak if achieved goal last 4 days
-      longestTieBotStreak: 7, // Example
-      tieBotStreakDate: user1PlayedDays.slice(-4).every(d => user1GoalAchievedDays.includes(d)) ? user1PlayedDays[user1PlayedDays.length - 1] : null, // Date of last tie/beat
-      // Puzzle Completed (Win) Streak
-      currentPuzzleCompletedStreak: user1PlayedDays.length, // Won all days played
-      longestPuzzleCompletedStreak: user1PlayedDays.length, // Won all days played
-      puzzleCompletedStreakDate: user1PlayedDays[user1PlayedDays.length - 1], // Date of last win
-    }, { merge: true }); // Use merge to avoid overwriting completely
-    console.log(`Seeded User 1 (${user1Id})`);
-
-    // --- USER 2: New User (iN1Rw...) ---
-    const user2Id = 'iN1RwQKXq4NxCItrGnInbGUFjen1';
-    const user2PlayedDays = DATES.slice(-4); // Played last 4 days
-    const user2GoalAchievedDays = user2PlayedDays; // Achieved all played days
-    const user2GoalBeatenDays = user2PlayedDays.slice(-2); // Beat goal last 2 days
-    const user2WonDays = user2PlayedDays; // Won all played days
-    const user2FirstTryWinDays = user2WonDays.filter((d, i) => (i % 2) + 1 === 1); // Won first try on some days
-
-    const user2BestScores = createDateMap(user2PlayedDays, (d, i) => 15 + (i % 3)); // Scores 9-11
-    // *** Create difficulty map for user 2 ***
-    const user2Difficulties = createDateMap(user2PlayedDays, () => DifficultyLevel.Easy); // Example: Always Easy
-
-    await db.collection('userStats').doc(user2Id).set({
-        attemptsPerDay: createDateMap(user2PlayedDays, (d, i) => (i % 2) + 1), // 1 or 2 attempts
-        bestScoresByDay: user2BestScores,
-        bestScoresByDayDifficulty: user2Difficulties, // *** Add difficulty map ***
-        goalAchievedDays: user2GoalAchievedDays,
-        hintUsageByDay: createDateMap(user2PlayedDays, (d, i) => (i === 1 ? 1 : 0)), // Hint used on second day played
-        playedDays: user2PlayedDays,
-        totalGamesPlayed: user2PlayedDays.length,
-        totalHintsUsed: 1,
-        totalMovesUsed: user2PlayedDays.reduce((sum, d, i) => sum + (9 + (i % 3)) * ((i % 2) + 1), 0),
-        totalWins: user2WonDays.length,
-        winsPerDay: createDateMap(user2WonDays, () => 1),
-        currentFirstTryStreak: user2FirstTryWinDays.length > 0 && user2FirstTryWinDays.includes(user2PlayedDays[user2PlayedDays.length - 1]) ? 1 : 0, // Example: 1 if last day was first try
-        longestFirstTryStreak: 1, // Example
-        firstTryStreakDate: user2FirstTryWinDays.length > 0 ? user2FirstTryWinDays[user2FirstTryWinDays.length - 1] : null, // Example
-        attemptsToAchieveBotScore: createDateMap(user2GoalAchievedDays, (d, i) => (i % 2) + 1),
-        attemptsToBeatBotScore: createDateMap(user2GoalBeatenDays, (d, i) => (i % 2) + 1), // Mimics attemptsToAchieveBotScore
-        goalBeatenDays: user2GoalBeatenDays,
-        attemptsToWinByDay: createDateMap(user2WonDays, (d, i) => (i % 2) + 1), // Attempt number for win
-        attemptWhenHintUsed: createDateMap(user2PlayedDays, (d, i) => (i === 1 ? 1 : null)),
-        eloScoreByDay: null, //createSampleEloScores(user2PlayedDays), // Add sample Elo scores
-        eloScoreAvg: null,
-        eloScoreTotal: null,
-        eloScoreAvgLast30: null,
-        eloScoreTotalLast30: null,
-        lastPlayedIsoDate: getOffsetDateString(0),
-        // Tie/Beat Bot Streak
-        currentTieBotStreak: user2PlayedDays.length, // Achieved all played days
-        longestTieBotStreak: user2PlayedDays.length, // Achieved all played days
-        tieBotStreakDate: user2PlayedDays[user2PlayedDays.length - 1],
-        // Puzzle Completed (Win) Streak
-        currentPuzzleCompletedStreak: user2PlayedDays.length, // Won all played days
-        longestPuzzleCompletedStreak: user2PlayedDays.length, // Won all played days
-        puzzleCompletedStreakDate: user2PlayedDays[user2PlayedDays.length - 1], // Date of last win
-    }, { merge: true });
-    console.log(`Seeded User 2 (${user2Id})`);
-
-    // --- USER 3: User with broken streak (6aA9G...) ---
-    const user3Id = '6aA9GFXtGcdGiWho5Q6ffVK9T2G2';
-    // Played DATES[0,1,2], skipped DATES[3,4], played DATES[5,6], explicitly lost DATES[6]
-    const user3PlayedDays = DATES.slice(0, 3).concat(DATES.slice(5, 7));
-    const user3LostDay = DATES[6]; // Explicitly lost this day
-    const user3WonDays = user3PlayedDays.filter(d => d !== user3LostDay); // Won on all played except the last one
-    const user3GoalAchievedDays = user3WonDays; // Achieved goal only when they won
-    const user3FirstTryWinDays = user3WonDays; // Won first try on all winning days
-
-    const user3BestScores = createDateMap(user3WonDays, (d, i) => 15 + i); // Scores 8, 9, 10, 11 on won days
-    // *** Create difficulty map for user 3 ***
-    const user3Difficulties = createDateMap(user3WonDays, () => DifficultyLevel.Hard); // Example: Always Hard
-
-    await db.collection('userStats').doc(user3Id).set({
-        attemptsPerDay: createDateMap(user3PlayedDays, (d) => (d === user3LostDay ? 5 : 1)), // 5 attempts on lost day, 1 otherwise
-        bestScoresByDay: user3BestScores,
-        bestScoresByDayDifficulty: user3Difficulties, // *** Add difficulty map ***
-        goalAchievedDays: user3GoalAchievedDays,
-        hintUsageByDay: createDateMap(user3PlayedDays, (d) => (d === user3LostDay ? 2 : 0)), // 2 hints on lost day
-        playedDays: user3PlayedDays,
-        totalGamesPlayed: user3PlayedDays.length,
-        totalHintsUsed: 2,
-        totalMovesUsed: user3WonDays.reduce((sum, d, i) => sum + (8 + i) * 1, 0) + (5 * 15), // Estimate moves (15 per attempt on lost day)
-        totalWins: user3WonDays.length,
-        winsPerDay: createDateMap(user3WonDays, () => 1),
-        currentFirstTryStreak: 0, // Broken streak
-        longestFirstTryStreak: 3, // Longest was the first 3 days
-        firstTryStreakDate: user3WonDays[user3WonDays.length - 1], // Date of *last* first try win (day 5)
-        attemptsToAchieveBotScore: createDateMap(user3GoalAchievedDays, () => 1),
-        attemptsToBeatBotScore: {}, // Didn't beat bot, remains empty
-        goalBeatenDays: [],
-        attemptsToWinByDay: createDateMap(user3WonDays, () => 1), // Won on first attempt when they won
-        attemptWhenHintUsed: createDateMap(user3PlayedDays, (d) => (d === user3LostDay ? 3 : null)), // Hint on attempt 3 on lost day
-        eloScoreByDay: null, //createSampleEloScores(user3PlayedDays), // Add sample Elo scores
-        eloScoreAvg: null,
-        eloScoreTotal: null,
-        eloScoreAvgLast30: null,
-        eloScoreTotalLast30: null,
-        lastPlayedIsoDate: getOffsetDateString(0),
-        // Tie/Beat Bot Streak
-        currentTieBotStreak: 0, // Broken streak
-        longestTieBotStreak: 3, // Example
-        tieBotStreakDate: null,
-        // Puzzle Completed (Win) Streak
-        currentPuzzleCompletedStreak: 0, // Broken streak (lost last played day)
-        longestPuzzleCompletedStreak: 3, // Won first 3 days
-        puzzleCompletedStreakDate: user3WonDays[user3WonDays.length - 1], // Date of last win (day 5)
-    }, { merge: true });
-    console.log(`Seeded User 3 (${user3Id})`);
-
-
-    // --- Create sample puzzles for all generated DATES ---
+    // 1) Create puzzles for the last 10 days plus today
     console.log(`Creating/updating sample puzzles for ${DATES.length} dates...`);
+    const puzzlesByDate = {};
     const puzzleBatch = db.batch();
     for (const date of DATES) {
-        const puzzleDocRef = db.collection('puzzles').doc(date);
-        // Use a simple, consistent puzzle structure for all dates for seeding
-        puzzleBatch.set(puzzleDocRef, {
-            actions: [101, 41, 88, 147, 56, 60, 81, 67, 42, 78, 0], // Example actions
-            algoScore: 12, // Example score
-            colorMap: [5, 0, 3, 4, 1, 2], // Example map
-            states: [ // Only need initial state for seeding usually
-                {
-                  0: ["red", "green", "blue", "orange", "red"],
-                  1: ["purple", "green", "green", "yellow", "blue"],
-                  2: ["yellow", "red", "yellow", "blue", "blue"],
-                  3: ["green", "orange", "orange", "red", "blue"],
-                  4: ["yellow", "red", "purple", "blue", "orange"]
-                },
-                // Add more states if needed for testing specific scenarios
-            ],
-            targetColor: "green"
-        }, { merge: true }); // Use merge to update existing puzzles without overwriting everything
+      const puzzleDocRef = db.collection('puzzles').doc(date);
+      const algoScore = 12 + Math.floor(Math.random() * 5) - 2; // 10..14
+      const puzzleDoc = {
+        actions: [101, 41, 88, 147, 56, 60, 81, 67, 42, 78, 0],
+        algoScore,
+        colorMap: [5, 0, 3, 4, 1, 2],
+        states: [
+          {
+            0: ["red", "green", "blue", "orange", "red"],
+            1: ["purple", "green", "green", "yellow", "blue"],
+            2: ["yellow", "red", "yellow", "blue", "blue"],
+            3: ["green", "orange", "orange", "red", "blue"],
+            4: ["yellow", "red", "purple", "blue", "orange"]
+          }
+        ],
+        targetColor: "green"
+      };
+      puzzlesByDate[date] = puzzleDoc;
+      puzzleBatch.set(puzzleDocRef, puzzleDoc, { merge: true });
     }
-
     await puzzleBatch.commit();
     console.log('Created/Updated sample puzzles');
 
-    // --- Create Daily Scores ---
-    console.log(`Creating/updating dailyScores for ${todayStr}...`);
-    // Create the dailyScores document (empty document to hold the subcollection)
-    await db.collection('dailyScores').doc(todayStr).set({}, { merge: true });
+    // 2) Generate 10 UIDs
+    const userIds = [];
+    for (let i = 0; i < 10; i++) userIds.push(generateMockFirebaseUID());
+    console.log('Generated user IDs:', userIds);
 
-    // Generate 10 sample users with Firebase-like UIDs
-    const userCount = 10;
-    const bestScoreUsers = 3;
-    const scoresBatch = db.batch();
-
-    console.log('Creating scores subcollection with user documents...');
-
-    for (let i = 1; i <= userCount; i++) {
-      // Generate a Firebase-like UID
-      const uid = generateMockFirebaseUID();
-
-      let score;
-      if (i <= bestScoreUsers) {
-        // First 3 players have the best score
-        score = 13;
-      } else {
-        // Other players have random scores between 7 and 15
-        score = Math.floor(Math.random() * 9) + 20;
+    // Helper functions
+    function computeCurrentStreak(allDates, predicate) {
+      let count = 0;
+      for (let i = allDates.length - 1; i >= 0; i--) {
+        const d = allDates[i];
+        if (predicate(d)) count++; else break;
       }
-
-      // Create a document in the scores subcollection for each user
-      const scoreDocRef = db.collection('dailyScores').doc(todayStr).collection('scores').doc(uid);
-      scoresBatch.set(scoreDocRef, { score }, { merge: true }); // Use merge
-
-      // console.log(`Added user ${i}/${userCount} with score ${score} and ID ${uid}`);
+      return count;
+    }
+    function computeLongestStreak(allDates, predicate) {
+      let maxStreak = 0;
+      let current = 0;
+      for (const d of allDates) {
+        if (predicate(d)) { current++; if (current > maxStreak) maxStreak = current; }
+        else { current = 0; }
+      }
+      return maxStreak;
     }
 
-    // Commit all the documents in the batch
-    await scoresBatch.commit();
+    const userHistories = {}; // uid -> { [date]: { easy?, medium?, hard? } }
 
-    // Create/Update specific example user documents matching the screenshot
-    const exampleUserIds = [
-      'SGD12BjUImhOYGfsdrZzJFnj2V12',
-      'iN1RwQKXq4NxCItrGnInbGUFjen1',
-      '6aA9GFXtGcdGiWho5Q6ffVK9T2G2'
-    ];
+    // 3) Create userPuzzleHistory with 20% skip per day and difficulty distribution
+    for (const uid of userIds) {
+      userHistories[uid] = {};
+      for (const date of DATES) {
+        // 20% chance to skip (user didn't play)
+        if (Math.random() < 0.2) continue;
 
-    for (const uid of exampleUserIds) {
-        // Get the best score from the userStats data we just set
-        const userStatsDoc = await db.collection('userStats').doc(uid).get();
-        const userStatsData = userStatsDoc.data();
-        const scoreForToday = userStatsData?.bestScoresByDay?.[todayStr] ?? 15; // Default to 11 if not found
-
-        await db.collection('dailyScores').doc(todayStr).collection('scores').doc(uid).set({
-            score: scoreForToday
-        }, { merge: true }); // Use merge
-        console.log(`Updated example user ${uid} in dailyScores with score ${scoreForToday}`);
-    }
-
-    // Verify that the data is properly accessible
-    console.log('Verifying data access...');
-    const scoresRef = db.collection('dailyScores').doc(todayStr).collection('scores');
-    const scoresSnapshot = await scoresRef.get();
-    console.log(`Found ${scoresSnapshot.size} documents in scores subcollection`);
-
-    if (scoresSnapshot.size > 0) {
-      const allScores = [];
-      scoresSnapshot.forEach(doc => {
-        const scoreData = doc.data();
-        // console.log(`Document ${doc.id}: Score = ${scoreData.score}`);
-        if (scoreData && typeof scoreData.score === 'number') {
-          allScores.push(scoreData.score);
+        // Difficulty presence distribution
+        const r = Math.random();
+        let hasEasy = false, hasMedium = false, hasHard = false;
+        if (r < 0.5) { // 50% only hard
+          hasHard = true;
+        } else if (r < 0.7) { // 20% only medium
+          hasMedium = true;
+        } else if (r < 0.8) { // 10% only easy
+          hasEasy = true;
+        } else if (r < 0.9) { // 10% hard + medium
+          hasHard = true; hasMedium = true;
+        } else { // 10% hard + medium + easy
+          hasHard = true; hasMedium = true; hasEasy = true;
         }
-      });
 
-      // Calculate stats to verify data
-      if (allScores.length > 0) {
-        const lowestScore = Math.min(...allScores);
-        const averageScore = allScores.reduce((sum, score) => sum + score, 0) / allScores.length;
-        const totalPlayers = allScores.length;
-        const playersWithLowestScore = allScores.filter(score => score === lowestScore).length;
+        const algo = puzzlesByDate[date].algoScore;
+        const docData = {};
+        let anyHintUsed = false;
+        let totalAttempts = 0;
 
-        console.log('Calculated stats from verification:');
-        console.log(`- Lowest Score: ${lowestScore}`);
-        console.log(`- Average Score: ${averageScore.toFixed(1)}`);
-        console.log(`- Total Players: ${totalPlayers}`);
-        console.log(`- Players with Best Score: ${playersWithLowestScore}`);
+        if (hasEasy) {
+          const attempts = 1 + Math.floor(Math.random() * 4); // 1..4
+          const firstTry = Math.random() < 0.35;
+          const hintUsedEasy = Math.random() < 0.2;
+          anyHintUsed = anyHintUsed || hintUsedEasy;
+          const moves = 10 + Math.floor(Math.random() * 10) + (attempts - 1) * 5;
+          const eloScore = 60 + Math.floor(Math.random() * 60); // 60..119
+          const tie = moves <= algo;
+          const beat = moves < algo;
+          const easyObj = {
+            attemptNumber: attempts,
+            moves,
+            firstTry,
+            goalAchieved: tie,
+            puzzleCompleted: true,
+            eloScore,
+            ...(tie ? { attemptToTieBot: attempts } : {}),
+            ...(beat ? { attemptToBeatBot: attempts } : {}),
+          };
+          docData.easy = easyObj;
+          totalAttempts += attempts;
+        }
+
+        if (hasMedium) {
+          const attempts = 1 + Math.floor(Math.random() * 4);
+          const firstTry = Math.random() < 0.25;
+          const hintUsedMedium = Math.random() < 0.2;
+          anyHintUsed = anyHintUsed || hintUsedMedium;
+          const moves = 12 + Math.floor(Math.random() * 12) + (attempts - 1) * 6;
+          const eloScore = 70 + Math.floor(Math.random() * 60); // 70..129
+          const tie = moves <= algo;
+          const beat = moves < algo;
+          const mediumObj = {
+            attemptNumber: attempts,
+            moves,
+            firstTry,
+            eloScore,
+            ...(tie ? { attemptToTieBot: attempts } : {}),
+            ...(beat ? { attemptToBeatBot: attempts } : {}),
+          };
+          docData.medium = mediumObj;
+          totalAttempts += attempts;
+        }
+
+        if (hasHard) {
+          const attempts = 1 + Math.floor(Math.random() * 5);
+          const firstTry = Math.random() < 0.15;
+          const hintUsedHard = Math.random() < 0.25;
+          anyHintUsed = anyHintUsed || hintUsedHard;
+          const moves = 14 + Math.floor(Math.random() * 14) + (attempts - 1) * 7;
+          const eloScore = 80 + Math.floor(Math.random() * 60); // 80..139
+          const tie = moves <= algo;
+          const beat = moves < algo;
+          const firstToBeatBot = Math.random() < 0.1;
+          const hardObj = {
+            attemptNumber: attempts,
+            moves,
+            firstTry,
+            eloScore,
+            firstToBeatBot,
+            ...(tie ? { attemptToTieBot: attempts } : {}),
+            ...(beat ? { attemptToBeatBot: attempts } : {}),
+          };
+          docData.hard = hardObj;
+          totalAttempts += attempts;
+        }
+
+        // Add top-level puzzle fields
+        docData.totalAttempts = totalAttempts;
+        docData.hintUsed = anyHintUsed;
+
+        // Persist history doc using user/{uid}/puzzles/{date}
+        const historyDocRef = db.collection('userPuzzleHistory').doc(uid).collection('puzzles').doc(date);
+        await historyDocRef.set(docData);
+        userHistories[uid][date] = docData;
       }
     }
 
-    console.log('Created dailyScores collection with proper subcollection structure');
+    // 4) Attach per-difficulty leaderboard stats under userPuzzleHistory/{uid}
+    for (const uid of userIds) {
+      const historyByDate = userHistories[uid];
+      const datesPlayed = DATES.filter(d => !!historyByDate[d]);
+
+      function goalsAchievedPredicate(difficulty) {
+        return (d) => {
+          const e = historyByDate[d]?.[difficulty];
+          if (!e) return false;
+          const algo = puzzlesByDate[d].algoScore;
+          return e.moves <= algo;
+        };
+      }
+      function firstTryPredicate(difficulty) {
+        return (d) => {
+          const e = historyByDate[d]?.[difficulty];
+          return !!(e && e.firstTry);
+        };
+      }
+
+      function buildDifficultyStats(difficulty) {
+        const daysWithDiff = DATES.filter(d => !!historyByDate[d]?.[difficulty]);
+        const goalsAchievedDays = daysWithDiff.filter(goalsAchievedPredicate(difficulty));
+        const goalsBeatenDays = daysWithDiff.filter(d => {
+          const e = historyByDate[d]?.[difficulty];
+          const algo = puzzlesByDate[d].algoScore;
+          return !!(e && e.moves < algo);
+        });
+        const currentTieBotStreak = computeCurrentStreak(DATES, (d) => goalsAchievedDays.includes(d));
+        const longestTieBotStreak = computeLongestStreak(DATES, (d) => goalsAchievedDays.includes(d));
+        const lastTieBotDate = goalsAchievedDays.length ? goalsAchievedDays[goalsAchievedDays.length - 1] : null;
+
+        const goalAchievedDate = goalsAchievedDays.length ? goalsAchievedDays[goalsAchievedDays.length - 1] : null;
+        const goalBeatenDate = goalsBeatenDays.length ? goalsBeatenDays[goalsBeatenDays.length - 1] : null;
+
+        const firstTryDays = daysWithDiff.filter(firstTryPredicate(difficulty));
+        const currentFirstTryStreak = computeCurrentStreak(DATES, (d) => firstTryDays.includes(d));
+        const longestFirstTryStreak = computeLongestStreak(DATES, (d) => firstTryDays.includes(d));
+        const lastFirstTryDate = firstTryDays.length ? firstTryDays[firstTryDays.length - 1] : null;
+
+        return {
+          goalsBeaten: goalsBeatenDays.length,
+          goalsAchieved: goalsAchievedDays.length,
+          goalAchievedDate,
+          goalBeatenDate,
+          currentFirstTryStreak,
+          lastFirstTryDate,
+          longestFirstTryStreak,
+          currentTieBotStreak,
+          lastTieBotDate,
+          longestTieBotStreak
+        };
+      }
+
+      // Level-agnostic aggregates
+      let puzzleAttempts = 0;
+      let moves = 0;
+      for (const d of datesPlayed) {
+        const entry = historyByDate[d];
+        if (entry.easy) { puzzleAttempts += entry.easy.attemptNumber; moves += entry.easy.moves; }
+        if (entry.medium) { puzzleAttempts += entry.medium.attemptNumber; moves += entry.medium.moves; }
+        if (entry.hard) { puzzleAttempts += entry.hard.attemptNumber; moves += entry.hard.moves; }
+      }
+      const levelAgnostic = {
+        puzzleAttempts,
+        moves,
+        puzzlesSolved: datesPlayed.length,
+        currentPuzzlesCompletedStreak: computeCurrentStreak(DATES, (d) => datesPlayed.includes(d)),
+        lastPuzzleCompletedDate: datesPlayed.length ? datesPlayed[datesPlayed.length - 1] : null,
+        longestPuzzlesCompletedStreak: computeLongestStreak(DATES, (d) => datesPlayed.includes(d))
+      };
+
+      const leaderboardEasy = buildDifficultyStats('easy');
+      const leaderboardMedium = buildDifficultyStats('medium');
+      const leaderboardHard = buildDifficultyStats('hard');
+
+      // Compute Elo aggregates from daily best elo across difficulties
+      const eloScoreByDay = {};
+      for (const d of datesPlayed) {
+        const e = historyByDate[d];
+        const elos = [];
+        if (e.easy && typeof e.easy.eloScore === 'number') elos.push(e.easy.eloScore);
+        if (e.medium && typeof e.medium.eloScore === 'number') elos.push(e.medium.eloScore);
+        if (e.hard && typeof e.hard.eloScore === 'number') elos.push(e.hard.eloScore);
+        if (elos.length > 0) eloScoreByDay[d] = Math.max(...elos);
+      }
+      let eloScoreAllTime = 0;
+      let eloScoreLast30 = 0;
+      let eloScoreLast7 = 0;
+      const now = new Date();
+      const todayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+      const start30 = new Date(todayUTC); start30.setUTCDate(start30.getUTCDate() - 29);
+      const start7 = new Date(todayUTC); start7.setUTCDate(start7.getUTCDate() - 6);
+      for (const [dayStr, val] of Object.entries(eloScoreByDay)) {
+        if (typeof val !== 'number' || isNaN(val)) continue;
+        eloScoreAllTime += val;
+        try {
+          const parts = dayStr.split('-');
+          if (parts.length === 3) {
+            const dUTC = Date.UTC(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+            const dDate = new Date(dUTC);
+            if (!isNaN(dDate.getTime())) {
+              if (dDate >= start30) eloScoreLast30 += val;
+              if (dDate >= start7) eloScoreLast7 += val;
+            }
+          }
+        } catch {}
+      }
+      const leaderboardCol = db.collection('userPuzzleHistory').doc(uid).collection('leaderboard');
+      await leaderboardCol.doc('levelAgnostic').set({
+        ...levelAgnostic,
+        eloScoreByDay,
+        eloScoreAllTime,
+        eloScoreLast30,
+        eloScoreLast7,
+      }, { merge: true });
+      await leaderboardCol.doc('easy').set(leaderboardEasy, { merge: true });
+      await leaderboardCol.doc('medium').set(leaderboardMedium, { merge: true });
+      await leaderboardCol.doc('hard').set(leaderboardHard, { merge: true });
+    }
+
+    // 5) Create dailyScoresV2 (per-difficulty) for all dates
+    console.log('Creating/updating dailyScoresV2 for all puzzle dates...');
+    for (const date of DATES) {
+      const easyMap = {};
+      const mediumMap = {};
+      const hardMap = {};
+      for (const uid of userIds) {
+        const entry = userHistories[uid][date];
+        if (!entry) continue; // user didn't play this date
+        if (entry.easy && typeof entry.easy.moves === 'number') {
+          easyMap[uid] = entry.easy.moves;
+        }
+        if (entry.medium && typeof entry.medium.moves === 'number') {
+          mediumMap[uid] = entry.medium.moves;
+        }
+        if (entry.hard && typeof entry.hard.moves === 'number') {
+          hardMap[uid] = entry.hard.moves;
+        }
+      }
+      const update = {};
+      if (Object.keys(easyMap).length) update.easy = easyMap;
+      if (Object.keys(mediumMap).length) update.medium = mediumMap;
+      if (Object.keys(hardMap).length) update.hard = hardMap;
+      if (Object.keys(update).length) {
+        await db.collection('dailyScoresV2').doc(date).set(update, { merge: true });
+      }
+    }
+
+    // Verify counts for today's hard entries in dailyScoresV2
+    console.log('Verifying dailyScoresV2 (hard) map for today...');
+    const v2Doc = await db.collection('dailyScoresV2').doc(todayStr).get();
+    const v2Data = v2Doc.exists ? (v2Doc.data() || {}) : {};
+    const hardCount = v2Data && v2Data.hard ? Object.keys(v2Data.hard).length : 0;
+    console.log(`Found ${hardCount} hard entries in dailyScoresV2 for ${todayStr}`);
+
+    console.log('Created dailyScoresV2 collections with per-difficulty structure');
     console.log('Seeding completed successfully');
   }
   catch (error) {

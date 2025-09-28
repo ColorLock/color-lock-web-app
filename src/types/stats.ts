@@ -97,4 +97,6 @@ export interface LeaderboardEntry {
   eloScoreTotal: number | null;
   eloScoreAvgLast30: number | null;
   eloScoreTotalLast30: number | null;
+  botsBeaten: number;
+  botsAchieved: number;
 } 
