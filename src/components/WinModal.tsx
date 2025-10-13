@@ -46,8 +46,8 @@ const WinModal: React.FC<WinModalProps> = ({
   // Get tutorial context
   const { isTutorialMode, nextStep, endTutorial } = useTutorialContext();
   
-  // Get game context to access stats
-  const { gameStats } = useGameContext();
+  // Get game context to access stats for win modal
+  const { gameStats, winModalStats } = useGameContext();
 
   // Get settings for sound playback
   const settings = useContext(SettingsContext);
@@ -59,8 +59,12 @@ const WinModal: React.FC<WinModalProps> = ({
   // Get today's date key
   const todayKey = dateKeyForToday();
   
-  // Get attempts for today directly from currentStats
-  const attemptsToday = currentStats.attemptsPerDay?.[todayKey] ?? 1; // Default to 1 if not found
+  // Values for Win Modal
+  const totalAttemptsForPuzzle = winModalStats?.totalAttempts ?? null;
+  const displayDifficulty = (winModalStats?.difficulty || settings?.difficultyLevel || 'medium') as string;
+  const difficultyText = typeof displayDifficulty === 'string'
+    ? (displayDifficulty.charAt(0).toUpperCase() + displayDifficulty.slice(1))
+    : String(displayDifficulty);
 
   // Check if Web Share API is supported
   useEffect(() => {
@@ -256,7 +260,6 @@ ${boardRows}`;
       )}
       
       <div className="win-modal win-modal-animated">
-        <h2 className="congratulations-title">Congratulations!</h2>
         
         <div className="unlocked-message">
           Unlocked <span className="color-name" style={{color: getColorCSS(puzzle.targetColor)}}>{colorName}</span> in <strong>{puzzle.userMovesUsed}</strong> moves!
@@ -266,14 +269,46 @@ ${boardRows}`;
         <div className="win-stats">
           <div className="stat-item">
             <div className="stat-value">{puzzle.algoScore}</div>
-            <div className="stat-label">Bot Moves</div>
+            <div className="stat-label">Goal</div>
           </div>
           <div className="stat-item">
-            <div className="stat-value">{attemptsToday}</div>
+            <div className="stat-value">{difficultyText}</div>
+            <div className="stat-label">Difficulty</div>
+          </div>
+          <div className="stat-item">
+            <div className="stat-value">{totalAttemptsForPuzzle !== null ? totalAttemptsForPuzzle : '—'}</div>
             <div className="stat-label">Times Played</div>
           </div>
         </div>
+
+        {/* Streaks Section */}
+        <div style={{ marginTop: '0.5rem', textAlign: 'center', fontWeight: 600 }}>{`Your Streaks (${difficultyText})`}</div>
+        <div className="win-stats">
+          <div className="stat-item">
+            <div className="stat-value">{winModalStats?.currentPuzzleCompletedStreak ?? '—'}</div>
+            <div className="stat-label">Puzzles</div>
+          </div>
+          <div className="stat-item">
+            <div className="stat-value">{winModalStats?.currentTieBotStreak ?? '—'}</div>
+            <div className="stat-label">Goal</div>
+          </div>
+          <div className="stat-item">
+            <div className="stat-value">{winModalStats?.currentFirstTryStreak ?? '—'}</div>
+            <div className="stat-label">First Try</div>
+          </div>
+        </div>
         
+        <div className="win-actions">
+          <button 
+            className="try-again-button"
+            onClick={handleTryAgainOrContinue}
+          >
+            {isTutorialMode ? "Play Today's Puzzle" : "Play Again"}
+          </button>
+          
+          <button className="win-close-button" onClick={onClose}>Close</button>
+        </div>
+
         {!isTutorialMode && (
           <div className="next-puzzle-timer">
             <p>New Puzzle in:</p>
@@ -287,7 +322,7 @@ ${boardRows}`;
             </div>
           </div>
         )}
-        
+
         <div className="share-section">
           <p>Share your results:</p>
           <div className="social-buttons">
@@ -330,17 +365,6 @@ ${boardRows}`;
               </button>
             )}
           </div>
-        </div>
-        
-        <div className="win-actions">
-          <button 
-            className="try-again-button"
-            onClick={handleTryAgainOrContinue}
-          >
-            {isTutorialMode ? "Play Today's Puzzle" : "Play Again"}
-          </button>
-          
-          <button className="win-close-button" onClick={onClose}>Close</button>
         </div>
       </div>
     </div>

@@ -6,8 +6,9 @@ import { HintResult } from '../utils/hintUtils';
 import {
     auth, // Keep auth import if needed elsewhere
     fetchPuzzleCallable,
-    getUserStatsCallable,
-    recordPuzzleHistoryCallable
+    getPersonalStatsCallable,
+    recordPuzzleHistoryCallable,
+    getWinModalStatsCallable
 } from '../services/firebaseService';
 import { dateKeyForToday } from '../utils/dateUtils';
 import { findLargestRegion, generatePuzzleFromDB } from '../utils/gameLogic';
@@ -39,6 +40,13 @@ interface GameContextValue {
   showAutocompleteModal: boolean;
   isLoadingStats: boolean;
   movesThisAttempt: number;
+  winModalStats: {
+    totalAttempts: number | null;
+    currentPuzzleCompletedStreak: number | null;
+    currentTieBotStreak: number | null;
+    currentFirstTryStreak: number | null;
+    difficulty: DifficultyLevel | null;
+  } | null;
   
   // Functions
   handleTileClick: (row: number, col: number) => void;
@@ -106,6 +114,13 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [isFirstTryOfDay, setIsFirstTryOfDay] = useState<boolean>(true);
   const [hintsUsedThisGame, setHintsUsedThisGame] = useState<number>(0);
   const [movesThisAttempt, setMovesThisAttempt] = useState<number>(0);
+  const [winModalStats, setWinModalStats] = useState<{
+    totalAttempts: number | null;
+    currentPuzzleCompletedStreak: number | null;
+    currentTieBotStreak: number | null;
+    currentFirstTryStreak: number | null;
+    difficulty: DifficultyLevel | null;
+  } | null>(null);
   
   // Settings and stats
   const [showSettings, setShowSettings] = useState(false);
@@ -141,7 +156,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     }
   }, []);
 
-  // --- Utility Function (Use getUserStatsCallable) ---
+  // --- Utility Function (Use getPersonalStatsCallable) ---
   const fetchAndSetUserStats = useCallback(async () => {
     // Check cache first
     if (cachedUserStats) {
@@ -164,7 +179,10 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setIsLoadingStats(true);
     
     try {
-        const result = await getUserStatsCallable();
+        const result = await getPersonalStatsCallable({
+            puzzleId: dateKeyForToday(),
+            difficulty: settings.difficultyLevel
+        });
         if (result.data.success) {
             if (result.data.stats) {
                 console.log("GameContext: User stats fetched successfully.");
@@ -386,9 +404,9 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     }
   };
 
-  const handlePuzzleSolved = (solvedPuzzle: DailyPuzzle) => {
+  const handlePuzzleSolved = async (solvedPuzzle: DailyPuzzle) => {
     console.log(`[STATS-EVENT ${new Date().toISOString()}] Game won - puzzle ID: ${solvedPuzzle.dateString}, userScore: ${solvedPuzzle.userMovesUsed}, algoScore: ${solvedPuzzle.algoScore}, difficulty: ${settings.difficultyLevel}`);
-    recordPuzzleHistory({
+    await recordPuzzleHistory({
       puzzle_id: solvedPuzzle.dateString,
       difficulty: settings.difficultyLevel,
       attemptNumber: attemptNumberToday,
@@ -398,6 +416,37 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       win_loss: 'win'
     });
     setHasRecordedCompletion(true);
+    // Fetch stats for Win Modal after write completes
+    try {
+      const resp = await getWinModalStatsCallable({ puzzleId: solvedPuzzle.dateString, difficulty: settings.difficultyLevel });
+      const data = resp.data as any;
+      if (data?.success && data?.stats) {
+        setWinModalStats({
+          totalAttempts: data.stats.totalAttempts ?? null,
+          currentPuzzleCompletedStreak: data.stats.currentPuzzleCompletedStreak ?? null,
+          currentTieBotStreak: data.stats.currentTieBotStreak ?? null,
+          currentFirstTryStreak: data.stats.currentFirstTryStreak ?? null,
+          difficulty: settings.difficultyLevel,
+        });
+      } else {
+        setWinModalStats({
+          totalAttempts: null,
+          currentPuzzleCompletedStreak: null,
+          currentTieBotStreak: null,
+          currentFirstTryStreak: null,
+          difficulty: settings.difficultyLevel,
+        });
+      }
+    } catch (e) {
+      console.error('Failed fetching win modal stats', e);
+      setWinModalStats({
+        totalAttempts: null,
+        currentPuzzleCompletedStreak: null,
+        currentTieBotStreak: null,
+        currentFirstTryStreak: null,
+        difficulty: settings.difficultyLevel,
+      });
+    }
     setShowWinModal(true);
   };
 
@@ -464,7 +513,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     updateSettings(newSettings);
   };
 
-  const handleAutoComplete = () => {
+  const handleAutoComplete = async () => {
       if (!puzzle) return;
 
       // 1. Get moves made *before* autocomplete
@@ -501,7 +550,37 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       });
       setHasRecordedCompletion(true);
 
-      // 7. Show win modal
+      // 7. Fetch win modal stats then show
+      try {
+        const resp = await getWinModalStatsCallable({ puzzleId: completedPuzzle.dateString, difficulty: settings.difficultyLevel });
+        const data = resp.data as any;
+        if (data?.success && data?.stats) {
+          setWinModalStats({
+            totalAttempts: data.stats.totalAttempts ?? null,
+            currentPuzzleCompletedStreak: data.stats.currentPuzzleCompletedStreak ?? null,
+            currentTieBotStreak: data.stats.currentTieBotStreak ?? null,
+            currentFirstTryStreak: data.stats.currentFirstTryStreak ?? null,
+            difficulty: settings.difficultyLevel,
+          });
+        } else {
+          setWinModalStats({
+            totalAttempts: null,
+            currentPuzzleCompletedStreak: null,
+            currentTieBotStreak: null,
+            currentFirstTryStreak: null,
+            difficulty: settings.difficultyLevel,
+          });
+        }
+      } catch (e) {
+        console.error('Failed fetching win modal stats', e);
+        setWinModalStats({
+          totalAttempts: null,
+          currentPuzzleCompletedStreak: null,
+          currentTieBotStreak: null,
+          currentFirstTryStreak: null,
+          difficulty: settings.difficultyLevel,
+        });
+      }
       setShowWinModal(true);
   };
 
@@ -570,6 +649,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     showAutocompleteModal,
     isLoadingStats,
     movesThisAttempt,
+    winModalStats,
     
     handleTileClick,
     handleColorSelect,

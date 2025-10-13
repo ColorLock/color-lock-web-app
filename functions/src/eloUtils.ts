@@ -20,10 +20,10 @@ function calculateEloAttemptPenalty(winAttempt: number | null | undefined): numb
   let cumulativePenalty = 0;
   for (let k = 2; k <= winAttempt; k++) {
     // Skip penalties for attempts beyond 21
-    if (k > 21) continue;
+    if (k > 30) continue;
     
     // Using Math.max to prevent division by zero or sqrt of negative
-    cumulativePenalty += -10 / Math.sqrt(Math.max(1, k - 1));
+    cumulativePenalty += -20 / Math.sqrt(Math.max(1, k - 1));
   }
   return cumulativePenalty;
 }
@@ -50,25 +50,17 @@ export function calculateEloScore(
     // --- Difficulty Multiplier ---
     let difficultyMultiplier = 1.0; // Default for Hard
 
-    if (difficulty === DifficultyLevel.Medium) {
-        difficultyMultiplier = 0.30;
-    } else if (difficulty === DifficultyLevel.Easy) {
-        difficultyMultiplier = 0.10;
+    if (difficulty === DifficultyLevel.Easy) {
+        difficultyMultiplier = 0.5;
     }
     logger.debug(`Calculating Elo for ${dateStr}: Difficulty=${difficulty}, Multiplier=${difficultyMultiplier}, UserScore=${userScore}, AlgoScore=${algoScore}`);
     // --- End Difficulty Multiplier ---
 
-    const winBonus = (winAttempt !== null && winAttempt >= 1) ? 100 : 0;
-    let tieOrBeatBonus = (userScore <= algoScore)
-        ? (100 * (algoScore - userScore + 1))
+    const winBonus = (winAttempt !== null && winAttempt >= 1) ? 200 : 0;
+    let tieOrBeatBonus = (difficulty === DifficultyLevel.Hard && userScore <= algoScore)
+        ? (200 * (algoScore - userScore + 1))
         : 0;
 
-    // Apply difficulty-based threshold adjustment *before* the multiplier
-    if (difficulty === DifficultyLevel.Easy) {
-        tieOrBeatBonus = Math.max(0, tieOrBeatBonus - 300);
-    } else if (difficulty === DifficultyLevel.Medium) {
-        tieOrBeatBonus = Math.max(0, tieOrBeatBonus - 100);
-    }
 
     // Apply difficulty multiplier to bonuses
     const adjustedWinBonus = winBonus * difficultyMultiplier;
@@ -87,7 +79,7 @@ export function calculateEloScore(
     );
 
     // Add first-to-beat-bot bonus of 100 points if applicable
-    const firstToBeatBotBonus = isFirstToBeatBot ? 100 : 0;
+    const firstToBeatBotBonus = isFirstToBeatBot ? 200 : 0;
     
     const finalScore = adjustedBonusWithHint + cumulativeAttemptPenalty + firstToBeatBotBonus;
 

@@ -2,13 +2,23 @@ import React, { useState, useEffect, memo, useCallback, useMemo } from 'react';
 import '../scss/main.scss';
 import { TileColor } from '../types';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faXmark, faShareNodes, faCopy, faEnvelope, faShare } from '@fortawesome/free-solid-svg-icons';
+import { faXmark, faShareNodes, faCopy, faEnvelope, faShare, faChevronDown } from '@fortawesome/free-solid-svg-icons';
 import { faTwitter, faFacebookF } from '@fortawesome/free-brands-svg-icons';
 import { GameStatistics, defaultStats, LeaderboardEntry } from '../types/stats';
 import { dateKeyForToday } from '../utils/dateUtils';
-import { getGlobalLeaderboardCallable } from '../services/firebaseService';
+import { getGlobalLeaderboardCallable, getPersonalStatsCallable, getGlobalLeaderboardV2Callable } from '../services/firebaseService';
 import { useDataCache } from '../contexts/DataCacheContext';
 import { useAuth } from '../contexts/AuthContext';
+import useSettings from '../hooks/useSettings';
+
+// Leaderboard V2 types
+interface LeaderboardEntryV2 {
+  userId: string;
+  username: string;
+  value: number;
+  rank: number;
+  isCurrent?: boolean;
+}
 
 interface StatsModalProps {
   isOpen: boolean;
@@ -30,6 +40,7 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
   isLoading: isLoadingPersonalStats = false
 }) => {
   const { currentUser } = useAuth();
+  const { settings } = useSettings();
   const {
       userStats: cachedUserStats,
       globalLeaderboard: cachedLeaderboard,
@@ -38,78 +49,109 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
   } = useDataCache();
 
   const [activeTab, setActiveTab] = useState<'personal' | 'global'>('personal');
-  const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
-  const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState<boolean>(cacheLoadingStates.leaderboard);
-  const [leaderboardError, setLeaderboardError] = useState<string | null>(cacheErrorStates.leaderboard);
-  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'totalMovesUsed', direction: 'desc' });
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
   const [isWebShareSupported, setIsWebShareSupported] = useState<boolean>(false);
+  
+  // Personal stats state
+  const [personalStats, setPersonalStats] = useState<any>(null);
+  const [isLoadingNewPersonalStats, setIsLoadingNewPersonalStats] = useState<boolean>(false);
+  const [personalStatsError, setPersonalStatsError] = useState<string | null>(null);
+  
+  // Global leaderboard V2 state
+  const [leaderboardCategory, setLeaderboardCategory] = useState<'score' | 'goals' | 'streaks'>('score');
+  const [leaderboardSubcategory, setLeaderboardSubcategory] = useState<string>('allTime');
+  const [leaderboardDifficulty, setLeaderboardDifficulty] = useState<string>(settings.difficultyLevel);
+  const [leaderboardV2Data, setLeaderboardV2Data] = useState<LeaderboardEntryV2[]>([]);
+  const [requesterEntry, setRequesterEntry] = useState<LeaderboardEntryV2 | null>(null);
+  const [isLoadingLeaderboardV2, setIsLoadingLeaderboardV2] = useState<boolean>(false);
+  const [leaderboardV2Error, setLeaderboardV2Error] = useState<string | null>(null);
   
   // Check if Web Share API is supported
   useEffect(() => {
     setIsWebShareSupported(typeof navigator.share === 'function');
   }, []);
   
+  const todayKey = dateKeyForToday(); // Get today's date key
+  
+  // Fetch personal stats when modal opens and user is authenticated
+  useEffect(() => {
+    const fetchPersonalStats = async () => {
+      if (!isOpen || !currentUser || activeTab !== 'personal') return;
+      
+      setIsLoadingNewPersonalStats(true);
+      setPersonalStatsError(null);
+      
+      try {
+        console.log("[StatsModal] Fetching personal stats for:", todayKey, "difficulty:", settings.difficultyLevel);
+        const result = await getPersonalStatsCallable({ 
+          puzzleId: todayKey, 
+          difficulty: settings.difficultyLevel 
+        });
+        
+        console.log("[StatsModal] Personal stats result:", result);
+        
+        if (result.data.success && result.data.stats) {
+          setPersonalStats(result.data.stats);
+        } else {
+          throw new Error(result.data.error || 'Failed to fetch personal stats');
+        }
+      } catch (error: any) {
+        console.error("[StatsModal] Error fetching personal stats:", error);
+        setPersonalStatsError(error.message || 'Could not load personal stats.');
+      } finally {
+        setIsLoadingNewPersonalStats(false);
+      }
+    };
+    
+    fetchPersonalStats();
+  }, [isOpen, currentUser, activeTab, todayKey, settings.difficultyLevel]);
+  
   // Determine which stats to display (prioritize cache, fallback to props)
   // Use cachedUserStats if available and user is logged in
   const displayUserStats = (currentUser && cachedUserStats) ? cachedUserStats : gameContextStats;
   const currentStats = displayUserStats || defaultStats;
-  const todayKey = dateKeyForToday(); // Get today's date key
   
-  // Fetch leaderboard data when the global tab is active and modal is open
+  // Fetch leaderboard V2 data when category, subcategory, or difficulty changes
   useEffect(() => {
-    const fetchLeaderboard = async () => {
-      // Check cache first
-      if (cachedLeaderboard) {
-        console.log("[StatsModal] Using cached global leaderboard.");
-        setLeaderboardData(cachedLeaderboard);
-        setIsLoadingLeaderboard(false);
-        setLeaderboardError(null);
-        return;
-      }
-
-      // If not cached and tab is activated
-      if (activeTab === 'global' && !isLoadingLeaderboard) {
-        console.log("[StatsModal] No cached leaderboard, attempting fetch...");
-        setIsLoadingLeaderboard(true);
-        setLeaderboardError(null);
-        try {
-          console.log("[StatsModal] Invoking getGlobalLeaderboardCallable()...");
-          const result = await getGlobalLeaderboardCallable();
-          console.log("[StatsModal] Callable function call returned (raw):", result);
-          
-          if (result.data.success && result.data.leaderboard) {
-            // Apply the initial sort config to the fetched data
-            const initialSortedData = sortLeaderboard(result.data.leaderboard, sortConfig);
-            setLeaderboardData(initialSortedData);
-          } else {
-            throw new Error(result.data.error || 'Failed to fetch leaderboard');
-          }
-        } catch (error: any) {
-          console.error("[StatsModal] Error calling getGlobalLeaderboard callable:", error);
-          setLeaderboardError(error.message || 'Could not load leaderboard data.');
-        } finally {
-          setIsLoadingLeaderboard(false);
+    const fetchLeaderboardV2 = async () => {
+      if (!isOpen || activeTab !== 'global') return;
+      
+      setIsLoadingLeaderboardV2(true);
+      setLeaderboardV2Error(null);
+      
+      try {
+        console.log("[StatsModal] Fetching leaderboard V2:", { 
+          category: leaderboardCategory, 
+          subcategory: leaderboardSubcategory, 
+          difficulty: leaderboardDifficulty 
+        });
+        
+        const result = await getGlobalLeaderboardV2Callable({
+          category: leaderboardCategory,
+          subcategory: leaderboardSubcategory,
+          difficulty: (leaderboardCategory === 'goals' || leaderboardCategory === 'streaks') 
+            ? leaderboardDifficulty 
+            : undefined
+        });
+        
+        console.log("[StatsModal] Leaderboard V2 result:", result);
+        
+        if (result.data.success && result.data.leaderboard) {
+          setLeaderboardV2Data(result.data.leaderboard);
+          setRequesterEntry(result.data.requesterEntry || null);
+        } else {
+          throw new Error(result.data.error || 'Failed to fetch leaderboard');
         }
+      } catch (error: any) {
+        console.error("[StatsModal] Error fetching leaderboard V2:", error);
+        setLeaderboardV2Error(error.message || 'Could not load leaderboard data.');
+      } finally {
+        setIsLoadingLeaderboardV2(false);
       }
     };
-
-    if (isOpen) {
-      fetchLeaderboard();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, isOpen, cachedLeaderboard]);
-  
-  // Update local state if cache updates while modal is open
-  useEffect(() => {
-    if (isOpen && cachedLeaderboard) {
-      // Sort cached leaderboard data when it updates
-      const sortedCachedData = sortLeaderboard(cachedLeaderboard, sortConfig);
-      setLeaderboardData(sortedCachedData);
-      setIsLoadingLeaderboard(cacheLoadingStates.leaderboard);
-      setLeaderboardError(cacheErrorStates.leaderboard);
-    }
-  }, [cachedLeaderboard, cacheLoadingStates.leaderboard, cacheErrorStates.leaderboard, isOpen, sortConfig]);
+    
+    fetchLeaderboardV2();
+  }, [isOpen, activeTab, leaderboardCategory, leaderboardSubcategory, leaderboardDifficulty]);
   
   // Handle outside click
   const handleOverlayClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -150,63 +192,61 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
     return String(value ?? ((type === 'bestScoreToday' || type === 'attemptsToday') ? 'N/A' : 0));
   }, [currentStats, todayKey]);
   
-  // --- Change: Extracted sorting logic to a reusable function ---
-  const sortLeaderboard = (data: LeaderboardEntry[], config: SortConfig): LeaderboardEntry[] => {
-    let sortableItems = [...data];
-    if (config !== null) {
-      sortableItems.sort((a, b) => {
-        // Handle potentially undefined values during sorting
-        const aValue = a[config.key] ?? (config.direction === 'asc' ? Infinity : -Infinity);
-        const bValue = b[config.key] ?? (config.direction === 'asc' ? Infinity : -Infinity);
-
-        // Compare values
-        if (aValue < bValue) return config.direction === 'asc' ? -1 : 1;
-        if (aValue > bValue) return config.direction === 'asc' ? 1 : -1;
-
-        // Secondary sort by username if primary values are equal
-        const aUsername = a.username?.toLowerCase() || '';
-        const bUsername = b.username?.toLowerCase() || '';
-        if (aUsername < bUsername) return -1;
-        if (aUsername > bUsername) return 1;
-
-        return 0; // Keep original order if all else fails
-      });
+  // Helper functions for leaderboard V2
+  const getSubcategoryOptions = useCallback((category: 'score' | 'goals' | 'streaks') => {
+    switch (category) {
+      case 'score':
+        return [
+          { value: 'last7', label: 'Last 7 Days' },
+          { value: 'last30', label: 'Last 30 Days' },
+          { value: 'allTime', label: 'All Time' }
+        ];
+      case 'goals':
+        return [
+          { value: 'beaten', label: 'Beaten' },
+          { value: 'matched', label: 'Matched' }
+        ];
+      case 'streaks':
+        return [
+          { value: 'firstTry', label: 'First Try' },
+          { value: 'goalAchieved', label: 'Goal Achieved' },
+          { value: 'puzzleCompleted', label: 'Puzzle Completed' }
+        ];
+      default:
+        return [];
     }
-    return sortableItems;
-  };
-
-  // Memoized sorted leaderboard data using the extracted function
-  const sortedLeaderboardData = useMemo(() => {
-    return sortLeaderboard(leaderboardData, sortConfig);
-  }, [leaderboardData, sortConfig]);
+  }, []);
   
-  // Request sorting function
-  const requestSort = (key: keyof LeaderboardEntry) => {
-    let direction: 'asc' | 'desc' = 'asc';
-    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
-    } else if (!sortConfig || sortConfig.key !== key) {
-      // Define default sort directions for specific keys
-      const descKeys: (keyof LeaderboardEntry)[] = [
-        'totalWins', 'longestPuzzleCompletedStreak', 'currentPuzzleCompletedStreak',
-        'longestTieBotStreak', 'currentTieBotStreak', 'currentFirstTryStreak',
-        'longestFirstTryStreak', 'eloScoreTotal', 'eloScoreTotalLast30', 'totalMovesUsed'
-      ];
-      const ascKeys: (keyof LeaderboardEntry)[] = [
-        'eloScoreAvg', 'eloScoreAvgLast30'
-      ];
-      if (descKeys.includes(key)) direction = 'desc';
-      else if (ascKeys.includes(key)) direction = 'asc';
-      else direction = 'asc'; // Default to ascending for username
+  const getHeaderLabel = useCallback((category: 'score' | 'goals' | 'streaks') => {
+    switch (category) {
+      case 'score':
+        return 'Score';
+      case 'goals':
+        return 'Goals';
+      case 'streaks':
+        return 'Streaks';
+      default:
+        return 'Score';
     }
-    setSortConfig({ key, direction });
-  };
+  }, []);
   
-  // Get sorting indicator arrow
-  const getSortIndicator = (key: keyof LeaderboardEntry) => {
-    if (!sortConfig || sortConfig.key !== key) return null;
-    return sortConfig.direction === 'asc' ? ' ▲' : ' ▼';
-  };
+  const getSubheaderLabel = useCallback((category: 'score' | 'goals' | 'streaks', subcategory: string) => {
+    const options = getSubcategoryOptions(category);
+    const option = options.find(opt => opt.value === subcategory);
+    return option?.label || subcategory;
+  }, [getSubcategoryOptions]);
+  
+  // Handle category change
+  const handleCategoryChange = useCallback((newCategory: 'score' | 'goals' | 'streaks') => {
+    setLeaderboardCategory(newCategory);
+    // Set default subcategory for the new category
+    const defaultSubcategories = {
+      score: 'allTime',
+      goals: 'beaten',
+      streaks: 'firstTry'
+    };
+    setLeaderboardSubcategory(defaultSubcategories[newCategory]);
+  }, []);
   
   // Generate formatted share text using the passed callback
   const getFormattedShareText = useCallback(() => {
@@ -316,169 +356,79 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
           {/* Personal Stats Tab */} 
           {activeTab === 'personal' && (
             <div role="tabpanel" aria-labelledby="personal-tab">
-              {showPersonalStatsLoader ? (
+              {isLoadingNewPersonalStats ? (
                 <div className="stats-loading">
                   <div className="spinner"></div>
                   <p>Loading statistics...</p>
                 </div>
-              ) : cacheErrorStates.userStats ? (
-                <div className="error-message">Error loading stats: {cacheErrorStates.userStats}</div>
-              ) : (
+              ) : personalStatsError ? (
+                <div className="error-message">Error loading stats: {personalStatsError}</div>
+              ) : !currentUser ? (
+                <div className="error-message">Please sign in to view personal stats</div>
+              ) : personalStats ? (
                 <>
                   <div className="stats-section">
                     <h3>Today's Game ({todayKey})</h3>
-                    <div className="stats-grid today-stats-grid">
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.bestScoresByDay, 'bestScoreToday')}</div>
-                        <div className="stat-label">Best Score</div>
+                    <div className="personal-stats-grid">
+                      <div className="personal-stat-item">
+                        <div className="personal-stat-value">{personalStats.today.bestEloScore ?? 'N/A'}</div>
+                        <div className="personal-stat-label">Best Elo Score</div>
                       </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.attemptsPerDay?.[todayKey], 'number')}</div>
-                        <div className="stat-label">Attempts</div>
+                      <div className="personal-stat-item">
+                        <div className="personal-stat-value">{personalStats.today.totalAttempts ?? 'N/A'}</div>
+                        <div className="personal-stat-label">Attempts</div>
                       </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.winsPerDay?.[todayKey], 'number')}</div>
-                        <div className="stat-label">Wins Today</div>
+                      <div className="personal-stat-item">
+                        <div className="personal-stat-value">{personalStats.today.fewestMoves ?? 'N/A'}</div>
+                        <div className="personal-stat-label">Fewest Moves ({personalStats.difficulty})</div>
                       </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.hintUsageByDay?.[todayKey], 'number')}</div>
-                        <div className="stat-label">Hints Today</div>
+                      <div className="personal-stat-item">
+                        <div className="personal-stat-value">{personalStats.today.bestDifficultyEloScore ?? 'N/A'}</div>
+                        <div className="personal-stat-label">Best Elo ({personalStats.difficulty})</div>
                       </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.attemptsToAchieveBotScore?.[todayKey], 'attemptsToday')}</div>
-                        <div className="stat-label">Attempts to Achieve Bot</div>
+                      <div className="personal-stat-item">
+                        <div className="personal-stat-value">{personalStats.today.attemptsToTieGoal ?? 'N/A'}</div>
+                        <div className="personal-stat-label">Attempts to Tie ({personalStats.difficulty})</div>
                       </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.attemptsToBeatBotScore?.[todayKey], 'attemptsToday')}</div>
-                        <div className="stat-label">Attempts to Beat Bot</div>
-                      </div>
-                       <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.attemptsToWinByDay?.[todayKey], 'attemptsToday')}</div>
-                        <div className="stat-label">Attempts to Win</div>
+                      <div className="personal-stat-item">
+                        <div className="personal-stat-value">{personalStats.today.attemptsToBeatGoal ?? 'N/A'}</div>
+                        <div className="personal-stat-label">Attempts to Beat ({personalStats.difficulty})</div>
                       </div>
                     </div>
                   </div>
                   
                   <div className="stats-section">
                     <h3>All-time Stats</h3>
-                    <div className="stats-grid all-time-stats-grid">
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.currentPuzzleCompletedStreak, 'number')}</div>
-                        <div className="stat-label">Current Win Streak</div>
+                    <div className="personal-stats-grid">
+                      <div className="personal-stat-item">
+                        <div className="personal-stat-value">{personalStats.allTime.currentPuzzleStreak ?? 'N/A'}</div>
+                        <div className="personal-stat-label">Current Puzzle Streak</div>
                       </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.longestPuzzleCompletedStreak, 'number')}</div>
-                        <div className="stat-label">Longest Win Streak</div>
+                      <div className="personal-stat-item">
+                        <div className="personal-stat-value">{personalStats.allTime.currentGoalStreak ?? 'N/A'}</div>
+                        <div className="personal-stat-label">Current Goal Streak ({personalStats.difficulty})</div>
                       </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.currentTieBotStreak, 'number')}</div>
-                        <div className="stat-label">Current Tie/Beat Streak</div>
+                      <div className="personal-stat-item">
+                        <div className="personal-stat-value">{personalStats.allTime.currentFirstTryStreak ?? 'N/A'}</div>
+                        <div className="personal-stat-label">Current First Try ({personalStats.difficulty})</div>
                       </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.longestTieBotStreak, 'number')}</div>
-                        <div className="stat-label">Longest Tie/Beat Streak</div>
+                      <div className="personal-stat-item">
+                        <div className="personal-stat-value">{personalStats.allTime.gamesPlayed ?? 'N/A'}</div>
+                        <div className="personal-stat-label">Games Played</div>
                       </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.playedDays, 'arrayLength')}</div>
-                        <div className="stat-label">Days Played</div>
+                      <div className="personal-stat-item">
+                        <div className="personal-stat-value">{personalStats.allTime.puzzlesSolved ?? 'N/A'}</div>
+                        <div className="personal-stat-label">Puzzles Solved</div>
                       </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.goalAchievedDays, 'arrayLength')}</div>
-                        <div className="stat-label">Goals Achieved</div>
-                        <div className="stat-description">(Met or Beat Bot)</div>
+                      <div className="personal-stat-item">
+                        <div className="personal-stat-value">{personalStats.allTime.totalMoves ?? 'N/A'}</div>
+                        <div className="personal-stat-label">Total Moves</div>
                       </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.goalBeatenDays, 'arrayLength')}</div>
-                        <div className="stat-label">Goals Beaten</div>
-                        <div className="stat-description">(Beat Bot)</div>
-                      </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.totalWins, 'number')}</div>
-                        <div className="stat-label">Total Wins</div>
-                      </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.totalGamesPlayed, 'number')}</div>
-                        <div className="stat-label">Total Games</div>
-                      </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.totalMovesUsed, 'number')}</div>
-                        <div className="stat-label">Total Moves</div>
-                      </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.totalHintsUsed, 'number')}</div>
-                        <div className="stat-label">Total Hints</div>
-                      </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.currentFirstTryStreak, 'number')}</div>
-                        <div className="stat-label">First Try Streak</div>
-                      </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{safelyDisplay(currentStats?.longestFirstTryStreak, 'number')}</div>
-                        <div className="stat-label">Longest 1st Try</div>
-                      </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{currentStats?.eloScoreAvg?.toFixed(0) ?? 'N/A'}</div>
-                        <div className="stat-label">Elo Avg (All)</div>
-                      </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{currentStats?.eloScoreAvgLast30?.toFixed(0) ?? 'N/A'}</div>
-                        <div className="stat-label">Elo Avg (30d)</div>
-                      </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{currentStats?.eloScoreTotal ?? 'N/A'}</div>
-                        <div className="stat-label">Elo Total</div>
-                      </div>
-                      <div className="stat-item">
-                        <div className="stat-value">{currentStats?.eloScoreTotalLast30 ?? 'N/A'}</div>
-                        <div className="stat-label">Elo Total (30d)</div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="share-section">
-                    <p>Share your statistics:</p>
-                    <div className="social-buttons">
-                      <button 
-                        className="social-button twitter-button" 
-                        onClick={handleTwitterShare}
-                        aria-label="Share to Twitter"
-                      >
-                        <FontAwesomeIcon icon={faTwitter} />
-                      </button>
-                      <button 
-                        className="social-button facebook-button" 
-                        onClick={handleFacebookShare}
-                        aria-label="Share to Facebook"
-                      >
-                        <FontAwesomeIcon icon={faFacebookF} />
-                      </button>
-                      <button 
-                        className="social-button email-button" 
-                        onClick={handleEmailShare}
-                        aria-label="Share via Email"
-                      >
-                        <FontAwesomeIcon icon={faEnvelope} />
-                      </button>
-                      <button 
-                        className="social-button copy-button" 
-                        onClick={handleCopyToClipboard}
-                        aria-label="Copy to Clipboard"
-                      >
-                        <FontAwesomeIcon icon={faCopy} />
-                        {copySuccess && <span className="copy-success-tooltip">Copied!</span>}
-                      </button>
-                      {isWebShareSupported && (
-                        <button 
-                          className="social-button web-share-button" 
-                          onClick={handleWebShare}
-                          aria-label="Share"
-                        >
-                          <FontAwesomeIcon icon={faShare} />
-                        </button>
-                      )}
                     </div>
                   </div>
                 </>
+              ) : (
+                <div className="error-message">No stats available</div>
               )}
             </div>
           )}
@@ -486,97 +436,127 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
           {/* Global Leaderboard Tab */} 
           {activeTab === 'global' && (
             <div className="stats-section global-stats-section" role="tabpanel" aria-labelledby="global-tab">
-              {isLoadingLeaderboard ? (
+              {/* Leaderboard Header with Controls */}
+              <div className="leaderboard-header-section">
+                <div className="leaderboard-header">
+                  <h3>{getHeaderLabel(leaderboardCategory)}</h3>
+                  <h4>{getSubheaderLabel(leaderboardCategory, leaderboardSubcategory)}</h4>
+                </div>
+                
+                {/* Leaderboard Controls - Horizontal Layout */}
+                <div className="leaderboard-controls-horizontal">
+                  <div className="control-row">
+                    <label htmlFor="category-select">Category:</label>
+                    <div className="select-wrapper">
+                      <select 
+                        id="category-select"
+                        value={leaderboardCategory} 
+                        onChange={(e) => handleCategoryChange(e.target.value as 'score' | 'goals' | 'streaks')}
+                        className="leaderboard-select"
+                      >
+                        <option value="score">Score</option>
+                        <option value="goals">Goals</option>
+                        <option value="streaks">Streaks</option>
+                      </select>
+                      <FontAwesomeIcon icon={faChevronDown} className="select-icon" />
+                    </div>
+                  </div>
+                  
+                  <div className="control-row">
+                    <label htmlFor="subcategory-select">Period:</label>
+                    <div className="select-wrapper">
+                      <select 
+                        id="subcategory-select"
+                        value={leaderboardSubcategory} 
+                        onChange={(e) => setLeaderboardSubcategory(e.target.value)}
+                        className="leaderboard-select"
+                      >
+                        {getSubcategoryOptions(leaderboardCategory).map(option => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      <FontAwesomeIcon icon={faChevronDown} className="select-icon" />
+                    </div>
+                  </div>
+                  
+                  {(leaderboardCategory === 'goals' || leaderboardCategory === 'streaks') && (
+                    <div className="control-row">
+                      <label htmlFor="difficulty-select">Difficulty:</label>
+                      <div className="select-wrapper">
+                        <select 
+                          id="difficulty-select"
+                          value={leaderboardDifficulty} 
+                          onChange={(e) => setLeaderboardDifficulty(e.target.value)}
+                          className="leaderboard-select"
+                        >
+                          <option value="easy">Easy</option>
+                          <option value="medium">Medium</option>
+                          <option value="hard">Hard</option>
+                        </select>
+                        <FontAwesomeIcon icon={faChevronDown} className="select-icon" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Leaderboard Content */}
+              {isLoadingLeaderboardV2 ? (
                 <div className="stats-loading">
                   <div className="spinner"></div>
                   <p>Loading leaderboard...</p>
                 </div>
-              ) : leaderboardError ? (
-                <div className="error-message">Error: {leaderboardError}</div>
+              ) : leaderboardV2Error ? (
+                <div className="error-message">Error: {leaderboardV2Error}</div>
               ) : (
-                <div className="table-container">
-                  <table className="global-stats-table">
-                    <thead>
-                      <tr>
-                        <th onClick={() => requestSort('username')} aria-sort={sortConfig?.key === 'username' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                          Username{getSortIndicator('username')}
-                        </th>
-                        <th onClick={() => requestSort('totalWins')} aria-sort={sortConfig?.key === 'totalWins' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                          Wins{getSortIndicator('totalWins')}
-                        </th>
-                        <th onClick={() => requestSort('totalMovesUsed')} aria-sort={sortConfig?.key === 'totalMovesUsed' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                          Moves{getSortIndicator('totalMovesUsed')}
-                        </th>
-                        <th onClick={() => requestSort('currentPuzzleCompletedStreak')} aria-sort={sortConfig?.key === 'currentPuzzleCompletedStreak' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                          Win Strk{getSortIndicator('currentPuzzleCompletedStreak')}
-                        </th>
-                         <th onClick={() => requestSort('longestPuzzleCompletedStreak')} aria-sort={sortConfig?.key === 'longestPuzzleCompletedStreak' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                          Max Win Strk{getSortIndicator('longestPuzzleCompletedStreak')}
-                        </th>
-                        <th onClick={() => requestSort('currentTieBotStreak')} aria-sort={sortConfig?.key === 'currentTieBotStreak' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                          Tie/Beat Strk{getSortIndicator('currentTieBotStreak')}
-                        </th>
-                        <th onClick={() => requestSort('longestTieBotStreak')} aria-sort={sortConfig?.key === 'longestTieBotStreak' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                          Max Tie/Beat{getSortIndicator('longestTieBotStreak')}
-                        </th>
-                        <th onClick={() => requestSort('currentFirstTryStreak')} aria-sort={sortConfig?.key === 'currentFirstTryStreak' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                          1st Try Strk{getSortIndicator('currentFirstTryStreak')}
-                        </th>
-                        <th onClick={() => requestSort('longestFirstTryStreak')} aria-sort={sortConfig?.key === 'longestFirstTryStreak' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                          Max 1st Try{getSortIndicator('longestFirstTryStreak')}
-                        </th>
-                        <th onClick={() => requestSort('eloScoreAvg')} aria-sort={sortConfig?.key === 'eloScoreAvg' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                          Elo Avg{getSortIndicator('eloScoreAvg')}
-                        </th>
-                        <th onClick={() => requestSort('eloScoreTotal')} aria-sort={sortConfig?.key === 'eloScoreTotal' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                          Elo Total{getSortIndicator('eloScoreTotal')}
-                        </th>
-                        <th onClick={() => requestSort('eloScoreAvgLast30')} aria-sort={sortConfig?.key === 'eloScoreAvgLast30' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                          Elo Avg (30d){getSortIndicator('eloScoreAvgLast30')}
-                        </th>
-                        <th onClick={() => requestSort('eloScoreTotalLast30')} aria-sort={sortConfig?.key === 'eloScoreTotalLast30' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                          Elo Total (30d){getSortIndicator('eloScoreTotalLast30')}
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedLeaderboardData.length > 0 ? (
-                          sortedLeaderboardData.map((entry) => {
-                            // --- Change: Check if this row is the current user ---
-                            const isCurrentUser = currentUser && entry.userId === currentUser.uid;
-                            
-                            // --- New: Determine the display name for this row ---
-                            let displayedName = entry.username || 'Anonymous';
-                            if (isCurrentUser && currentUser && currentUser.displayName) {
-                              displayedName = currentUser.displayName;
-                            }
-                            
-                            return (
-                              // --- Change: Add 'current-user-row' class conditionally ---
-                              <tr key={entry.userId} className={isCurrentUser ? 'current-user-row' : ''}>
-                                <td>{displayedName}</td>
-                                <td>{entry.totalWins}</td>
-                                <td>{entry.totalMovesUsed}</td>
-                                <td>{entry.currentPuzzleCompletedStreak}</td>
-                                <td>{entry.longestPuzzleCompletedStreak}</td>
-                                <td>{entry.currentTieBotStreak}</td>
-                                <td>{entry.longestTieBotStreak}</td>
-                                <td>{entry.currentFirstTryStreak}</td>
-                                <td>{entry.longestFirstTryStreak}</td>
-                                <td>{entry.eloScoreAvg !== null ? entry.eloScoreAvg.toFixed(0) : 'N/A'}</td>
-                                <td>{entry.eloScoreTotal !== null ? entry.eloScoreTotal : 'N/A'}</td>
-                                <td>{entry.eloScoreAvgLast30 !== null ? entry.eloScoreAvgLast30.toFixed(0) : 'N/A'}</td>
-                                <td>{entry.eloScoreTotalLast30 !== null ? entry.eloScoreTotalLast30 : 'N/A'}</td>
-                              </tr>
-                            );
-                          })
-                      ) : (
-                        <tr>
-                          <td colSpan={13} style={{ textAlign: 'center' }}>No leaderboard data available.</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                <div className="leaderboard-list-container">
+                  {/* Current user's position if not in top 10 */}
+                  {requesterEntry && (
+                    <div className="requester-entry">
+                      <div className={`leaderboard-entry user-entry`}>
+                        <div className="entry-rank">#{requesterEntry.rank}</div>
+                        <div className="entry-info">
+                          <div className="entry-username">
+                            <span>{requesterEntry.username}</span>
+                            {requesterEntry.isCurrent && <span className="current-badge">Current</span>}
+                          </div>
+                          <div className="entry-value">{requesterEntry.value}</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Top 10 List */}
+                  <div className="leaderboard-list">
+                    {leaderboardV2Data.length > 0 ? (
+                      leaderboardV2Data.map((entry, index) => {
+                        const isCurrentUser = currentUser && entry.userId === currentUser.uid;
+                        const rankClass = 
+                          entry.rank === 1 ? 'rank-gold' : 
+                          entry.rank === 2 ? 'rank-silver' : 
+                          entry.rank === 3 ? 'rank-bronze' : 
+                          '';
+                        
+                        return (
+                          <div 
+                            key={entry.userId} 
+                            className={`leaderboard-entry ${rankClass} ${isCurrentUser && !rankClass ? 'user-entry' : ''}`}
+                          >
+                            <div className="entry-rank">#{entry.rank}</div>
+                            <div className="entry-info">
+                              <div className="entry-username">
+                                <span>{entry.username}</span>
+                                {entry.isCurrent && <span className="current-badge">Current</span>}
+                              </div>
+                              <div className="entry-value">{entry.value}</div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="no-data-message">No leaderboard data available.</div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

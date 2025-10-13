@@ -10,7 +10,10 @@
   @include flex-column;
   gap: $spacing-lg;
   position: relative;
-  overflow: hidden;
+  max-height: 85vh; // allow scrolling for tall content
+  overflow-y: auto; // scroll vertically when needed
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 // Win modal animation
@@ -34,7 +37,7 @@
 // Message about unlocking color
 .unlocked-message {
   font-size: $font-size-larger;
-  margin: 0;
+  margin: 12px 0 0 0; // add more space above the unlocked line
   padding: 5px 0;
   display: flex;
   align-items: center;
@@ -57,13 +60,18 @@
 .win-stats {
   display: flex;
   justify-content: center;
-  gap: 30px;
+  gap: 18px; // slightly tighter spacing between boxes
   margin: 5px 0;
+  width: 100%;
 }
 
 .stat-item {
   @include flex-column;
   align-items: center;
+  // make each box equal and even narrower
+  flex: 0 0 110px;
+  max-width: 110px;
+  min-width: 100px;
 }
 
 .stat-value {
@@ -79,12 +87,37 @@
 
 // Next puzzle timer section
 .next-puzzle-timer {
-  margin: 5px 0 $spacing-md;
+  // Make spacing above/below the timer closer to equal, slightly larger below
+  margin: 6px 0 8px;
   
   p {
     font-size: $font-size-base;
     margin-bottom: 5px;
     color: $color-text-light;
+  }
+}
+
+// Tighter spacing before the share section specifically in Win Modal
+.win-modal {
+  .share-section {
+    margin-top: 2px !important; // further reduce space before the line
+    padding-top: 6px !important; // small breathing room after the line
+    border-top: 1px solid #eee; // ensure line remains
+  }
+
+  // Actions row (Play Again / Close)
+  .win-actions {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    // Make spacing symmetrical above and below
+    margin-top: 6px;
+    padding-bottom: 6px;
+    margin-bottom: 0; // minimize extra space
+    
+    button {
+      margin-bottom: 0; // ensure buttons don't add extra space
+    }
   }
 }
 

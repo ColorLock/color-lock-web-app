@@ -1,5 +1,6 @@
 import * as functions from "firebase-functions/v1";
 import * as admin from "firebase-admin";
+import { FieldPath } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { logger as v2Logger } from "firebase-functions/v2";
 import { onSchedule } from "firebase-functions/v2/scheduler";
@@ -993,32 +994,28 @@ function isDayAfter(prevDateStr: string | null | undefined, currentDateStr: stri
     }
 }
 
-async function getLowestDailyScore(puzzleId: string): Promise<number | null> {
-    const scoresSnap = await db.collection("dailyScores").doc(puzzleId).collection("scores").get();
-    if (scoresSnap.empty) return null;
+async function getLowestHardDailyScore(puzzleId: string, excludeUserId?: string): Promise<number | null> {
+    const docSnap = await db.collection("dailyScoresV2").doc(puzzleId).get();
+    if (!docSnap.exists) return null;
+    
+    const data = docSnap.data();
+    const hardScores = data?.hard;
+    
+    if (!hardScores || typeof hardScores !== "object") return null;
+    
     let minScore: number | null = null;
-    scoresSnap.forEach(doc => {
-        const data = doc.data();
-        const s = typeof data?.score === "number" ? data.score : null;
-        if (s !== null && !isNaN(s)) {
-            if (minScore === null || s < minScore) minScore = s;
+    for (const userId in hardScores) {
+        // Skip the current user when checking if they're first to beat bot
+        if (excludeUserId && userId === excludeUserId) continue;
+        
+        const moves = hardScores[userId];
+        if (typeof moves === "number" && !isNaN(moves)) {
+            if (minScore === null || moves < minScore) {
+                minScore = moves;
+            }
         }
-    });
-    return minScore;
-}
-
-async function getLowestHardDailyScore(puzzleId: string): Promise<number | null> {
-    const scoresSnap = await db.collection("dailyScores").doc(puzzleId).collection("scores").get();
-    if (scoresSnap.empty) return null;
-    let minScore: number | null = null;
-    scoresSnap.forEach(doc => {
-        const data = doc.data();
-        const s = typeof data?.score === "number" ? data.score : null;
-        const level = data?.difficultyLevel;
-        if (s !== null && !isNaN(s) && level === DifficultyLevel.Hard) {
-            if (minScore === null || s < minScore) minScore = s;
-        }
-    });
+    }
+    
     return minScore;
 }
 
@@ -1051,10 +1048,11 @@ export const recordPuzzleHistory = onCall(
         const isWin = payload.win_loss === 'win';
 
         // Determine firstToBeatBot by looking at existing dailyScores (Hard difficulty only, ignoring Easy/Medium entries)
+        // Exclude the current user's previous scores when checking if they're first to beat bot
         const qualifiesVsBot = moves < botMoves;
         let firstToBeatBot = false;
         if (difficulty === DifficultyLevel.Hard) {
-            const lowestExisting = await getLowestHardDailyScore(puzzleId); // null => no hard scores yet
+            const lowestExisting = await getLowestHardDailyScore(puzzleId, userId); // null => no hard scores yet from other users
             firstToBeatBot = qualifiesVsBot && (lowestExisting === null || lowestExisting > moves);
         }
         // These will be computed using global attempt number inside the transaction
@@ -1135,12 +1133,13 @@ export const recordPuzzleHistory = onCall(
                         newDiffObj = {
                             attemptNumber: globalAttemptNumber,
                             moves,
-                            firstTry,
+                            firstTry: existing.firstTry ?? firstTry, // Preserve existing firstTry value
                             eloScore: elo,
                             attemptToTieBot,
                             attemptToBeatBot,
                         };
-                        newDiffObj.firstToBeatBot = difficulty === DifficultyLevel.Hard ? firstToBeatBot : false;
+                        // Allow firstToBeatBot to be set on any attempt where user achieves it
+                        newDiffObj.firstToBeatBot = difficulty === DifficultyLevel.Hard ? (existing.firstToBeatBot || firstToBeatBot) : false;
                     } else {
                         newDiffObj = {
                             attemptNumber: existing.attemptNumber,
@@ -1184,15 +1183,8 @@ export const recordPuzzleHistory = onCall(
                         firstToBeatBot: false,
                         firstTry: false,
                     };
-                    // Mirror to V2 immediately and queue for stats recompute
-                    try {
-                        const v2DocRef = db.collection("dailyScoresV2").doc(puzzleId);
-                        // Write nested map using proper merge semantics (no dot-path in set)
-                        tx.set(v2DocRef, { [diffKey]: { [userId]: null } }, { merge: true });
-                        v2Writes.push({ diffKey, moves: moves });
-                    } catch (e) {
-                        logger.warn("Failed mirroring per-difficulty daily score (v2) on loss init", { puzzleId, difficulty: diffKey, userId }, e);
-                    }
+                    // Loss: Do NOT write to dailyScoresV2
+                    logger.info("Loss recorded for puzzle history only, not writing to dailyScoresV2", { puzzleId, difficulty: diffKey, userId });
                 }
             }
 
@@ -1360,18 +1352,7 @@ export const recordPuzzleHistory = onCall(
             }
         });
 
-        // Lastly, update dailyScores with best score for user
-        try {
-            const scoreRef = db.collection("dailyScores").doc(puzzleId).collection("scores").doc(userId);
-            const scoreSnap = await scoreRef.get();
-            const currentScore = scoreSnap.exists ? scoreSnap.data()?.score : undefined;
-            if (typeof currentScore !== 'number' || moves < currentScore) {
-                await scoreRef.set({ score: moves, difficultyLevel: difficulty }, { merge: true });
-            }
-        } catch (e) {
-            logger.error("Failed to update dailyScores for user", userId, "puzzle", puzzleId, e);
-        }
-
+        
         // Write to V2 daily scores for any queued writes and recompute stats for affected difficulties
         try {
             if (v2Writes.length > 0) {
@@ -1393,7 +1374,7 @@ export const recordPuzzleHistory = onCall(
 async function writeDailyScoreV2(puzzleId: string, difficulty: DifficultyLevel, userId: string, moves: number): Promise<void> {
     const diffKey = difficulty; // 'easy' | 'medium' | 'hard'
     const ref = db.collection("dailyScoresV2").doc(puzzleId);
-    await ref.set({ [diffKey]: { [userId]: moves }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await ref.set({ [diffKey]: { [userId]: moves } }, { merge: true });
 }
 
 // Helper: Update aggregated stats for dailyScoresV2 per puzzle+difficulty
@@ -1419,14 +1400,6 @@ async function updateDailyScoresV2Stats(puzzleId: string, difficulty: Difficulty
             playersWithLowestScore += 1;
         }
     }
-
-    const statsRef = db.collection("dailyScoresV2").doc(puzzleId).collection("stats").doc(diffKey);
-    await statsRef.set({
-        lowestScore: lowestScore ?? null,
-        totalPlayers,
-        playersWithLowestScore,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
 }
 
 // --- New: Get User Daily Stats ---
@@ -1498,129 +1471,461 @@ export const getUserDailyStats = onCall(
     }
 );
 
-// --- New: Get Global Leaderboard (Level-agnostic + Difficulty segment) ---
-export const getLeaderboard = onCall(
+// --- New: Get per-difficulty stats for dailyScoresV2 ---
+export const getDailyScoresV2Stats = onCall(
     {
         memory: "256MiB",
         timeoutSeconds: 60,
         ...getAppCheckConfig(),
     },
     async (request) => {
-        // Optional auth for public leaderboard; if present, log
-        const uid = request.auth?.uid || "guest/unauthenticated";
-        logger.info(`getLeaderboard invoked by: ${uid}`);
+        const userId = request.auth?.uid || "guest/unauthenticated";
+        const puzzleId = request.data?.puzzleId as string | undefined;
+        logger.info(`getDailyScoresV2Stats invoked by: ${userId} for puzzleId: ${puzzleId}`);
 
-        const requestedDifficulty = request.data?.difficulty as (DifficultyLevel | "easy" | "medium" | "hard" | undefined);
-        const normalizedDifficulty = requestedDifficulty ? normalizeDifficulty(requestedDifficulty) : undefined;
+        if (!puzzleId) {
+            throw new HttpsError("invalid-argument", "puzzleId is required.");
+        }
+
+        const diffKeys: DifficultyLevel[] = [
+            DifficultyLevel.Easy,
+            DifficultyLevel.Medium,
+            DifficultyLevel.Hard,
+        ];
 
         try {
-            // Fetch all level-agnostic leaderboard docs across users
-            const laSnap = await db.collectionGroup("leaderboard")
-                .where(admin.firestore.FieldPath.documentId(), "==", "levelAgnostic")
-                .get();
+            const baseRef = db.collection("dailyScoresV2").doc(puzzleId);
+            const baseSnap = await baseRef.get();
+            const baseData = baseSnap.exists ? (baseSnap.data() as any) : {};
 
-            // If difficulty requested, fetch that difficulty docs across users
-            let diffSnap: FirebaseFirestore.QuerySnapshot | null = null;
-            if (normalizedDifficulty) {
-                diffSnap = await db.collectionGroup("leaderboard")
-                    .where(admin.firestore.FieldPath.documentId(), "==", normalizedDifficulty)
-                    .get();
+            const result: Record<string, { lowestScore: number | null; totalPlayers: number; playersWithLowestScore: number; averageScore: number | null }> = {};
+
+            // Compute directly from the main document map (ensures averageScore is included)
+            for (const diff of diffKeys) {
+                const diffMap = (baseData && typeof baseData[diff] === 'object') ? (baseData[diff] as Record<string, any>) : {};
+                let lowestScore: number | null = null;
+                let totalPlayers = 0;
+                let playersWithLowestScore = 0;
+                let sumScores = 0;
+
+                for (const [, val] of Object.entries(diffMap)) {
+                    const moves = typeof val === 'number' ? val : null;
+                    if (moves === null || isNaN(moves)) continue;
+                    totalPlayers += 1;
+                    sumScores += moves;
+                    if (lowestScore === null || moves < lowestScore) {
+                        lowestScore = moves;
+                        playersWithLowestScore = 1;
+                    } else if (lowestScore !== null && moves === lowestScore) {
+                        playersWithLowestScore += 1;
+                    }
+                }
+
+                const averageScore = totalPlayers > 0 ? (sumScores / totalPlayers) : null;
+                result[diff] = { lowestScore, totalPlayers, playersWithLowestScore, averageScore };
             }
 
-            // Helper to extract userId from a collection group doc path: userPuzzleHistory/{uid}/leaderboard/{docId}
-            const getUserIdFromDoc = (doc: FirebaseFirestore.QueryDocumentSnapshot) => {
-                const parent = doc.ref.parent; // leaderboard
-                const userDoc = parent.parent; // userPuzzleHistory/{uid}
-                return userDoc ? userDoc.id : undefined;
-            };
+            return { success: true, stats: result };
+        } catch (e) {
+            logger.error('getDailyScoresV2Stats: error computing stats', e);
+            throw new HttpsError('internal', 'Failed to fetch dailyScoresV2 stats');
+        }
+    }
+);
 
-            // Assemble level-agnostic arrays per stat
-            type Entry = { userId: string; value: number };
-            const laEntriesAllTime: Entry[] = [];
-            const laEntriesLast30: Entry[] = [];
-            const laEntriesLast7: Entry[] = [];
-            const laEntriesLongestStreak: Entry[] = [];
-            const laEntriesCurrentStreak: Entry[] = [];
+// --- New: Get Win Modal Stats ---
+interface GetWinModalStatsRequest {
+    puzzleId: string;
+    difficulty: DifficultyLevel | "easy" | "medium" | "hard";
+}
 
-            laSnap.forEach(doc => {
-                const userId = getUserIdFromDoc(doc);
-                if (!userId) return;
-                const data = doc.data() as any;
-                const pushIfNum = (arr: Entry[], v: any) => {
-                    if (typeof v === 'number' && !isNaN(v)) arr.push({ userId, value: v });
-                };
-                pushIfNum(laEntriesAllTime, data.eloScoreAllTime);
-                pushIfNum(laEntriesLast30, data.eloScoreLast30);
-                pushIfNum(laEntriesLast7, data.eloScoreLast7);
-                pushIfNum(laEntriesLongestStreak, data.longestPuzzleCompletedStreak);
-                pushIfNum(laEntriesCurrentStreak, data.currentPuzzleCompletedStreak);
-            });
+export const getWinModalStats = onCall(
+    {
+        memory: "256MiB",
+        timeoutSeconds: 60,
+        ...getAppCheckConfig(),
+    },
+    async (request) => {
+        if (!request.auth) {
+            throw new HttpsError("unauthenticated", "Authentication required.");
+        }
+        const userId = request.auth.uid;
+        const { puzzleId, difficulty } = (request.data || {}) as GetWinModalStatsRequest;
+        if (!puzzleId || !difficulty) {
+            throw new HttpsError("invalid-argument", "puzzleId and difficulty are required.");
+        }
 
-            const desc = (a: Entry, b: Entry) => b.value - a.value;
-            laEntriesAllTime.sort(desc);
-            laEntriesLast30.sort(desc);
-            laEntriesLast7.sort(desc);
-            laEntriesLongestStreak.sort(desc);
-            laEntriesCurrentStreak.sort(desc);
+        const normalizedDifficulty = normalizeDifficulty(difficulty);
 
-            // Assemble difficulty arrays per stat (only if requested)
-            let difficultyResult: any = null;
-            if (diffSnap && normalizedDifficulty) {
-                const ftCurrent: Entry[] = [];
-                const tieCurrent: Entry[] = [];
-                const ftLongest: Entry[] = [];
-                const tieLongest: Entry[] = [];
-                const goalsAchieved: Entry[] = [];
-                const goalsBeaten: Entry[] = [];
+        try {
+            const userHistoryRef = db.collection("userPuzzleHistory").doc(userId);
+            const puzzleRef = userHistoryRef.collection("puzzles").doc(puzzleId);
+            const levelAgnosticRef = userHistoryRef.collection("leaderboard").doc("levelAgnostic");
+            const difficultyRef = userHistoryRef.collection("leaderboard").doc(normalizedDifficulty);
 
-                diffSnap.forEach(doc => {
-                    const userId = getUserIdFromDoc(doc);
-                    if (!userId) return;
-                    const data = doc.data() as any;
-                    const pushIfNum = (arr: Entry[], v: any) => {
-                        if (typeof v === 'number' && !isNaN(v)) arr.push({ userId, value: v });
-                    };
-                    pushIfNum(ftCurrent, data.currentFirstTryStreak);
-                    pushIfNum(tieCurrent, data.currentTieBotStreak);
-                    pushIfNum(ftLongest, data.longestFirstTryStreak);
-                    pushIfNum(tieLongest, data.longestTieBotStreak);
-                    pushIfNum(goalsAchieved, data.goalsAchieved);
-                    pushIfNum(goalsBeaten, data.goalsBeaten);
-                });
+            const [puzzleSnap, laSnap, diffSnap] = await Promise.all([
+                puzzleRef.get(),
+                levelAgnosticRef.get(),
+                difficultyRef.get(),
+            ]);
 
-                ftCurrent.sort(desc);
-                tieCurrent.sort(desc);
-                ftLongest.sort(desc);
-                tieLongest.sort(desc);
-                goalsAchieved.sort(desc);
-                goalsBeaten.sort(desc);
+            const totalAttempts = puzzleSnap.exists && typeof (puzzleSnap.data() as any)?.totalAttempts === 'number'
+                ? (puzzleSnap.data() as any).totalAttempts
+                : null;
 
-                difficultyResult = {
-                    difficulty: normalizedDifficulty,
-                    currentFirstTryStreak: ftCurrent,
-                    currentTieBotStreak: tieCurrent,
-                    longestFirstTryStreak: ftLongest,
-                    longestTieBotStreak: tieLongest,
-                    goalsAchieved,
-                    goalsBeaten,
-                };
-            }
+            const laData = laSnap.exists ? (laSnap.data() as any) : {};
+            const dData = diffSnap.exists ? (diffSnap.data() as any) : {};
+
+            const currentPuzzleCompletedStreak = typeof laData.currentPuzzleCompletedStreak === 'number'
+                ? laData.currentPuzzleCompletedStreak
+                : null;
+
+            const currentTieBotStreak = typeof dData.currentTieBotStreak === 'number'
+                ? dData.currentTieBotStreak
+                : null;
+
+            const currentFirstTryStreak = typeof dData.currentFirstTryStreak === 'number'
+                ? dData.currentFirstTryStreak
+                : null;
 
             return {
                 success: true,
-                leaderboard: {
-                    levelAgnostic: {
-                        eloScoreAllTime: laEntriesAllTime,
-                        eloScoreLast30: laEntriesLast30,
-                        eloScoreLast7: laEntriesLast7,
-                        longestPuzzleCompletedStreak: laEntriesLongestStreak,
-                        currentPuzzleCompletedStreak: laEntriesCurrentStreak,
-                    },
-                    difficulty: difficultyResult,
-                },
+                stats: {
+                    totalAttempts,
+                    currentPuzzleCompletedStreak,
+                    currentTieBotStreak,
+                    currentFirstTryStreak,
+                    difficulty: normalizedDifficulty,
+                }
             };
         } catch (e) {
-            logger.error('getLeaderboard: error building leaderboard', e);
+            logger.error('getWinModalStats: failed to build stats', e);
+            throw new HttpsError('internal', 'Failed to fetch win modal stats');
+        }
+    }
+);
+
+// --- New: Get Personal Stats for Stats Modal ---
+interface GetPersonalStatsRequest {
+    puzzleId: string;
+    difficulty: DifficultyLevel | "easy" | "medium" | "hard";
+}
+
+export const getPersonalStats = onCall(
+    {
+        memory: "256MiB",
+        timeoutSeconds: 60,
+        ...getAppCheckConfig(),
+    },
+    async (request) => {
+        if (!request.auth) {
+            throw new HttpsError("unauthenticated", "Authentication required.");
+        }
+        const userId = request.auth.uid;
+        const { puzzleId, difficulty } = (request.data || {}) as GetPersonalStatsRequest;
+
+        if (!puzzleId || !difficulty) {
+            throw new HttpsError("invalid-argument", "puzzleId and difficulty are required.");
+        }
+
+        // If puzzleId and difficulty are provided, return puzzle-specific stats
+        const normalizedDifficulty = normalizeDifficulty(difficulty);
+        logger.info(`getPersonalStats invoked by: ${userId} for puzzle: ${puzzleId} on difficulty: ${normalizedDifficulty}`);
+
+        try {
+            const userHistoryRef = db.collection("userPuzzleHistory").doc(userId);
+            const puzzleRef = userHistoryRef.collection("puzzles").doc(puzzleId);
+            const levelAgnosticRef = userHistoryRef.collection("leaderboard").doc("levelAgnostic");
+            const difficultyRef = userHistoryRef.collection("leaderboard").doc(normalizedDifficulty);
+
+            const [puzzleSnap, laSnap, diffSnap] = await Promise.all([
+                puzzleRef.get(),
+                levelAgnosticRef.get(),
+                difficultyRef.get(),
+            ]);
+
+            const puzzleData = puzzleSnap.exists ? (puzzleSnap.data() as any) : {};
+            const laData = laSnap.exists ? (laSnap.data() as any) : {};
+            const dData = diffSnap.exists ? (diffSnap.data() as any) : {};
+            
+            // Get difficulty-specific data
+            const diffData = puzzleData[normalizedDifficulty] || {};
+
+            // Today's Game stats
+            const todayStats = {
+                bestEloScore: typeof laData.eloScoreByDay?.[puzzleId] === 'number' 
+                    ? laData.eloScoreByDay[puzzleId] 
+                    : null,
+                totalAttempts: typeof puzzleData.totalAttempts === 'number' 
+                    ? puzzleData.totalAttempts 
+                    : null,
+                fewestMoves: typeof diffData.moves === 'number' 
+                    ? diffData.moves 
+                    : null,
+                bestDifficultyEloScore: typeof diffData.eloScore === 'number' 
+                    ? diffData.eloScore 
+                    : (typeof diffData.elo === 'number' ? diffData.elo : null),
+                attemptsToTieGoal: typeof diffData.attemptToTieBot === 'number' 
+                    ? diffData.attemptToTieBot 
+                    : null,
+                attemptsToBeatGoal: typeof diffData.attemptToBeatBot === 'number' 
+                    ? diffData.attemptToBeatBot 
+                    : null,
+            };
+
+            // All-time stats
+            const allTimeStats = {
+                currentPuzzleStreak: typeof laData.currentPuzzleCompletedStreak === 'number' 
+                    ? laData.currentPuzzleCompletedStreak 
+                    : null,
+                currentGoalStreak: typeof dData.currentTieBotStreak === 'number' 
+                    ? dData.currentTieBotStreak 
+                    : null,
+                currentFirstTryStreak: typeof dData.currentFirstTryStreak === 'number' 
+                    ? dData.currentFirstTryStreak 
+                    : null,
+                gamesPlayed: typeof laData.puzzleAttempts === 'number' 
+                    ? laData.puzzleAttempts 
+                    : null,
+                puzzlesSolved: typeof laData.puzzleSolved === 'number' 
+                    ? laData.puzzleSolved 
+                    : null,
+                totalMoves: typeof laData.moves === 'number' 
+                    ? laData.moves 
+                    : null,
+            };
+
+            return {
+                success: true,
+                stats: {
+                    today: todayStats,
+                    allTime: allTimeStats,
+                    difficulty: normalizedDifficulty,
+                }
+            };
+        } catch (e) {
+            logger.error('getPersonalStats: failed to fetch stats', e);
+            throw new HttpsError('internal', 'Failed to fetch personal stats');
+        }
+    }
+);
+
+// --- New: Get Global Leaderboard V2 (userPuzzleHistory-based) ---
+interface GetGlobalLeaderboardV2Request {
+    category: 'score' | 'goals' | 'streaks';
+    subcategory: string; // e.g., 'last7', 'last30', 'allTime', 'beaten', 'matched', 'firstTry', 'goalAchieved', 'puzzleCompleted'
+    difficulty?: DifficultyLevel | "easy" | "medium" | "hard";
+}
+
+interface LeaderboardEntryV2 {
+    userId: string;
+    username: string;
+    value: number;
+    rank: number;
+    isCurrent?: boolean; // For streaks, indicates if current equals longest
+}
+
+export const getGlobalLeaderboardV2 = onCall(
+    {
+        memory: "512MiB",
+        timeoutSeconds: 120,
+        ...getAppCheckConfig(),
+    },
+    async (request) => {
+        const requesterId = request.auth?.uid || "guest/unauthenticated";
+        const { category, subcategory, difficulty } = (request.data || {}) as GetGlobalLeaderboardV2Request;
+        
+        logger.info(`getGlobalLeaderboardV2 invoked by: ${requesterId}, category: ${category}, subcategory: ${subcategory}, difficulty: ${difficulty}`);
+
+        if (!category || !subcategory) {
+            throw new HttpsError("invalid-argument", "category and subcategory are required.");
+        }
+
+        // Validate category-specific requirements
+        if ((category === 'goals' || category === 'streaks') && !difficulty) {
+            throw new HttpsError("invalid-argument", "difficulty is required for goals and streaks categories.");
+        }
+
+        const normalizedDifficulty = difficulty ? normalizeDifficulty(difficulty) : null;
+
+        try {
+            // Determine which field to query based on category and subcategory
+            let fieldPath: string;
+            let checkCurrent = false;
+            let currentFieldPath: string | null = null;
+
+            if (category === 'score') {
+                switch (subcategory) {
+                    case 'last7':
+                        fieldPath = 'eloScoreLast7';
+                        break;
+                    case 'last30':
+                        fieldPath = 'eloScoreLast30';
+                        break;
+                    case 'allTime':
+                        fieldPath = 'eloScoreAllTime';
+                        break;
+                    default:
+                        throw new HttpsError("invalid-argument", `Invalid score subcategory: ${subcategory}`);
+                }
+            } else if (category === 'goals' && normalizedDifficulty) {
+                switch (subcategory) {
+                    case 'beaten':
+                        fieldPath = 'goalsBeaten';
+                        break;
+                    case 'matched':
+                        fieldPath = 'goalsAchieved';
+                        break;
+                    default:
+                        throw new HttpsError("invalid-argument", `Invalid goals subcategory: ${subcategory}`);
+                }
+            } else if (category === 'streaks' && normalizedDifficulty) {
+                checkCurrent = true;
+                switch (subcategory) {
+                    case 'firstTry':
+                        fieldPath = 'longestFirstTryStreak';
+                        currentFieldPath = 'currentFirstTryStreak';
+                        break;
+                    case 'goalAchieved':
+                        fieldPath = 'longestTieBotStreak';
+                        currentFieldPath = 'currentTieBotStreak';
+                        break;
+                    case 'puzzleCompleted':
+                        fieldPath = 'longestPuzzleCompletedStreak';
+                        currentFieldPath = 'currentPuzzleCompletedStreak';
+                        checkCurrent = true;
+                        break;
+                    default:
+                        throw new HttpsError("invalid-argument", `Invalid streaks subcategory: ${subcategory}`);
+                }
+            } else {
+                throw new HttpsError("invalid-argument", "Invalid category or missing difficulty.");
+            }
+
+            // Query all documents from the leaderboard collection group
+            const allLeaderboardDocs = await db.collectionGroup("leaderboard").get();
+            
+            // Determine which document ID to filter for
+            let targetDocId: string;
+            if (category === 'score' || (category === 'streaks' && subcategory === 'puzzleCompleted')) {
+                targetDocId = "levelAgnostic";
+            } else if (normalizedDifficulty) {
+                targetDocId = normalizedDifficulty;
+            } else {
+                throw new HttpsError("internal", "Failed to determine target document.");
+            }
+
+            // Extract userId from collection group doc path
+            const getUserIdFromDoc = (doc: FirebaseFirestore.QueryDocumentSnapshot) => {
+                const parent = doc.ref.parent; // leaderboard collection
+                const userDoc = parent.parent; // userPuzzleHistory/{uid} document
+                return userDoc ? userDoc.id : undefined;
+            };
+
+            // Build entries array, filtering by document ID in memory
+            const entries: Array<{ userId: string; value: number; currentValue?: number }> = [];
+            
+            allLeaderboardDocs.forEach(doc => {
+                // Filter by document ID
+                if (doc.id !== targetDocId) return;
+                
+                const userId = getUserIdFromDoc(doc);
+                if (!userId) return;
+                
+                const data = doc.data() as any;
+                const value = typeof data[fieldPath] === 'number' ? data[fieldPath] : null;
+                
+                if (value === null || isNaN(value) || value === 0) return;
+                
+                const entry: { userId: string; value: number; currentValue?: number } = { userId, value };
+                
+                // If checking current streak, include current value
+                if (checkCurrent && currentFieldPath) {
+                    const currentValue = typeof data[currentFieldPath] === 'number' ? data[currentFieldPath] : null;
+                    if (currentValue !== null) {
+                        entry.currentValue = currentValue;
+                    }
+                }
+                
+                entries.push(entry);
+            });
+
+            // Sort by value descending
+            entries.sort((a, b) => b.value - a.value);
+
+            // Get top 10
+            const top10 = entries.slice(0, 10);
+
+            // Find requester's entry if not in top 10
+            let requesterEntry: LeaderboardEntryV2 | null = null;
+            const requesterIndex = entries.findIndex(e => e.userId === requesterId);
+            if (requesterIndex >= 10 && requesterId !== "guest/unauthenticated") {
+                const entry = entries[requesterIndex];
+                requesterEntry = {
+                    userId: entry.userId,
+                    username: '', // Will be filled below
+                    value: entry.value,
+                    rank: requesterIndex + 1,
+                    isCurrent: checkCurrent && entry.currentValue !== undefined ? entry.currentValue === entry.value : undefined
+                };
+            }
+
+            // Fetch usernames for top 10 + requester
+            const userIdsToFetch = [...top10.map(e => e.userId)];
+            if (requesterEntry) {
+                userIdsToFetch.push(requesterEntry.userId);
+            }
+
+            const userDisplayNames = new Map<string, string>();
+            
+            try {
+                for (let i = 0; i < userIdsToFetch.length; i += 100) {
+                    const chunk = userIdsToFetch.slice(i, i + 100);
+                    const userRecords = await admin.auth().getUsers(
+                        chunk.map(uid => ({ uid }))
+                    );
+                    
+                    userRecords.users.forEach(user => {
+                        userDisplayNames.set(
+                            user.uid,
+                            user.displayName || `User_${user.uid.substring(0, 6)}`
+                        );
+                    });
+                    
+                    userRecords.notFound.forEach(userIdentifier => {
+                        if ('uid' in userIdentifier) {
+                            const uid = userIdentifier.uid;
+                            userDisplayNames.set(uid, `User_${uid.substring(0, 6)}`);
+                        }
+                    });
+                }
+            } catch (authError) {
+                logger.error("getGlobalLeaderboardV2: Error fetching user display names:", authError);
+            }
+
+            // Build final leaderboard entries
+            const leaderboard: LeaderboardEntryV2[] = top10.map((entry, index) => ({
+                userId: entry.userId,
+                username: userDisplayNames.get(entry.userId) || `User_${entry.userId.substring(0, 6)}`,
+                value: entry.value,
+                rank: index + 1,
+                isCurrent: checkCurrent && entry.currentValue !== undefined ? entry.currentValue === entry.value : undefined
+            }));
+
+            // Update requester entry username if exists
+            if (requesterEntry) {
+                requesterEntry.username = userDisplayNames.get(requesterEntry.userId) || `User_${requesterEntry.userId.substring(0, 6)}`;
+            }
+
+            logger.info(`getGlobalLeaderboardV2: Returning ${leaderboard.length} entries with requester: ${!!requesterEntry}`);
+
+            return {
+                success: true,
+                leaderboard,
+                requesterEntry: requesterEntry || undefined
+            };
+        } catch (e) {
+            logger.error('getGlobalLeaderboardV2: error building leaderboard', e);
             throw new HttpsError('internal', 'Failed to fetch leaderboard');
         }
     }

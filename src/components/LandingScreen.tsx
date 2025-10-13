@@ -19,7 +19,7 @@ interface LandingScreenProps {
 const LandingScreen: React.FC<LandingScreenProps> = () => {
   const { signIn, signUp, playAsGuest, logOut, currentUser, isGuest, isAuthenticated } = useAuth();
   const { setShowLandingPage } = useNavigation();
-  const { dailyScoresStats, loadingStates, errorStates } = useDataCache(); // Use the cache context
+  const { dailyScoresStats, dailyScoresV2Stats, loadingStates, errorStates } = useDataCache(); // Use the cache context
 
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
@@ -33,6 +33,54 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
   // Use loading/error state from context
   const statsLoading = loadingStates.dailyScores;
   const statsError = errorStates.dailyScores;
+
+  // --- Build rotating difficulty messages from V2 stats ---
+  const difficultyOrder: Array<{ key: 'easy' | 'medium' | 'hard'; label: string }> = [
+    { key: 'easy', label: 'Easy' },
+    { key: 'medium', label: 'Medium' },
+    { key: 'hard', label: 'Hard' },
+  ];
+  const difficultyMessages: string[] = (() => {
+    if (!dailyScoresV2Stats) return [];
+    return difficultyOrder.map(({ key, label }) => {
+      const stats = (dailyScoresV2Stats as any)[key] as { totalPlayers: number; playersWithLowestScore: number } | undefined;
+      const total = stats?.totalPlayers ?? 0;
+      const bestCount = stats?.playersWithLowestScore ?? 0;
+      if (total <= 0) {
+        return `Be the first to play today!`;
+      }
+      const verb = bestCount === 1 ? 'has' : 'have';
+      return `${bestCount} out of ${total} players ${verb} achieved the best score`;
+    });
+  })();
+
+  // NOTE: Derived values that depend on rotatingIdx must be declared AFTER rotatingIdx is defined
+
+  // rotation state and fade animation
+  const [rotatingIdx, setRotatingIdx] = useState(0);
+  const [fadeIn, setFadeIn] = useState(true);
+
+  useEffect(() => {
+    if (!difficultyMessages.length) return;
+    const interval = setInterval(() => {
+      // fade out, then switch text, then fade in
+      setFadeIn(false);
+      const timeout = setTimeout(() => {
+        setRotatingIdx(prev => (prev + 1) % difficultyMessages.length);
+        setFadeIn(true);
+      }, 1000);
+      return () => clearTimeout(timeout);
+    }, 7000);
+    return () => clearInterval(interval);
+  }, [difficultyMessages.length]);
+
+  // Current per-difficulty stats for rotating difficulty (must come after rotatingIdx)
+  const currentDifficultyKey = difficultyOrder[rotatingIdx]?.key;
+  const currentV2Stats = (dailyScoresV2Stats as any)?.[currentDifficultyKey] as
+    | { lowestScore: number | null; averageScore: number | null }
+    | undefined;
+  const currentBestScore = currentV2Stats?.lowestScore ?? null;
+  const currentAverageScore = currentV2Stats?.averageScore ?? null;
 
   // Simplified loading - just show content directly
   useEffect(() => {
@@ -184,7 +232,11 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
 
 
       <div className="global-stats-container">
-        <h2>Today's Global Stats</h2>
+        <h2>
+          <span style={{ opacity: fadeIn ? 1 : 0, transition: 'opacity 1000ms ease' }}>
+            {`Today's Global Stats${difficultyMessages.length > 0 ? ` (${difficultyOrder[rotatingIdx].label})` : ''}`}
+          </span>
+        </h2>
         {statsLoading ? (
           <div className="spinner" style={{margin: '2rem auto'}}></div>
         ) : (
@@ -192,23 +244,29 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
             <div className="stats-grid">
               <div className="stat-card">
                 <div className="stat-value">
-                  {displayStats.averageScore !== null
-                    ? Number(displayStats.averageScore).toFixed(1)
-                    : '—'}
+                  <span style={{ opacity: fadeIn ? 1 : 0, transition: 'opacity 1000ms ease' }}>
+                    {currentAverageScore !== null && currentAverageScore !== undefined
+                      ? Number(currentAverageScore).toFixed(1)
+                      : '—'}
+                  </span>
                 </div>
                 <div className="stat-label">Average Score</div>
               </div>
               <div className="stat-card">
-                <div className="stat-value">{displayStats.lowestScore !== null ? displayStats.lowestScore : '—'}</div>
+                <div className="stat-value">
+                  <span style={{ opacity: fadeIn ? 1 : 0, transition: 'opacity 1000ms ease' }}>
+                    {currentBestScore !== null && currentBestScore !== undefined ? currentBestScore : '—'}
+                  </span>
+                </div>
                 <div className="stat-label">Best Score</div>
               </div>
             </div>
             <p className="stats-highlight">
-              {displayStats.totalPlayers > 0 ? (
-                `${usersWithBestScore} out of ${displayStats.totalPlayers} players ${usersWithBestScore === 1 ? 'has' : 'have'} achieved the best score`
-              ) : (
-                statsError ? 'Stats unavailable' : 'Be the first to play today!' // Show error or default message
-              )}
+              <span style={{ opacity: fadeIn ? 1 : 0, transition: 'opacity 1000ms ease' }}>
+                {difficultyMessages.length > 0
+                  ? difficultyMessages[rotatingIdx]
+                  : (statsError ? 'Stats unavailable' : 'Be the first to play today!')}
+              </span>
             </p>
           </>
         )}

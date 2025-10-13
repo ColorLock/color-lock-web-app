@@ -90,8 +90,6 @@ export const updateUserStatsCallable = getCallableFunction<any, { success: boole
 // New: Define callable function for recording completed puzzle history
 export const recordPuzzleHistoryCallable = getCallableFunction<any, { success: boolean; error?: string }>('recordPuzzleHistory');
 
-// Define callable function for getting user stats
-export const getUserStatsCallable = getCallableFunction<void, { success: boolean; stats?: any; error?: string }>('getUserStats');
 
 // Define callable function for getting daily score stats
 export const getDailyScoresStatsCallable = getCallableFunction<{ puzzleId: string }, { success: boolean; stats?: any; error?: string }>('getDailyScoresStats');
@@ -104,6 +102,79 @@ interface GetGlobalLeaderboardResponse {
 }
 
 export const getGlobalLeaderboardCallable = getCallableFunction<void, GetGlobalLeaderboardResponse>('getGlobalLeaderboard');
+
+// V2 daily scores per-difficulty stats
+interface GetDailyScoresV2StatsResponse {
+  success: boolean;
+  stats?: Record<string, { lowestScore: number | null; totalPlayers: number; playersWithLowestScore: number; averageScore: number | null }>;
+  error?: string;
+}
+
+export const getDailyScoresV2StatsCallable = getCallableFunction<{ puzzleId: string }, GetDailyScoresV2StatsResponse>('getDailyScoresV2Stats');
+
+// Win Modal stats callable
+interface GetWinModalStatsResponse {
+  success: boolean;
+  stats?: {
+    totalAttempts: number | null;
+    currentPuzzleCompletedStreak: number | null;
+    currentTieBotStreak: number | null;
+    currentFirstTryStreak: number | null;
+    difficulty: string;
+  };
+  error?: string;
+}
+
+export const getWinModalStatsCallable = getCallableFunction<{ puzzleId: string; difficulty: string }, GetWinModalStatsResponse>('getWinModalStats');
+
+// Personal Stats for Stats Modal callable
+interface GetPersonalStatsResponse {
+  success: boolean;
+  stats?: {
+    today: {
+      bestEloScore: number | null;
+      totalAttempts: number | null;
+      fewestMoves: number | null;
+      bestDifficultyEloScore: number | null;
+      attemptsToTieGoal: number | null;
+      attemptsToBeatGoal: number | null;
+    };
+    allTime: {
+      currentPuzzleStreak: number | null;
+      currentGoalStreak: number | null;
+      currentFirstTryStreak: number | null;
+      gamesPlayed: number | null;
+      puzzlesSolved: number | null;
+      totalMoves: number | null;
+    };
+    difficulty: string;
+  };
+  error?: string;
+}
+
+export const getPersonalStatsCallable = getCallableFunction<{ puzzleId: string; difficulty: string }, GetPersonalStatsResponse>('getPersonalStats');
+
+// Global Leaderboard V2 callable
+export interface LeaderboardEntryV2 {
+  userId: string;
+  username: string;
+  value: number;
+  rank: number;
+  isCurrent?: boolean;
+}
+
+export interface GetGlobalLeaderboardV2Response {
+  success: boolean;
+  leaderboard?: LeaderboardEntryV2[];
+  requesterEntry?: LeaderboardEntryV2;
+  error?: string;
+}
+
+export const getGlobalLeaderboardV2Callable = getCallableFunction<{ 
+  category: 'score' | 'goals' | 'streaks'; 
+  subcategory: string; 
+  difficulty?: string 
+}, GetGlobalLeaderboardV2Response>('getGlobalLeaderboardV2');
 
 // Add a helper function to verify auth state - useful for debugging
 export const verifyAuthState = () => {
