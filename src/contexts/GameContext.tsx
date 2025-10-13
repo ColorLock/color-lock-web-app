@@ -91,7 +91,13 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const DATE_TO_USE = dateKeyForToday();
   const { setShowLandingPage } = useNavigation();
   const { currentUser } = useAuth();
-  const { puzzleData: cachedPuzzleData, userStats: cachedUserStats, loadingStates: cacheLoadingStates, errorStates: cacheErrorStates } = useDataCache(); // Use cache hook
+  const { 
+    puzzleData: cachedPuzzleData, 
+    userStats: cachedUserStats, 
+    winModalStats: cachedWinModalStats,
+    loadingStates: cacheLoadingStates, 
+    errorStates: cacheErrorStates 
+  } = useDataCache(); // Use cache hook
 
   // Game state
   const [puzzle, setPuzzle] = useState<DailyPuzzle | null>(null);
@@ -333,6 +339,14 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       }
   }, [puzzle?.isLost, puzzle?.dateString, puzzle?.algoScore, hintsUsedThisGame, isLostReported, movesThisAttempt, recordPuzzleHistory, settings.difficultyLevel, isFirstTryOfDay, attemptNumberToday]);
 
+  // Load cached win modal stats on mount
+  useEffect(() => {
+    if (cachedWinModalStats) {
+      console.log("GameContext: Loading cached win modal stats on mount.");
+      setWinModalStats(cachedWinModalStats);
+    }
+  }, [cachedWinModalStats]);
+
   // Fetch fresh stats when the StatsModal is opened
   useEffect(() => {
     if (showStatsState) {
@@ -406,7 +420,32 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   const handlePuzzleSolved = async (solvedPuzzle: DailyPuzzle) => {
     console.log(`[STATS-EVENT ${new Date().toISOString()}] Game won - puzzle ID: ${solvedPuzzle.dateString}, userScore: ${solvedPuzzle.userMovesUsed}, algoScore: ${solvedPuzzle.algoScore}, difficulty: ${settings.difficultyLevel}`);
-    await recordPuzzleHistory({
+    
+    // 1. Update local win modal stats immediately for instant UI display
+    setWinModalStats(prevStats => {
+      if (!prevStats) {
+        // First win of the day - initialize with basic values
+        return {
+          totalAttempts: attemptNumberToday,
+          currentPuzzleCompletedStreak: 1,
+          currentTieBotStreak: solvedPuzzle.userMovesUsed <= solvedPuzzle.algoScore ? 1 : 0,
+          currentFirstTryStreak: isFirstTryOfDay && hintsUsedThisGame === 0 && solvedPuzzle.userMovesUsed <= solvedPuzzle.algoScore ? 1 : 0,
+          difficulty: settings.difficultyLevel,
+        };
+      }
+      // Subsequent wins - increment attempt count, keep streaks as-is for now
+      return {
+        ...prevStats,
+        totalAttempts: attemptNumberToday,
+        difficulty: settings.difficultyLevel,
+      };
+    });
+    
+    // 2. Show modal immediately with local/optimistic stats
+    setShowWinModal(true);
+    
+    // 3. Record puzzle history in the background (don't await to avoid UI delay)
+    recordPuzzleHistory({
       puzzle_id: solvedPuzzle.dateString,
       difficulty: settings.difficultyLevel,
       attemptNumber: attemptNumberToday,
@@ -414,40 +453,29 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       hintUsed: hintsUsedThisGame > 0,
       botMoves: solvedPuzzle.algoScore,
       win_loss: 'win'
+    }).finally(() => {
+      setHasRecordedCompletion(true);
+      
+      // 4. Fetch fresh stats from backend in the background to get accurate streaks
+      getWinModalStatsCallable({ puzzleId: solvedPuzzle.dateString, difficulty: settings.difficultyLevel })
+        .then(resp => {
+          const data = resp.data as any;
+          if (data?.success && data?.stats) {
+            console.log('GameContext: Updating win modal stats with fresh data from backend.');
+            setWinModalStats({
+              totalAttempts: data.stats.totalAttempts ?? null,
+              currentPuzzleCompletedStreak: data.stats.currentPuzzleCompletedStreak ?? null,
+              currentTieBotStreak: data.stats.currentTieBotStreak ?? null,
+              currentFirstTryStreak: data.stats.currentFirstTryStreak ?? null,
+              difficulty: settings.difficultyLevel,
+            });
+          }
+        })
+        .catch(e => {
+          console.error('Failed fetching fresh win modal stats:', e);
+          // Keep the optimistic local stats if fetch fails
+        });
     });
-    setHasRecordedCompletion(true);
-    // Fetch stats for Win Modal after write completes
-    try {
-      const resp = await getWinModalStatsCallable({ puzzleId: solvedPuzzle.dateString, difficulty: settings.difficultyLevel });
-      const data = resp.data as any;
-      if (data?.success && data?.stats) {
-        setWinModalStats({
-          totalAttempts: data.stats.totalAttempts ?? null,
-          currentPuzzleCompletedStreak: data.stats.currentPuzzleCompletedStreak ?? null,
-          currentTieBotStreak: data.stats.currentTieBotStreak ?? null,
-          currentFirstTryStreak: data.stats.currentFirstTryStreak ?? null,
-          difficulty: settings.difficultyLevel,
-        });
-      } else {
-        setWinModalStats({
-          totalAttempts: null,
-          currentPuzzleCompletedStreak: null,
-          currentTieBotStreak: null,
-          currentFirstTryStreak: null,
-          difficulty: settings.difficultyLevel,
-        });
-      }
-    } catch (e) {
-      console.error('Failed fetching win modal stats', e);
-      setWinModalStats({
-        totalAttempts: null,
-        currentPuzzleCompletedStreak: null,
-        currentTieBotStreak: null,
-        currentFirstTryStreak: null,
-        difficulty: settings.difficultyLevel,
-      });
-    }
-    setShowWinModal(true);
   };
 
   const handleTryAgain = async () => {
@@ -532,12 +560,35 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       // 3. Update local state with the additional moves for UI/state consistency
       setMovesThisAttempt(finalMovesForThisAttempt);
 
-      // 5. Apply the autocomplete to the actual puzzle state for UI update
+      // 4. Apply the autocomplete to the actual puzzle state for UI update
       const completedPuzzle = autoCompletePuzzle(puzzle);
       setPuzzle(completedPuzzle);
       setShowAutocompleteModal(false);
 
-      // 6. Record the win with the explicitly calculated total moves for the attempt
+      // 5. Update local win modal stats immediately for instant UI display
+      setWinModalStats(prevStats => {
+        if (!prevStats) {
+          // First win of the day - initialize with basic values
+          return {
+            totalAttempts: attemptNumberToday,
+            currentPuzzleCompletedStreak: 1,
+            currentTieBotStreak: completedPuzzle.userMovesUsed <= completedPuzzle.algoScore ? 1 : 0,
+            currentFirstTryStreak: isFirstTryOfDay && hintsUsedThisGame === 0 && completedPuzzle.userMovesUsed <= completedPuzzle.algoScore ? 1 : 0,
+            difficulty: settings.difficultyLevel,
+          };
+        }
+        // Subsequent wins - increment attempt count, keep streaks as-is for now
+        return {
+          ...prevStats,
+          totalAttempts: attemptNumberToday,
+          difficulty: settings.difficultyLevel,
+        };
+      });
+
+      // 6. Show modal immediately with local/optimistic stats
+      setShowWinModal(true);
+
+      // 7. Record the win in the background
       console.log(`[STATS-EVENT ${new Date().toISOString()}] Game won via Autocomplete - puzzle ID: ${completedPuzzle.dateString}, difficulty: ${settings.difficultyLevel}`);
       recordPuzzleHistory({
         puzzle_id: completedPuzzle.dateString,
@@ -547,41 +598,29 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         hintUsed: hintsUsedThisGame > 0,
         botMoves: completedPuzzle.algoScore,
         win_loss: 'win'
+      }).finally(() => {
+        setHasRecordedCompletion(true);
+        
+        // 8. Fetch fresh stats from backend in the background to get accurate streaks
+        getWinModalStatsCallable({ puzzleId: completedPuzzle.dateString, difficulty: settings.difficultyLevel })
+          .then(resp => {
+            const data = resp.data as any;
+            if (data?.success && data?.stats) {
+              console.log('GameContext: Updating win modal stats with fresh data from backend (autocomplete).');
+              setWinModalStats({
+                totalAttempts: data.stats.totalAttempts ?? null,
+                currentPuzzleCompletedStreak: data.stats.currentPuzzleCompletedStreak ?? null,
+                currentTieBotStreak: data.stats.currentTieBotStreak ?? null,
+                currentFirstTryStreak: data.stats.currentFirstTryStreak ?? null,
+                difficulty: settings.difficultyLevel,
+              });
+            }
+          })
+          .catch(e => {
+            console.error('Failed fetching fresh win modal stats:', e);
+            // Keep the optimistic local stats if fetch fails
+          });
       });
-      setHasRecordedCompletion(true);
-
-      // 7. Fetch win modal stats then show
-      try {
-        const resp = await getWinModalStatsCallable({ puzzleId: completedPuzzle.dateString, difficulty: settings.difficultyLevel });
-        const data = resp.data as any;
-        if (data?.success && data?.stats) {
-          setWinModalStats({
-            totalAttempts: data.stats.totalAttempts ?? null,
-            currentPuzzleCompletedStreak: data.stats.currentPuzzleCompletedStreak ?? null,
-            currentTieBotStreak: data.stats.currentTieBotStreak ?? null,
-            currentFirstTryStreak: data.stats.currentFirstTryStreak ?? null,
-            difficulty: settings.difficultyLevel,
-          });
-        } else {
-          setWinModalStats({
-            totalAttempts: null,
-            currentPuzzleCompletedStreak: null,
-            currentTieBotStreak: null,
-            currentFirstTryStreak: null,
-            difficulty: settings.difficultyLevel,
-          });
-        }
-      } catch (e) {
-        console.error('Failed fetching win modal stats', e);
-        setWinModalStats({
-          totalAttempts: null,
-          currentPuzzleCompletedStreak: null,
-          currentTieBotStreak: null,
-          currentFirstTryStreak: null,
-          difficulty: settings.difficultyLevel,
-        });
-      }
-      setShowWinModal(true);
   };
 
   const handleSetShowAutocompleteModal = (show: boolean) => {

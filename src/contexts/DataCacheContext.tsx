@@ -7,7 +7,8 @@ import {
     fetchPuzzleCallable,
     getPersonalStatsCallable,
     getGlobalLeaderboardV2Callable,
-    getDailyScoresV2StatsCallable
+    getDailyScoresV2StatsCallable,
+    getWinModalStatsCallable
 } from '../services/firebaseService';
 import { dateKeyForToday } from '../utils/dateUtils';
 import { User } from 'firebase/auth';
@@ -29,11 +30,20 @@ interface DifficultyDailyStats {
 }
 type DailyScoresV2Stats = Record<string, DifficultyDailyStats>;
 
+interface WinModalStats {
+    totalAttempts: number | null;
+    currentPuzzleCompletedStreak: number | null;
+    currentTieBotStreak: number | null;
+    currentFirstTryStreak: number | null;
+    difficulty: DifficultyLevel | null;
+}
+
 interface LoadingStates {
     dailyScores: boolean;
     puzzle: boolean;
     userStats: boolean;
     leaderboard: boolean;
+    winModalStats: boolean;
 }
 
 interface ErrorStates {
@@ -41,6 +51,7 @@ interface ErrorStates {
     puzzle: string | null;
     userStats: string | null;
     leaderboard: string | null;
+    winModalStats: string | null;
 }
 
 interface DataCacheContextValue {
@@ -49,6 +60,7 @@ interface DataCacheContextValue {
     puzzleData: FirestorePuzzleData | null;
     userStats: GameStatistics | null;
     globalLeaderboard: LeaderboardEntryV2[] | null;
+    winModalStats: WinModalStats | null;
     loadingStates: LoadingStates;
     errorStates: ErrorStates;
     fetchAndCacheData: (currentUser: User | null) => Promise<void>;
@@ -60,6 +72,7 @@ const initialLoadingStates: LoadingStates = {
     puzzle: false,
     userStats: false,
     leaderboard: false,
+    winModalStats: false,
 };
 
 const initialErrorStates: ErrorStates = {
@@ -67,6 +80,7 @@ const initialErrorStates: ErrorStates = {
     puzzle: null,
     userStats: null,
     leaderboard: null,
+    winModalStats: null,
 };
 
 const DataCacheContext = createContext<DataCacheContextValue | undefined>(undefined);
@@ -90,6 +104,7 @@ export const DataCacheProvider: React.FC<DataCacheProviderProps> = ({ children }
     const [puzzleData, setPuzzleData] = useState<FirestorePuzzleData | null>(null);
     const [userStats, setUserStats] = useState<GameStatistics | null>(null);
     const [globalLeaderboard, setGlobalLeaderboard] = useState<LeaderboardEntryV2[] | null>(null);
+    const [winModalStats, setWinModalStats] = useState<WinModalStats | null>(null);
     const [loadingStates, setLoadingStates] = useState<LoadingStates>(initialLoadingStates);
     const [errorStates, setErrorStates] = useState<ErrorStates>(initialErrorStates);
     const [isInitialFetchDone, setIsInitialFetchDone] = useState(false);
@@ -175,6 +190,55 @@ export const DataCacheProvider: React.FC<DataCacheProviderProps> = ({ children }
              setUserStats(null); // Ensure userStats is null if not fetched
         }
 
+        // --- 3.5. Fetch Win Modal Stats (for authenticated users only) ---
+        if (currentUser) {
+            setLoadingStates(prev => ({ ...prev, winModalStats: true }));
+            setErrorStates(prev => ({ ...prev, winModalStats: null }));
+            try {
+                console.log("DataCacheContext: Fetching Win Modal Stats...");
+                const result = await getWinModalStatsCallable({
+                    puzzleId: today,
+                    difficulty: settings.difficultyLevel
+                });
+                if (result.data?.success && result.data?.stats) {
+                    setWinModalStats({
+                        totalAttempts: result.data.stats.totalAttempts ?? null,
+                        currentPuzzleCompletedStreak: result.data.stats.currentPuzzleCompletedStreak ?? null,
+                        currentTieBotStreak: result.data.stats.currentTieBotStreak ?? null,
+                        currentFirstTryStreak: result.data.stats.currentFirstTryStreak ?? null,
+                        difficulty: settings.difficultyLevel,
+                    });
+                    console.log("DataCacheContext: Win Modal Stats fetched successfully.");
+                } else {
+                    // If stats don't exist yet, use null values
+                    console.log("DataCacheContext: No win modal stats found for user, using null values.");
+                    setWinModalStats({
+                        totalAttempts: null,
+                        currentPuzzleCompletedStreak: null,
+                        currentTieBotStreak: null,
+                        currentFirstTryStreak: null,
+                        difficulty: settings.difficultyLevel,
+                    });
+                }
+            } catch (error: any) {
+                console.error("DataCacheContext: Error fetching win modal stats:", error);
+                setErrorStates(prev => ({ ...prev, winModalStats: error.message || 'Failed to load win modal stats' }));
+                // Set null values on error
+                setWinModalStats({
+                    totalAttempts: null,
+                    currentPuzzleCompletedStreak: null,
+                    currentTieBotStreak: null,
+                    currentFirstTryStreak: null,
+                    difficulty: settings.difficultyLevel,
+                });
+            } finally {
+                setLoadingStates(prev => ({ ...prev, winModalStats: false }));
+            }
+        } else {
+            console.log("DataCacheContext: Skipping win modal stats fetch (no user logged in).");
+            setWinModalStats(null);
+        }
+
         // --- 4. Fetch Global Leaderboard V2 (Score - All Time) ---
         setLoadingStates(prev => ({ ...prev, leaderboard: true }));
         setErrorStates(prev => ({ ...prev, leaderboard: null }));
@@ -208,6 +272,7 @@ export const DataCacheProvider: React.FC<DataCacheProviderProps> = ({ children }
         puzzleData,
         userStats,
         globalLeaderboard,
+        winModalStats,
         loadingStates,
         errorStates,
         fetchAndCacheData,

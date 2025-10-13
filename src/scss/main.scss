@@ -438,6 +438,30 @@
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
+.landing-stats-button {
+  display: block;
+  margin: 1rem auto 0 auto;
+  background-color: transparent;
+  color: #3478F6;
+  border: 1px solid #3478F6;
+  border-radius: 6px;
+  padding: 0.4rem 1rem;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover:not(:disabled) {
+    background-color: #3478F6;
+    color: white;
+  }
+  
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
 .landing-auth-container {
   display: flex;
   flex-direction: column;

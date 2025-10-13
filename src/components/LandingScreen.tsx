@@ -4,6 +4,8 @@ import { useNavigation } from '../App';
 import '../scss/main.scss';
 import { dateKeyForToday } from '../utils/dateUtils';
 import { useDataCache } from '../contexts/DataCacheContext'; // Import the new context hook
+import StatsModal from './StatsModal';
+import { GameStatistics } from '../types/stats';
 
 interface DailyScoreStats {
   lowestScore: number | null;
@@ -29,6 +31,7 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
   const [authError, setAuthError] = useState<string | null>(null); // Rename error state for clarity
   const [authLoading, setAuthLoading] = useState(false); // Rename loading state
   const [showAppContent, setShowAppContent] = useState(false);
+  const [showStatsModal, setShowStatsModal] = useState(false);
 
   // Use loading/error state from context
   const statsLoading = loadingStates.dailyScores;
@@ -203,6 +206,19 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
     setDisplayName('');
   };
 
+  const handleOpenStatsModal = () => {
+    setShowStatsModal(true);
+  };
+
+  const handleCloseStatsModal = () => {
+    setShowStatsModal(false);
+  };
+
+  const handleShareStats = () => {
+    // Share functionality is handled within StatsModal
+    console.log('Share stats triggered from landing screen');
+  };
+
   // Check if user is authenticated as a regular user (not guest)
   const isRegularUser = isAuthenticated && !isGuest;
   console.log("Auth state:", { isAuthenticated, isGuest, isRegularUser, displayName: currentUser?.displayName });
@@ -268,6 +284,13 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
                   : (statsError ? 'Stats unavailable' : 'Be the first to play today!')}
               </span>
             </p>
+            <button 
+              className="landing-stats-button"
+              onClick={handleOpenStatsModal}
+              disabled={authLoading}
+            >
+              🏆  Leaderboard
+            </button>
           </>
         )}
       </div>
@@ -414,6 +437,16 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
           </div>
         </div>
       )}
+
+      {/* Stats Modal */}
+      <StatsModal
+        isOpen={showStatsModal}
+        onClose={handleCloseStatsModal}
+        stats={null}
+        onShareStats={handleShareStats}
+        isLoading={false}
+        initialTab="global"
+      />
     </div>
   );
 };

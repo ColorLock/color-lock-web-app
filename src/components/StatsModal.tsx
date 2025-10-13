@@ -26,6 +26,7 @@ interface StatsModalProps {
   stats: GameStatistics | null;
   onShareStats: () => void;
   isLoading?: boolean;
+  initialTab?: 'personal' | 'global';
 }
 
 // Define the type for sorting state
@@ -37,7 +38,8 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
   onClose, 
   stats: gameContextStats,
   onShareStats,
-  isLoading: isLoadingPersonalStats = false
+  isLoading: isLoadingPersonalStats = false,
+  initialTab = 'personal'
 }) => {
   const { currentUser } = useAuth();
   const { settings } = useSettings();
@@ -48,7 +50,7 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
       errorStates: cacheErrorStates
   } = useDataCache();
 
-  const [activeTab, setActiveTab] = useState<'personal' | 'global'>('personal');
+  const [activeTab, setActiveTab] = useState<'personal' | 'global'>(initialTab);
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
   const [isWebShareSupported, setIsWebShareSupported] = useState<boolean>(false);
   
@@ -70,6 +72,13 @@ const StatsModal: React.FC<StatsModalProps> = memo(({
   useEffect(() => {
     setIsWebShareSupported(typeof navigator.share === 'function');
   }, []);
+  
+  // Set active tab when modal opens based on initialTab prop
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
   
   const todayKey = dateKeyForToday(); // Get today's date key
   
