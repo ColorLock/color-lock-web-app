@@ -64,7 +64,7 @@
     "@rollup/plugin-replace": "^6.0.2",
     "@testing-library/jest-dom": "^6.6.3",
     "@vitejs/plugin-react": "^4.7.0",
-    "@vitest/ui": "^3.0.0",
+    "@vitest/ui": "^3.2.0",
     "eslint-config-react-app": "^7.0.1",
     "firebase-admin": "^13.2.0",
     "firebase-functions-test": "^3.4.1",
