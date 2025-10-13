@@ -37,47 +37,45 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
   const statsLoading = loadingStates.dailyScores;
   const statsError = errorStates.dailyScores;
 
-  // --- Build rotating difficulty messages from V2 stats ---
+  // --- Calculate total players across all difficulties ---
+  const totalPlayersToday = (() => {
+    if (!dailyScoresV2Stats) return 0;
+    const easy = (dailyScoresV2Stats as any).easy?.totalPlayers ?? 0;
+    const medium = (dailyScoresV2Stats as any).medium?.totalPlayers ?? 0;
+    const hard = (dailyScoresV2Stats as any).hard?.totalPlayers ?? 0;
+    return easy + medium + hard;
+  })();
+
+  // Static message for total players
+  const playersMessage = totalPlayersToday > 0 
+    ? `${totalPlayersToday} ${totalPlayersToday === 1 ? 'Person Has' : 'People Have'} Completed Today's Puzzle!`
+    : 'Be the first to play today!';
+
+  // --- Setup cycling for difficulty stats ---
   const difficultyOrder: Array<{ key: 'easy' | 'medium' | 'hard'; label: string }> = [
     { key: 'easy', label: 'Easy' },
     { key: 'medium', label: 'Medium' },
     { key: 'hard', label: 'Hard' },
   ];
-  const difficultyMessages: string[] = (() => {
-    if (!dailyScoresV2Stats) return [];
-    return difficultyOrder.map(({ key, label }) => {
-      const stats = (dailyScoresV2Stats as any)[key] as { totalPlayers: number; playersWithLowestScore: number } | undefined;
-      const total = stats?.totalPlayers ?? 0;
-      const bestCount = stats?.playersWithLowestScore ?? 0;
-      if (total <= 0) {
-        return `Be the first to play today!`;
-      }
-      const verb = bestCount === 1 ? 'has' : 'have';
-      return `${bestCount} out of ${total} players ${verb} achieved the best score`;
-    });
-  })();
-
-  // NOTE: Derived values that depend on rotatingIdx must be declared AFTER rotatingIdx is defined
 
   // rotation state and fade animation
   const [rotatingIdx, setRotatingIdx] = useState(0);
   const [fadeIn, setFadeIn] = useState(true);
 
   useEffect(() => {
-    if (!difficultyMessages.length) return;
     const interval = setInterval(() => {
       // fade out, then switch text, then fade in
       setFadeIn(false);
       const timeout = setTimeout(() => {
-        setRotatingIdx(prev => (prev + 1) % difficultyMessages.length);
+        setRotatingIdx(prev => (prev + 1) % difficultyOrder.length);
         setFadeIn(true);
       }, 1000);
       return () => clearTimeout(timeout);
     }, 7000);
     return () => clearInterval(interval);
-  }, [difficultyMessages.length]);
+  }, [difficultyOrder.length]);
 
-  // Current per-difficulty stats for rotating difficulty (must come after rotatingIdx)
+  // Current per-difficulty stats for rotating difficulty
   const currentDifficultyKey = difficultyOrder[rotatingIdx]?.key;
   const currentV2Stats = (dailyScoresV2Stats as any)?.[currentDifficultyKey] as
     | { lowestScore: number | null; averageScore: number | null }
@@ -250,7 +248,7 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
       <div className="global-stats-container">
         <h2>
           <span style={{ opacity: fadeIn ? 1 : 0, transition: 'opacity 1000ms ease' }}>
-            {`Today's Global Stats${difficultyMessages.length > 0 ? ` (${difficultyOrder[rotatingIdx].label})` : ''}`}
+            {`Today's Global Stats (${difficultyOrder[rotatingIdx].label})`}
           </span>
         </h2>
         {statsLoading ? (
@@ -278,11 +276,7 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
               </div>
             </div>
             <p className="stats-highlight">
-              <span style={{ opacity: fadeIn ? 1 : 0, transition: 'opacity 1000ms ease' }}>
-                {difficultyMessages.length > 0
-                  ? difficultyMessages[rotatingIdx]
-                  : (statsError ? 'Stats unavailable' : 'Be the first to play today!')}
-              </span>
+              {playersMessage}
             </p>
             <button 
               className="landing-stats-button"
