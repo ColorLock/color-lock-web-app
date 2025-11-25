@@ -26,8 +26,8 @@ function getOffsetDateString(offsetDays) {
   return `${year}-${month}-${day}`;
 }
 
-// Generate dates ending today (today and the 10 days before)
-const DATES = Array.from({ length: 11 }, (_, i) => getOffsetDateString(i - 10));
+// Generate dates ending today (today and the 89 days before = 90 days total)
+const DATES = Array.from({ length: 90 }, (_, i) => getOffsetDateString(i - 89));
 console.log("Generated Dates for Seeding:", DATES);
 
 // Check if a specific date was provided as a command line argument

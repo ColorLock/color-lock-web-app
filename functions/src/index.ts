@@ -1422,12 +1422,45 @@ export const getUsageStats = onCall(
             // Sort by date ascending
             stats.sort((a, b) => a.puzzleId.localeCompare(b.puzzleId));
 
-            logger.info(`getUsageStats: Returning ${stats.length} entries`);
+            // Calculate total unique users across the date range by querying dailyScoresV2
+            // This is more efficient than querying userPuzzleHistory for each user
+            let totalUniqueUsers = 0;
+            try {
+                const uniqueUserIds = new Set<string>();
+                
+                // Query dailyScoresV2 for all dates in the range
+                const dailyScoresSnapshot = await db.collection("dailyScoresV2").get();
+                
+                dailyScoresSnapshot.forEach(doc => {
+                    const docId = doc.id;
+                    // Filter by date range
+                    if (docId >= startDate && docId <= endDate) {
+                        const data = doc.data();
+                        // Collect user IDs from all difficulties
+                        for (const difficulty of ["easy", "medium", "hard"]) {
+                            const diffData = data?.[difficulty];
+                            if (diffData && typeof diffData === "object") {
+                                Object.keys(diffData).forEach(uid => uniqueUserIds.add(uid));
+                            }
+                        }
+                    }
+                });
+
+                totalUniqueUsers = uniqueUserIds.size;
+                logger.info(`getUsageStats: Found ${totalUniqueUsers} unique users from dailyScoresV2`);
+            } catch (userCountError) {
+                logger.warn("getUsageStats: Could not calculate total unique users from dailyScoresV2:", userCountError);
+                // Fall back to summing daily unique users (may overcount due to users playing multiple days)
+                totalUniqueUsers = stats.reduce((sum, s) => sum + s.uniqueUsers, 0);
+            }
+
+            logger.info(`getUsageStats: Returning ${stats.length} entries, ${totalUniqueUsers} total unique users`);
 
             return {
                 success: true,
                 stats,
                 count: stats.length,
+                totalUniqueUsers,
             };
 
         } catch (error) {

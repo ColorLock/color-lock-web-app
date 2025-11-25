@@ -21,6 +21,7 @@ const UsageStatsScreen: React.FC = () => {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('30days');
   const [metricType, setMetricType] = useState<MetricType>('users');
   const [statsData, setStatsData] = useState<UsageStatsEntry[]>([]);
+  const [totalUniqueUsers, setTotalUniqueUsers] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,18 +55,79 @@ const UsageStatsScreen: React.FC = () => {
     };
   };
 
+  // Helper to get the next cache invalidation time (12:30 AM ET)
+  const getNextInvalidationTime = (): number => {
+    const now = new Date();
+    // Convert to ET (UTC-5 or UTC-4 depending on DST)
+    const etOffset = -5 * 60; // ET is UTC-5 (standard) or UTC-4 (DST)
+    const etTime = new Date(now.getTime() + (etOffset + now.getTimezoneOffset()) * 60 * 1000);
+
+    // Set to 12:30 AM ET
+    const nextInvalidation = new Date(etTime);
+    nextInvalidation.setHours(0, 30, 0, 0);
+
+    // If we're past 12:30 AM today, set to tomorrow
+    if (etTime.getTime() > nextInvalidation.getTime()) {
+      nextInvalidation.setDate(nextInvalidation.getDate() + 1);
+    }
+
+    // Convert back to local time
+    return nextInvalidation.getTime() - (etOffset + now.getTimezoneOffset()) * 60 * 1000;
+  };
+
+  // Check if cached data is still valid
+  const isCacheValid = (cacheKey: string): boolean => {
+    const cached = localStorage.getItem(cacheKey);
+    if (!cached) return false;
+
+    try {
+      const { timestamp } = JSON.parse(cached);
+      const nextInvalidation = getNextInvalidationTime();
+      return Date.now() < nextInvalidation && timestamp < nextInvalidation;
+    } catch {
+      return false;
+    }
+  };
+
   // Fetch data when filter changes
   useEffect(() => {
     const fetchStats = async () => {
+      const { startDate, endDate } = getDateRange(timeFilter);
+      const cacheKey = `usageStats_${timeFilter}_${startDate}_${endDate}`;
+
+      // Check cache first
+      if (isCacheValid(cacheKey)) {
+        try {
+          const cached = JSON.parse(localStorage.getItem(cacheKey)!);
+          setStatsData(cached.stats);
+          setTotalUniqueUsers(cached.totalUniqueUsers || 0);
+          setLoading(false);
+          console.log('[UsageStats] Using cached data');
+          return;
+        } catch (err) {
+          console.warn('[UsageStats] Failed to parse cached data:', err);
+        }
+      }
+
       setLoading(true);
       setError(null);
 
       try {
-        const { startDate, endDate } = getDateRange(timeFilter);
         const result = await getUsageStatsCallable({ startDate, endDate });
 
         if (result.data.success && result.data.stats) {
-          setStatsData(result.data.stats);
+          const stats = result.data.stats;
+          const uniqueUsers = result.data.totalUniqueUsers || 0;
+
+          setStatsData(stats);
+          setTotalUniqueUsers(uniqueUsers);
+
+          // Cache the result
+          localStorage.setItem(cacheKey, JSON.stringify({
+            stats,
+            totalUniqueUsers: uniqueUsers,
+            timestamp: Date.now(),
+          }));
         } else {
           throw new Error(result.data.error || 'Failed to fetch usage stats');
         }
@@ -127,27 +189,27 @@ const UsageStatsScreen: React.FC = () => {
 
   // Calculate aggregate totals
   const totals = useMemo(() => {
-    const totalUsers = statsData.reduce((sum, d) => sum + d.uniqueUsers, 0);
     const totalAttempts = statsData.reduce((sum, d) => sum + d.totalAttempts, 0);
-    const avgUsersPerDay = statsData.length > 0 ? Math.round(totalUsers / statsData.length) : 0;
+    const dailyUsersSum = statsData.reduce((sum, d) => sum + d.uniqueUsers, 0);
+    const avgUsersPerDay = statsData.length > 0 ? Math.round(dailyUsersSum / statsData.length) : 0;
     const avgAttemptsPerDay = statsData.length > 0 ? Math.round(totalAttempts / statsData.length) : 0;
-    const peakDayUsers = statsData.length > 0 
+    const peakDayUsers = statsData.length > 0
       ? statsData.reduce((max, d) => d.uniqueUsers > max.uniqueUsers ? d : max, statsData[0])
       : null;
-    const peakDayAttempts = statsData.length > 0 
+    const peakDayAttempts = statsData.length > 0
       ? statsData.reduce((max, d) => d.totalAttempts > max.totalAttempts ? d : max, statsData[0])
       : null;
 
-    return { 
-      totalUsers, 
-      totalAttempts, 
-      avgUsersPerDay, 
-      avgAttemptsPerDay, 
-      peakDayUsers, 
-      peakDayAttempts, 
-      daysTracked: statsData.length 
+    return {
+      totalUsers: totalUniqueUsers, // Use the actual unique users count from backend
+      totalAttempts,
+      avgUsersPerDay,
+      avgAttemptsPerDay,
+      peakDayUsers,
+      peakDayAttempts,
+      daysTracked: statsData.length
     };
-  }, [statsData]);
+  }, [statsData, totalUniqueUsers]);
 
   const getChartValue = (point: AggregatedDataPoint) => {
     return metricType === 'users' ? point.uniqueUsers : point.totalAttempts;
@@ -197,7 +259,7 @@ const UsageStatsScreen: React.FC = () => {
                 <div className="bar-track">
                   <div className="bar-fill" style={{ height: `${Math.max(heightPercent, 3)}%` }} />
                 </div>
-                {showLabel && <span className="bar-label">{point.label}</span>}
+                <span className={`bar-label ${showLabel ? '' : 'bar-label--hidden'}`}>{point.label}</span>
               </div>
             );
           })}
