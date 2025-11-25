@@ -172,6 +172,7 @@ export interface GetUsageStatsResponse {
   stats?: UsageStatsEntry[];
   count?: number;
   totalUniqueUsers?: number;
+  totalAttempts?: number;
   error?: string;
 }
 

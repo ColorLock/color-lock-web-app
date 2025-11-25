@@ -1269,6 +1269,113 @@ export const sendDailyPuzzleReminders = onSchedule(
 // --- Usage Stats Collection and Retrieval ---
 
 /**
+ * Helper function to calculate and update aggregate stats (7d, 30d, 90d, allTime)
+ * Stores pre-computed unique user counts in special documents for efficient retrieval
+ */
+async function updateAggregateStats(latestPuzzleId: string): Promise<void> {
+    const now = DateTime.fromISO(latestPuzzleId, { zone: "utc" });
+    
+    // Define date ranges
+    const ranges = {
+        "aggregate_7d": 7,
+        "aggregate_30d": 30,
+        "aggregate_90d": 90,
+    };
+
+    for (const [docId, days] of Object.entries(ranges)) {
+        const startDate = now.minus({ days: days - 1 }).toFormat("yyyy-MM-dd");
+        const endDate = latestPuzzleId;
+        
+        const uniqueUserIds = new Set<string>();
+        let totalAttempts = 0;
+        let daysWithData = 0;
+
+        // Query all daily stats in range
+        const statsSnapshot = await db.collection("usageStats")
+            .where(admin.firestore.FieldPath.documentId(), ">=", startDate)
+            .where(admin.firestore.FieldPath.documentId(), "<=", endDate)
+            .get();
+
+        statsSnapshot.forEach(doc => {
+            // Skip aggregate documents
+            if (doc.id.startsWith("aggregate_")) return;
+            
+            const data = doc.data();
+            
+            // Collect unique user IDs
+            if (data.userIds && Array.isArray(data.userIds)) {
+                data.userIds.forEach((uid: string) => uniqueUserIds.add(uid));
+            }
+            
+            // Sum total attempts
+            if (typeof data.totalAttempts === "number") {
+                totalAttempts += data.totalAttempts;
+            }
+            
+            daysWithData++;
+        });
+
+        // Write aggregate document
+        await db.collection("usageStats").doc(docId).set({
+            uniqueUsers: uniqueUserIds.size,
+            totalAttempts,
+            daysWithData,
+            startDate,
+            endDate,
+            userIds: Array.from(uniqueUserIds).sort(),
+            processedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        logger.info(`updateAggregateStats: ${docId} - ${uniqueUserIds.size} unique users, ${totalAttempts} attempts, ${daysWithData} days`);
+    }
+
+    // Calculate all-time stats
+    const allUniqueUserIds = new Set<string>();
+    let allTotalAttempts = 0;
+    let allDaysWithData = 0;
+    let earliestDate: string | null = null;
+
+    const allStatsSnapshot = await db.collection("usageStats").get();
+    
+    allStatsSnapshot.forEach(doc => {
+        // Skip aggregate documents
+        if (doc.id.startsWith("aggregate_")) return;
+        
+        const data = doc.data();
+        
+        // Track earliest date
+        if (!earliestDate || doc.id < earliestDate) {
+            earliestDate = doc.id;
+        }
+        
+        // Collect unique user IDs
+        if (data.userIds && Array.isArray(data.userIds)) {
+            data.userIds.forEach((uid: string) => allUniqueUserIds.add(uid));
+        }
+        
+        // Sum total attempts
+        if (typeof data.totalAttempts === "number") {
+            allTotalAttempts += data.totalAttempts;
+        }
+        
+        allDaysWithData++;
+    });
+
+    // Write all-time aggregate document
+    await db.collection("usageStats").doc("aggregate_allTime").set({
+        uniqueUsers: allUniqueUserIds.size,
+        totalAttempts: allTotalAttempts,
+        daysWithData: allDaysWithData,
+        startDate: earliestDate || latestPuzzleId,
+        endDate: latestPuzzleId,
+        userIds: Array.from(allUniqueUserIds).sort(),
+        processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    logger.info(`updateAggregateStats: aggregate_allTime - ${allUniqueUserIds.size} unique users, ${allTotalAttempts} attempts, ${allDaysWithData} days`);
+}
+
+/**
  * Scheduled Cloud Function to collect daily usage statistics
  * Runs daily at 5:30 AM UTC (12:30 AM EST / 1:30 AM EDT)
  * Processes stats from 2 days prior to ensure all users from all timezones are captured
@@ -1345,15 +1452,22 @@ export const collectDailyUsageStats = onSchedule(
 
             logger.info(`collectDailyUsageStats: Processed ${processedUsers} users, ${errorUsers} errors, Total attempts: ${totalAttempts}`);
 
-            // Step 3: Write to usageStats collection
+            // Step 3: Write to usageStats collection with userIds
+            const userIdsArray = Array.from(uniqueUserIds).sort();
             const usageStatsRef = db.collection("usageStats").doc(targetPuzzleId);
             await usageStatsRef.set({
                 uniqueUsers,
                 totalAttempts,
+                userIds: userIdsArray,
                 processedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
 
-            logger.info(`collectDailyUsageStats: Successfully wrote stats for ${targetPuzzleId}`);
+            logger.info(`collectDailyUsageStats: Successfully wrote stats for ${targetPuzzleId} with ${userIdsArray.length} user IDs`);
+
+            // Step 4: Calculate and update aggregate stats (7d, 30d, 90d, allTime)
+            await updateAggregateStats(targetPuzzleId);
+
+            logger.info(`collectDailyUsageStats: Successfully updated aggregate stats`);
 
         } catch (error) {
             logger.error("collectDailyUsageStats: Fatal error during execution:", error);
@@ -1408,6 +1522,9 @@ export const getUsageStats = onCall(
 
             statsSnapshot.forEach(doc => {
                 const docId = doc.id;
+                // Skip aggregate documents
+                if (docId.startsWith("aggregate_")) return;
+                
                 // Filter by date range (document IDs are YYYY-MM-DD format)
                 if (docId >= startDate && docId <= endDate) {
                     const data = doc.data();
@@ -1422,45 +1539,89 @@ export const getUsageStats = onCall(
             // Sort by date ascending
             stats.sort((a, b) => a.puzzleId.localeCompare(b.puzzleId));
 
-            // Calculate total unique users across the date range by querying dailyScoresV2
-            // This is more efficient than querying userPuzzleHistory for each user
+            // Calculate total unique users and total attempts across the date range
+            // First, try to find a matching pre-computed aggregate
             let totalUniqueUsers = 0;
-            try {
-                const uniqueUserIds = new Set<string>();
-                
-                // Query dailyScoresV2 for all dates in the range
-                const dailyScoresSnapshot = await db.collection("dailyScoresV2").get();
-                
-                dailyScoresSnapshot.forEach(doc => {
-                    const docId = doc.id;
-                    // Filter by date range
-                    if (docId >= startDate && docId <= endDate) {
-                        const data = doc.data();
-                        // Collect user IDs from all difficulties
-                        for (const difficulty of ["easy", "medium", "hard"]) {
-                            const diffData = data?.[difficulty];
-                            if (diffData && typeof diffData === "object") {
-                                Object.keys(diffData).forEach(uid => uniqueUserIds.add(uid));
-                            }
-                        }
-                    }
-                });
-
-                totalUniqueUsers = uniqueUserIds.size;
-                logger.info(`getUsageStats: Found ${totalUniqueUsers} unique users from dailyScoresV2`);
-            } catch (userCountError) {
-                logger.warn("getUsageStats: Could not calculate total unique users from dailyScoresV2:", userCountError);
-                // Fall back to summing daily unique users (may overcount due to users playing multiple days)
-                totalUniqueUsers = stats.reduce((sum, s) => sum + s.uniqueUsers, 0);
+            let totalAttempts = 0;
+            let usedAggregate = false;
+            
+            // Determine which aggregate documents to check based on date range span
+            const startDateObj = DateTime.fromISO(startDate, { zone: "utc" });
+            const endDateObj = DateTime.fromISO(endDate, { zone: "utc" });
+            const daysDiff = Math.ceil(endDateObj.diff(startDateObj, "days").days) + 1;
+            
+            // Map day spans to potential aggregate document IDs
+            const candidateAggregates: string[] = [];
+            if (daysDiff === 7) {
+                candidateAggregates.push("aggregate_7d");
+            } else if (daysDiff === 30) {
+                candidateAggregates.push("aggregate_30d");
+            } else if (daysDiff === 90) {
+                candidateAggregates.push("aggregate_90d");
+            } else if (startDate <= "2024-01-01" && daysDiff > 90) {
+                candidateAggregates.push("aggregate_allTime");
             }
 
-            logger.info(`getUsageStats: Returning ${stats.length} entries, ${totalUniqueUsers} total unique users`);
+            // Try each candidate aggregate and validate its stored date range
+            for (const aggregateDocId of candidateAggregates) {
+                try {
+                    const aggregateDoc = await db.collection("usageStats").doc(aggregateDocId).get();
+                    if (aggregateDoc.exists) {
+                        const aggregateData = aggregateDoc.data();
+                        const aggStartDate = aggregateData?.startDate as string | undefined;
+                        const aggEndDate = aggregateData?.endDate as string | undefined;
+                        
+                        // Validate that the aggregate's stored date range matches the requested range
+                        if (aggStartDate === startDate && aggEndDate === endDate) {
+                            totalUniqueUsers = typeof aggregateData?.uniqueUsers === "number" ? aggregateData.uniqueUsers : 0;
+                            totalAttempts = typeof aggregateData?.totalAttempts === "number" ? aggregateData.totalAttempts : 0;
+                            usedAggregate = true;
+                            logger.info(`getUsageStats: Using pre-computed aggregate ${aggregateDocId} (${aggStartDate} to ${aggEndDate}): ${totalUniqueUsers} unique users, ${totalAttempts} attempts`);
+                            break; // Found matching aggregate
+                        } else {
+                            logger.info(`getUsageStats: Aggregate ${aggregateDocId} found but dates don't match. Aggregate: ${aggStartDate} to ${aggEndDate}, Requested: ${startDate} to ${endDate}`);
+                        }
+                    }
+                } catch (aggregateError) {
+                    logger.warn(`getUsageStats: Error reading aggregate ${aggregateDocId}:`, aggregateError);
+                }
+            }
+
+            // If no aggregate found, calculate manually from daily stats
+            if (!usedAggregate) {
+                logger.info(`getUsageStats: No matching aggregate, calculating manually for range ${startDate} to ${endDate}`);
+                const uniqueUserIds = new Set<string>();
+                
+                for (const stat of stats) {
+                    // Sum total attempts from daily stats
+                    totalAttempts += stat.totalAttempts;
+                    
+                    // Read the daily document to get userIds
+                    try {
+                        const dailyDoc = await db.collection("usageStats").doc(stat.puzzleId).get();
+                        if (dailyDoc.exists) {
+                            const dailyData = dailyDoc.data();
+                            if (dailyData?.userIds && Array.isArray(dailyData.userIds)) {
+                                dailyData.userIds.forEach((uid: string) => uniqueUserIds.add(uid));
+                            }
+                        }
+                    } catch (dailyError) {
+                        logger.warn(`getUsageStats: Error reading daily doc ${stat.puzzleId}:`, dailyError);
+                    }
+                }
+
+                totalUniqueUsers = uniqueUserIds.size;
+                logger.info(`getUsageStats: Calculated ${totalUniqueUsers} unique users, ${totalAttempts} attempts from ${stats.length} daily stats`);
+            }
+
+            logger.info(`getUsageStats: Returning ${stats.length} entries, ${totalUniqueUsers} total unique users, ${totalAttempts} total attempts`);
 
             return {
                 success: true,
                 stats,
                 count: stats.length,
                 totalUniqueUsers,
+                totalAttempts,
             };
 
         } catch (error) {
@@ -1567,10 +1728,12 @@ export const backfillUsageStats = onCall(
                     logger.info(`backfillUsageStats: ${puzzleId} - Users: ${uniqueUserIds.size}, Attempts: ${totalAttempts}`);
 
                     if (!dryRun) {
-                        // Write to usageStats collection
+                        // Write to usageStats collection with userIds
+                        const userIdsArray = Array.from(uniqueUserIds).sort();
                         await db.collection("usageStats").doc(puzzleId).set({
                             uniqueUsers: uniqueUserIds.size,
                             totalAttempts,
+                            userIds: userIdsArray,
                             processedAt: admin.firestore.FieldValue.serverTimestamp(),
                         });
                     }
@@ -1580,6 +1743,25 @@ export const backfillUsageStats = onCall(
                 } catch (dayError) {
                     errorDays++;
                     logger.error(`backfillUsageStats: Error processing ${puzzleId}:`, dayError);
+                }
+            }
+
+            // Update aggregate stats after backfill (if not dry run)
+            if (!dryRun && processedDays > 0) {
+                try {
+                    // Find the latest date that was processed
+                    const latestDate = dailyScoresSnapshot.docs
+                        .map(doc => doc.id)
+                        .filter(id => id >= (startDate || "2024-01-01") && id <= (endDate || "9999-12-31"))
+                        .sort()
+                        .pop();
+                    
+                    if (latestDate) {
+                        logger.info(`backfillUsageStats: Updating aggregate stats based on latest date: ${latestDate}`);
+                        await updateAggregateStats(latestDate);
+                    }
+                } catch (aggregateError) {
+                    logger.warn("backfillUsageStats: Failed to update aggregates:", aggregateError);
                 }
             }
 

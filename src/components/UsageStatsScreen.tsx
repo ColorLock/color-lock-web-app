@@ -22,6 +22,7 @@ const UsageStatsScreen: React.FC = () => {
   const [metricType, setMetricType] = useState<MetricType>('users');
   const [statsData, setStatsData] = useState<UsageStatsEntry[]>([]);
   const [totalUniqueUsers, setTotalUniqueUsers] = useState<number>(0);
+  const [totalAttempts, setTotalAttempts] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,15 +35,15 @@ const UsageStatsScreen: React.FC = () => {
     switch (filter) {
       case '7days':
         startDate = new Date(now);
-        startDate.setDate(now.getDate() - 7);
+        startDate.setDate(now.getDate() - 6); // Last 7 days = today + 6 days back
         break;
       case '30days':
         startDate = new Date(now);
-        startDate.setDate(now.getDate() - 30);
+        startDate.setDate(now.getDate() - 29); // Last 30 days = today + 29 days back
         break;
       case '90days':
         startDate = new Date(now);
-        startDate.setDate(now.getDate() - 90);
+        startDate.setDate(now.getDate() - 89); // Last 90 days = today + 89 days back
         break;
       case 'alltime':
         startDate = new Date('2024-01-01');
@@ -99,10 +100,16 @@ const UsageStatsScreen: React.FC = () => {
       if (isCacheValid(cacheKey)) {
         try {
           const cached = JSON.parse(localStorage.getItem(cacheKey)!);
+          console.log('[UsageStats] Using cached data:', {
+            statsLength: cached.stats?.length,
+            totalUniqueUsers: cached.totalUniqueUsers,
+            totalAttempts: cached.totalAttempts,
+            cacheKey
+          });
           setStatsData(cached.stats);
           setTotalUniqueUsers(cached.totalUniqueUsers || 0);
+          setTotalAttempts(cached.totalAttempts || 0);
           setLoading(false);
-          console.log('[UsageStats] Using cached data');
           return;
         } catch (err) {
           console.warn('[UsageStats] Failed to parse cached data:', err);
@@ -115,17 +122,34 @@ const UsageStatsScreen: React.FC = () => {
       try {
         const result = await getUsageStatsCallable({ startDate, endDate });
 
+        console.log('[UsageStats] Backend response:', {
+          success: result.data.success,
+          statsCount: result.data.stats?.length,
+          totalUniqueUsers: result.data.totalUniqueUsers,
+          totalAttempts: result.data.totalAttempts,
+          count: result.data.count
+        });
+
         if (result.data.success && result.data.stats) {
           const stats = result.data.stats;
           const uniqueUsers = result.data.totalUniqueUsers || 0;
+          const attempts = result.data.totalAttempts || 0;
+
+          console.log('[UsageStats] Setting state:', {
+            statsLength: stats.length,
+            uniqueUsers,
+            attempts
+          });
 
           setStatsData(stats);
           setTotalUniqueUsers(uniqueUsers);
+          setTotalAttempts(attempts);
 
           // Cache the result
           localStorage.setItem(cacheKey, JSON.stringify({
             stats,
             totalUniqueUsers: uniqueUsers,
+            totalAttempts: attempts,
             timestamp: Date.now(),
           }));
         } else {
@@ -189,7 +213,6 @@ const UsageStatsScreen: React.FC = () => {
 
   // Calculate aggregate totals
   const totals = useMemo(() => {
-    const totalAttempts = statsData.reduce((sum, d) => sum + d.totalAttempts, 0);
     const dailyUsersSum = statsData.reduce((sum, d) => sum + d.uniqueUsers, 0);
     const avgUsersPerDay = statsData.length > 0 ? Math.round(dailyUsersSum / statsData.length) : 0;
     const avgAttemptsPerDay = statsData.length > 0 ? Math.round(totalAttempts / statsData.length) : 0;
@@ -202,14 +225,14 @@ const UsageStatsScreen: React.FC = () => {
 
     return {
       totalUsers: totalUniqueUsers, // Use the actual unique users count from backend
-      totalAttempts,
+      totalAttempts, // Use the total attempts from backend (from aggregate or sum of daily)
       avgUsersPerDay,
       avgAttemptsPerDay,
       peakDayUsers,
       peakDayAttempts,
       daysTracked: statsData.length
     };
-  }, [statsData, totalUniqueUsers]);
+  }, [statsData, totalUniqueUsers, totalAttempts]);
 
   const getChartValue = (point: AggregatedDataPoint) => {
     return metricType === 'users' ? point.uniqueUsers : point.totalAttempts;

@@ -378,7 +378,7 @@ async function seedData() {
 
     console.log('Created dailyScoresV2 collections with per-difficulty structure');
 
-    // 6) Create usageStats collection for all dates
+    // 6) Create usageStats collection for all dates with userIds
     console.log('Creating/updating usageStats for all puzzle dates...');
     for (const date of DATES) {
       // Count unique users who played this date (across all difficulties)
@@ -394,23 +394,119 @@ async function seedData() {
       }
       
       const uniqueUsers = uniqueUsersSet.size;
+      const userIdsArray = Array.from(uniqueUsersSet).sort();
       
       // Only write if there's data for this date
       if (uniqueUsers > 0) {
         await db.collection('usageStats').doc(date).set({
           uniqueUsers,
           totalAttempts: totalAttemptsForDate,
+          userIds: userIdsArray,
           processedAt: admin.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
       }
     }
     console.log('Created usageStats collection with daily stats');
 
+    // 7) Create aggregate stats documents (7d, 30d, 90d, allTime)
+    console.log('Creating aggregate stats documents...');
+    
+    // Helper to calculate aggregates for a date range
+    async function createAggregate(docId, daysBack) {
+      const endDate = todayStr;
+      const startDateObj = new Date(endDate);
+      startDateObj.setDate(startDateObj.getDate() - (daysBack - 1));
+      const startDate = startDateObj.toISOString().split('T')[0];
+      
+      const uniqueUsersSet = new Set();
+      let totalAttempts = 0;
+      let daysWithData = 0;
+      
+      for (const date of DATES) {
+        if (date < startDate || date > endDate) continue;
+        
+        const entry = userHistories;
+        for (const uid of userIds) {
+          const userEntry = entry[uid][date];
+          if (!userEntry) continue;
+          
+          uniqueUsersSet.add(uid);
+        }
+        
+        // Get total attempts for this date
+        for (const uid of userIds) {
+          const userEntry = entry[uid][date];
+          if (userEntry) {
+            totalAttempts += userEntry.totalAttempts || 0;
+            if (!daysWithData || date > startDate) {
+              // Count this day once
+            }
+          }
+        }
+        
+        // Check if any user played this date
+        const dayHasData = userIds.some(uid => entry[uid][date]);
+        if (dayHasData) daysWithData++;
+      }
+      
+      const userIdsArray = Array.from(uniqueUsersSet).sort();
+      
+      await db.collection('usageStats').doc(docId).set({
+        uniqueUsers: uniqueUsersSet.size,
+        totalAttempts,
+        daysWithData,
+        startDate,
+        endDate,
+        userIds: userIdsArray,
+        processedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      
+      console.log(`  ${docId}: ${uniqueUsersSet.size} users, ${totalAttempts} attempts, ${daysWithData} days`);
+    }
+    
+    // Create aggregate documents
+    await createAggregate('aggregate_7d', 7);
+    await createAggregate('aggregate_30d', 30);
+    await createAggregate('aggregate_90d', 90);
+    
+    // All-time aggregate (all DATES)
+    const allUniqueUsersSet = new Set();
+    let allTotalAttempts = 0;
+    let allDaysWithData = 0;
+    
+    for (const date of DATES) {
+      let dayHasData = false;
+      for (const uid of userIds) {
+        const entry = userHistories[uid][date];
+        if (entry) {
+          allUniqueUsersSet.add(uid);
+          allTotalAttempts += entry.totalAttempts || 0;
+          dayHasData = true;
+        }
+      }
+      if (dayHasData) allDaysWithData++;
+    }
+    
+    const allUserIdsArray = Array.from(allUniqueUsersSet).sort();
+    
+    await db.collection('usageStats').doc('aggregate_allTime').set({
+      uniqueUsers: allUniqueUsersSet.size,
+      totalAttempts: allTotalAttempts,
+      daysWithData: allDaysWithData,
+      startDate: DATES[0],
+      endDate: DATES[DATES.length - 1],
+      userIds: allUserIdsArray,
+      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    
+    console.log(`  aggregate_allTime: ${allUniqueUsersSet.size} users, ${allTotalAttempts} attempts, ${allDaysWithData} days`);
+    console.log('Created aggregate stats documents');
+
     // Verify usageStats for today
     const usageDoc = await db.collection('usageStats').doc(todayStr).get();
     if (usageDoc.exists) {
       const usageData = usageDoc.data();
-      console.log(`usageStats for ${todayStr}: ${usageData.uniqueUsers} users, ${usageData.totalAttempts} attempts`);
+      console.log(`usageStats for ${todayStr}: ${usageData.uniqueUsers} users, ${usageData.totalAttempts} attempts, ${usageData.userIds?.length || 0} userIds`);
     }
 
     console.log('Seeding completed successfully');
