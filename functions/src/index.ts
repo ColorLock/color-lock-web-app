@@ -388,6 +388,9 @@ export const recordPuzzleHistory = onCall(
                 if (globalAttemptNumber === 1 && moves <= botMoves && !hintUsed) {
                     if (!prevLastFirstTryDate) {
                         newFirstTryCurrent = 1;
+                    } else if (prevLastFirstTryDate === puzzleId) {
+                        // Same day - keep streak unchanged
+                        newFirstTryCurrent = prevFirstTryCurrent;
                     } else if (isDayAfter(prevLastFirstTryDate, puzzleId)) {
                         newFirstTryCurrent = prevFirstTryCurrent + 1;
                     } else {
@@ -418,6 +421,9 @@ export const recordPuzzleHistory = onCall(
                 if (moves <= botMoves) {
                     if (!prevLastTieDate) {
                         newTieCurrent = 1;
+                    } else if (prevLastTieDate === puzzleId) {
+                        // Same day - keep streak unchanged
+                        newTieCurrent = prevTieCurrent;
                     } else if (isDayAfter(prevLastTieDate, puzzleId)) {
                         newTieCurrent = prevTieCurrent + 1;
                     } else {
@@ -1256,6 +1262,310 @@ export const sendDailyPuzzleReminders = onSchedule(
                 errors: errorCount,
                 dailyPlayers: dailyPlayersCount,
             });
+        }
+    }
+);
+
+// --- Usage Stats Collection and Retrieval ---
+
+/**
+ * Scheduled Cloud Function to collect daily usage statistics
+ * Runs daily at 5:30 AM UTC (12:30 AM EST / 1:30 AM EDT)
+ * Processes stats from 2 days prior to ensure all users from all timezones are captured
+ * Example: Runs on Jan 3 at 12:30 AM EST → processes Jan 1 stats
+ * Collects: unique users and total attempts per puzzle
+ */
+export const collectDailyUsageStats = onSchedule(
+    {
+        schedule: "30 5 * * *", // Every day at 5:30 AM UTC (12:30 AM EST / 1:30 AM EDT)
+        timeZone: "UTC",
+        memory: "512MiB",
+        timeoutSeconds: 540,
+    },
+    async (event) => {
+        logger.info("collectDailyUsageStats: Starting execution");
+
+        try {
+            // Process stats from 2 days prior to ensure all users from all timezones are captured
+            // This gives users in all timezones (including Hawaii/Alaska) time to complete the puzzle
+            const nowEastern = DateTime.utc().setZone("America/New_York");
+            const targetDate = nowEastern.minus({ days: 2 });
+            const targetPuzzleId = targetDate.toFormat("yyyy-MM-dd");
+
+            logger.info(`collectDailyUsageStats: Processing puzzle ID: ${targetPuzzleId} (Current Eastern Time: ${nowEastern.toISO()})`);
+
+            // Step 1: Count unique users from dailyScoresV2
+            const dailyScoresRef = db.collection("dailyScoresV2").doc(targetPuzzleId);
+            const dailyScoresSnap = await dailyScoresRef.get();
+
+            const uniqueUserIds = new Set<string>();
+
+            if (dailyScoresSnap.exists) {
+                const data = dailyScoresSnap.data();
+
+                // Collect user IDs from all difficulties
+                for (const difficulty of ["easy", "medium", "hard"]) {
+                    const diffData = data?.[difficulty];
+                    if (diffData && typeof diffData === "object") {
+                        Object.keys(diffData).forEach(userId => uniqueUserIds.add(userId));
+                    }
+                }
+            }
+
+            const uniqueUsers = uniqueUserIds.size;
+            logger.info(`collectDailyUsageStats: Found ${uniqueUsers} unique users`);
+
+            // Step 2: Sum total attempts from userPuzzleHistory
+            let totalAttempts = 0;
+            let processedUsers = 0;
+            let errorUsers = 0;
+
+            for (const userId of uniqueUserIds) {
+                try {
+                    const puzzleRef = db.collection("userPuzzleHistory")
+                        .doc(userId)
+                        .collection("puzzles")
+                        .doc(targetPuzzleId);
+
+                    const puzzleSnap = await puzzleRef.get();
+
+                    if (puzzleSnap.exists) {
+                        const puzzleData = puzzleSnap.data();
+                        const attempts = typeof puzzleData?.totalAttempts === "number"
+                            ? puzzleData.totalAttempts
+                            : 0;
+                        totalAttempts += attempts;
+                        processedUsers++;
+                    }
+                } catch (error) {
+                    errorUsers++;
+                    logger.warn(`collectDailyUsageStats: Error processing user ${userId}:`, error);
+                }
+            }
+
+            logger.info(`collectDailyUsageStats: Processed ${processedUsers} users, ${errorUsers} errors, Total attempts: ${totalAttempts}`);
+
+            // Step 3: Write to usageStats collection
+            const usageStatsRef = db.collection("usageStats").doc(targetPuzzleId);
+            await usageStatsRef.set({
+                uniqueUsers,
+                totalAttempts,
+                processedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+            logger.info(`collectDailyUsageStats: Successfully wrote stats for ${targetPuzzleId}`);
+
+        } catch (error) {
+            logger.error("collectDailyUsageStats: Fatal error during execution:", error);
+            throw error;
+        }
+    }
+);
+
+/**
+ * Callable Cloud Function to retrieve usage statistics
+ * Supports filtering by date range and aggregation
+ */
+interface GetUsageStatsRequest {
+    startDate: string; // YYYY-MM-DD format
+    endDate: string;   // YYYY-MM-DD format
+}
+
+interface UsageStatsEntry {
+    puzzleId: string;
+    uniqueUsers: number;
+    totalAttempts: number;
+}
+
+export const getUsageStats = onCall(
+    {
+        memory: "512MiB",
+        timeoutSeconds: 60,
+        ...getAppCheckConfig(),
+    },
+    async (request) => {
+        const userId = request.auth?.uid || "guest/unauthenticated";
+        const { startDate, endDate } = (request.data || {}) as GetUsageStatsRequest;
+
+        logger.info(`getUsageStats: Called by ${userId}, range: ${startDate} to ${endDate}`);
+
+        if (!startDate || !endDate) {
+            throw new HttpsError("invalid-argument", "startDate and endDate are required (YYYY-MM-DD format).");
+        }
+
+        // Validate date format
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(startDate) || !dateRegex.test(endDate)) {
+            throw new HttpsError("invalid-argument", "Dates must be in YYYY-MM-DD format.");
+        }
+
+        try {
+            // Get all usageStats documents and filter by date range
+            // This avoids FieldPath.documentId() issues in some environments
+            const statsSnapshot = await db.collection("usageStats").get();
+
+            const stats: UsageStatsEntry[] = [];
+
+            statsSnapshot.forEach(doc => {
+                const docId = doc.id;
+                // Filter by date range (document IDs are YYYY-MM-DD format)
+                if (docId >= startDate && docId <= endDate) {
+                    const data = doc.data();
+                    stats.push({
+                        puzzleId: docId,
+                        uniqueUsers: typeof data.uniqueUsers === "number" ? data.uniqueUsers : 0,
+                        totalAttempts: typeof data.totalAttempts === "number" ? data.totalAttempts : 0,
+                    });
+                }
+            });
+
+            // Sort by date ascending
+            stats.sort((a, b) => a.puzzleId.localeCompare(b.puzzleId));
+
+            logger.info(`getUsageStats: Returning ${stats.length} entries`);
+
+            return {
+                success: true,
+                stats,
+                count: stats.length,
+            };
+
+        } catch (error) {
+            logger.error("getUsageStats: Error fetching stats:", error);
+            throw new HttpsError("internal", "Failed to fetch usage stats.");
+        }
+    }
+);
+
+/**
+ * One-time migration function to backfill usage stats from old data structure
+ * WARNING: This is an admin-only function and should be called with caution
+ */
+interface BackfillUsageStatsRequest {
+    startDate?: string; // Optional: YYYY-MM-DD format
+    endDate?: string;   // Optional: YYYY-MM-DD format
+    dryRun?: boolean;   // If true, only logs what would be done
+}
+
+export const backfillUsageStats = onCall(
+    {
+        memory: "1GiB",
+        timeoutSeconds: 540,
+        ...getAppCheckConfig(),
+    },
+    async (request) => {
+        // Only allow authenticated users (you may want to add admin check)
+        if (!request.auth) {
+            throw new HttpsError("unauthenticated", "Authentication required.");
+        }
+
+        const userId = request.auth.uid;
+        const { startDate, endDate, dryRun = true } = (request.data || {}) as BackfillUsageStatsRequest;
+
+        logger.info(`backfillUsageStats: Called by ${userId}, dryRun: ${dryRun}`);
+
+        try {
+            let processedDays = 0;
+            let skippedDays = 0;
+            let errorDays = 0;
+
+            // Get all dailyScoresV2 documents
+            let query = db.collection("dailyScoresV2").orderBy(admin.firestore.FieldPath.documentId(), "asc");
+
+            if (startDate) {
+                query = query.where(admin.firestore.FieldPath.documentId(), ">=", startDate);
+            }
+            if (endDate) {
+                query = query.where(admin.firestore.FieldPath.documentId(), "<=", endDate);
+            }
+
+            const dailyScoresSnapshot = await query.get();
+
+            logger.info(`backfillUsageStats: Found ${dailyScoresSnapshot.size} days to process`);
+
+            for (const dailyScoresDoc of dailyScoresSnapshot.docs) {
+                const puzzleId = dailyScoresDoc.id;
+
+                try {
+                    // Check if stats already exist
+                    const existingStatsSnap = await db.collection("usageStats").doc(puzzleId).get();
+
+                    if (existingStatsSnap.exists) {
+                        logger.info(`backfillUsageStats: Stats already exist for ${puzzleId}, skipping`);
+                        skippedDays++;
+                        continue;
+                    }
+
+                    // Count unique users from dailyScoresV2
+                    const data = dailyScoresDoc.data();
+                    const uniqueUserIds = new Set<string>();
+
+                    for (const difficulty of ["easy", "medium", "hard"]) {
+                        const diffData = data?.[difficulty];
+                        if (diffData && typeof diffData === "object") {
+                            Object.keys(diffData).forEach(uid => uniqueUserIds.add(uid));
+                        }
+                    }
+
+                    // Sum total attempts from userPuzzleHistory
+                    let totalAttempts = 0;
+
+                    for (const uid of uniqueUserIds) {
+                        try {
+                            const puzzleRef = db.collection("userPuzzleHistory")
+                                .doc(uid)
+                                .collection("puzzles")
+                                .doc(puzzleId);
+
+                            const puzzleSnap = await puzzleRef.get();
+
+                            if (puzzleSnap.exists) {
+                                const puzzleData = puzzleSnap.data();
+                                const attempts = typeof puzzleData?.totalAttempts === "number"
+                                    ? puzzleData.totalAttempts
+                                    : 0;
+                                totalAttempts += attempts;
+                            }
+                        } catch (userError) {
+                            logger.warn(`backfillUsageStats: Error processing user ${uid} for ${puzzleId}:`, userError);
+                        }
+                    }
+
+                    logger.info(`backfillUsageStats: ${puzzleId} - Users: ${uniqueUserIds.size}, Attempts: ${totalAttempts}`);
+
+                    if (!dryRun) {
+                        // Write to usageStats collection
+                        await db.collection("usageStats").doc(puzzleId).set({
+                            uniqueUsers: uniqueUserIds.size,
+                            totalAttempts,
+                            processedAt: admin.firestore.FieldValue.serverTimestamp(),
+                        });
+                    }
+
+                    processedDays++;
+
+                } catch (dayError) {
+                    errorDays++;
+                    logger.error(`backfillUsageStats: Error processing ${puzzleId}:`, dayError);
+                }
+            }
+
+            const summary = {
+                success: true,
+                dryRun,
+                processedDays,
+                skippedDays,
+                errorDays,
+                totalDays: dailyScoresSnapshot.size,
+            };
+
+            logger.info("backfillUsageStats: Completed", summary);
+
+            return summary;
+
+        } catch (error) {
+            logger.error("backfillUsageStats: Fatal error:", error);
+            throw new HttpsError("internal", "Failed to backfill usage stats.");
         }
     }
 );

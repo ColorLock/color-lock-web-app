@@ -3,7 +3,8 @@
 @use 'base';
 @use 'layout';
 @use 'components';
-@use 'modals'; 
+@use 'modals';
+@use 'usageStats';
 @use 'sass:color';
 
 // Add these new styles at the end of the file

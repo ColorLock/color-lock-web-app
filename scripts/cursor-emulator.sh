@@ -1,146 +1,104 @@
 #!/bin/bash
 
-# Stop on errors
+# Color Lock - Firebase Emulator Startup Script
+# This script starts the Firebase emulators, builds functions, and seeds test data.
+#
+# Usage:
+#   npm run cursor-dev
+#   OR
+#   ./scripts/cursor-emulator.sh
+
 set -e
 
-# Colors for prettier output
+# Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Function to check if port is in use
-check_port() {
-  lsof -i:$1 > /dev/null 2>&1
-  return $?
-}
+log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# Function to clean up previous emulators
-cleanup_previous() {
-  echo -e "${YELLOW}Checking for existing emulators...${NC}"
-  
-  # Check for Firebase emulator processes
-  if pgrep -f "firebase emulators" > /dev/null; then
-    echo -e "${YELLOW}Found existing Firebase emulator processes...${NC}"
-    pkill -f "firebase emulators" || true
-    echo -e "${GREEN}Stopped Firebase emulator processes.${NC}"
-  fi
-  
-  # Check for Java emulator processes
-  if pgrep -f "java.*emulator" > /dev/null; then
-    echo -e "${YELLOW}Found existing Java emulator processes...${NC}"
-    pkill -f "java.*emulator" || true
-    echo -e "${GREEN}Stopped Java emulator processes.${NC}"
-  fi
-  
-  # Check common emulator ports
-  PORTS_TO_CHECK=(8080 9099 5001 4400 4000 4500 9150 5000 9000 8085 4438)
-  PORTS_IN_USE=()
-  
-  for PORT in "${PORTS_TO_CHECK[@]}"; do
-    if check_port $PORT; then
-      PORTS_IN_USE+=($PORT)
-      echo -e "${YELLOW}Found process using port $PORT${NC}"
-    fi
-  done
-  
-  if [ ${#PORTS_IN_USE[@]} -gt 0 ]; then
-    echo -e "${YELLOW}Forcefully stopping processes on ports: ${PORTS_IN_USE[@]}${NC}"
-    for PORT in "${PORTS_IN_USE[@]}"; do
-      # Get PID of process using this port
-      PID=$(lsof -t -i:$PORT 2>/dev/null || true)
-      if [ ! -z "$PID" ]; then
-        echo -e "${YELLOW}Killing process $PID using port $PORT${NC}"
-        kill -9 $PID 2>/dev/null || true
-      fi
-    done
-    
-    # Final fallback if specific process killing didn't work
-    echo -e "${YELLOW}Final cleanup of any remaining emulator processes...${NC}"
-    killall -9 java node 2>/dev/null || true
-    
-    sleep 3
-    echo -e "${GREEN}Cleaned up previous emulators.${NC}"
-  else
-    echo -e "${GREEN}No existing emulators found on checked ports.${NC}"
-  fi
-  
-  # Wait a moment to ensure ports are released
+# Kill any existing emulator processes
+cleanup() {
+  log_info "Cleaning up existing emulator processes..."
+  pkill -f "firebase emulators" 2>/dev/null || true
+  pkill -f "java.*emulator" 2>/dev/null || true
   sleep 2
 }
 
-# Function to handle cleanup on exit
+# Handle script exit
 handle_exit() {
-  echo -e "\n${BLUE}Cleaning up...${NC}"
-  # Kill the emulator process
+  echo ""
+  log_info "Shutting down emulators..."
   kill $EMULATOR_PID 2>/dev/null || true
-  echo -e "${GREEN}Emulators stopped.${NC}"
+  log_success "Emulators stopped."
   exit 0
 }
 
-# Set trap for clean exit
-trap handle_exit INT TERM EXIT
+trap handle_exit INT TERM
 
-# Clean up any previous emulator instances
-cleanup_previous
+# Step 1: Cleanup
+cleanup
 
-echo -e "${BLUE}Building functions...${NC}"
-(cd functions && npm run build) # Run build in subshell
+# Step 2: Build functions
+log_info "Building Cloud Functions..."
+(cd functions && npm run build)
 if [ $? -ne 0 ]; then
-  echo -e "${RED}Functions build failed!${NC}"
+  log_error "Functions build failed!"
   exit 1
 fi
-echo -e "${GREEN}Functions built successfully.${NC}"
+log_success "Functions built successfully."
 
-echo -e "${BLUE}=== Starting Firebase Emulators ===${NC}"
-echo -e "${BLUE}Project: color-lock-prod${NC}"
-echo -e "${YELLOW}IMPORTANT: The frontend must connect to project 'color-lock-prod' in region 'us-central1'${NC}"
+# Step 3: Start emulators
+log_info "Starting Firebase Emulators..."
+firebase emulators:start \
+  --only auth,functions,firestore \
+  --project color-lock-prod \
+  --import=./firebase-emulator-data \
+  --export-on-exit=./firebase-emulator-data &
 
-# Start Firebase emulators in the background
-firebase emulators:start --only auth,functions,firestore,pubsub --project color-lock-prod --inspect-functions &
-
-# Store the emulator process ID
 EMULATOR_PID=$!
 
-# Wait for emulators to start
-echo -e "${BLUE}Waiting for emulators to start (15 seconds)...${NC}"
-sleep 15
+# Wait for emulators to initialize
+log_info "Waiting for emulators to start (10 seconds)..."
+sleep 10
 
 # Check if emulators are running
 if ! ps -p $EMULATOR_PID > /dev/null; then
-  echo -e "${RED}Emulators failed to start. Check for port conflicts.${NC}"
+  log_error "Emulators failed to start. Check for port conflicts."
   exit 1
 fi
 
-# Seed data
-echo -e "${BLUE}=== Seeding Test Data ===${NC}"
-echo -e "${YELLOW}The seeding script will use project ID: color-lock-prod${NC}"
+# Step 4: Seed test data
+log_info "Seeding test data..."
 node scripts/seed-emulator.js
-
-# Check if seed was successful
 if [ $? -ne 0 ]; then
-  echo -e "${RED}Failed to seed test data. Check the error logs above.${NC}"
+  log_error "Failed to seed test data."
   kill $EMULATOR_PID
   exit 1
-else
-  echo -e "${GREEN}Successfully seeded test data to Firestore emulator.${NC}"
-  echo -e "${YELLOW}You should now see data in the getDailyScoresStats function responses.${NC}"
 fi
+log_success "Test data seeded successfully."
 
-# Set PUBSUB_EMULATOR_HOST for convenience in this terminal session
-export PUBSUB_EMULATOR_HOST=localhost:8085
-echo -e "${BLUE}Set PUBSUB_EMULATOR_HOST=${PUBSUB_EMULATOR_HOST} for this terminal session${NC}"
+# Done!
+echo ""
+echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}  Firebase Emulators Ready!${NC}"
+echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
+echo ""
+echo -e "  ${BLUE}Emulator UI:${NC}      http://localhost:4000"
+echo -e "  ${BLUE}Firestore:${NC}        http://localhost:8080"
+echo -e "  ${BLUE}Auth:${NC}             http://localhost:9099"
+echo -e "  ${BLUE}Functions:${NC}        http://localhost:5001"
+echo ""
+echo -e "  ${YELLOW}To start the frontend:${NC} npm run dev"
+echo ""
+echo -e "  Press ${RED}Ctrl+C${NC} to stop the emulators."
+echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
+echo ""
 
-# Notify user
-echo -e "\n${GREEN}=== Setup Complete! ===${NC}"
-echo -e "Firebase emulators are running with test data."
-echo -e "Emulator UI: ${BLUE}http://localhost:4000${NC}"
-echo -e "You can now run your app with:"
-echo -e "${BLUE}npm run dev${NC}"
-echo -e "\nTo trigger scheduled functions, run:"
-echo -e "${BLUE}npm run trigger:elo:emulator${NC} or ${BLUE}npm run trigger:leaderboard:emulator${NC}"
-echo -e "\nPress Ctrl+C to stop the emulators when done testing."
-
-# Keep script running until Ctrl+C
-wait $EMULATOR_PID 
+# Keep script running
+wait $EMULATOR_PID

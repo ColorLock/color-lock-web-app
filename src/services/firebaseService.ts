@@ -154,11 +154,47 @@ export interface GetGlobalLeaderboardV2Response {
   error?: string;
 }
 
-export const getGlobalLeaderboardV2Callable = getCallableFunction<{ 
-  category: 'score' | 'goals' | 'streaks'; 
-  subcategory: string; 
-  difficulty?: string 
+export const getGlobalLeaderboardV2Callable = getCallableFunction<{
+  category: 'score' | 'goals' | 'streaks';
+  subcategory: string;
+  difficulty?: string
 }, GetGlobalLeaderboardV2Response>('getGlobalLeaderboardV2');
+
+// Usage Stats callable
+export interface UsageStatsEntry {
+  puzzleId: string;
+  uniqueUsers: number;
+  totalAttempts: number;
+}
+
+export interface GetUsageStatsResponse {
+  success: boolean;
+  stats?: UsageStatsEntry[];
+  count?: number;
+  error?: string;
+}
+
+export const getUsageStatsCallable = getCallableFunction<{
+  startDate: string;  // YYYY-MM-DD format
+  endDate: string;    // YYYY-MM-DD format
+}, GetUsageStatsResponse>('getUsageStats');
+
+// Backfill usage stats callable (admin function)
+export interface BackfillUsageStatsResponse {
+  success: boolean;
+  dryRun?: boolean;
+  processedDays?: number;
+  skippedDays?: number;
+  errorDays?: number;
+  totalDays?: number;
+  error?: string;
+}
+
+export const backfillUsageStatsCallable = getCallableFunction<{
+  startDate?: string;
+  endDate?: string;
+  dryRun?: boolean;
+}, BackfillUsageStatsResponse>('backfillUsageStats');
 
 // Add a helper function to verify auth state - useful for debugging
 export const verifyAuthState = () => {

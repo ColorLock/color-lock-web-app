@@ -377,6 +377,42 @@ async function seedData() {
     console.log(`Found ${hardCount} hard entries in dailyScoresV2 for ${todayStr}`);
 
     console.log('Created dailyScoresV2 collections with per-difficulty structure');
+
+    // 6) Create usageStats collection for all dates
+    console.log('Creating/updating usageStats for all puzzle dates...');
+    for (const date of DATES) {
+      // Count unique users who played this date (across all difficulties)
+      const uniqueUsersSet = new Set();
+      let totalAttemptsForDate = 0;
+      
+      for (const uid of userIds) {
+        const entry = userHistories[uid][date];
+        if (!entry) continue; // user didn't play this date
+        
+        uniqueUsersSet.add(uid);
+        totalAttemptsForDate += entry.totalAttempts || 0;
+      }
+      
+      const uniqueUsers = uniqueUsersSet.size;
+      
+      // Only write if there's data for this date
+      if (uniqueUsers > 0) {
+        await db.collection('usageStats').doc(date).set({
+          uniqueUsers,
+          totalAttempts: totalAttemptsForDate,
+          processedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+    }
+    console.log('Created usageStats collection with daily stats');
+
+    // Verify usageStats for today
+    const usageDoc = await db.collection('usageStats').doc(todayStr).get();
+    if (usageDoc.exists) {
+      const usageData = usageDoc.data();
+      console.log(`usageStats for ${todayStr}: ${usageData.uniqueUsers} users, ${usageData.totalAttempts} attempts`);
+    }
+
     console.log('Seeding completed successfully');
   }
   catch (error) {

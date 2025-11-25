@@ -20,7 +20,7 @@ interface LandingScreenProps {
 
 const LandingScreen: React.FC<LandingScreenProps> = () => {
   const { signIn, signUp, playAsGuest, logOut, currentUser, isGuest, isAuthenticated } = useAuth();
-  const { setShowLandingPage } = useNavigation();
+  const { setShowLandingPage, navigateToScreen } = useNavigation();
   const { dailyScoresStats, dailyScoresV2Stats, loadingStates, errorStates } = useDataCache(); // Use the cache context
 
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -278,7 +278,7 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
             <p className="stats-highlight">
               {playersMessage}
             </p>
-            <button 
+            <button
               className="landing-stats-button"
               onClick={handleOpenStatsModal}
               disabled={authLoading}

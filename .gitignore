@@ -28,6 +28,9 @@ yarn-error.log*
 firebase-debug.log*
 firestore-debug.log*
 
+# Firebase emulator data
+firebase-emulator-data/
+
 # Don't ignore the firebaseConfig.tsx file
 !src/env/firebaseConfig.tsx
 
@@ -71,6 +74,7 @@ notes.txt
 temp.txt
 *_sctructure*.json
 TEST_REWRITE_SUMMARY.md
+firebase2.py
 
 # Test cache
 .jest-cache/

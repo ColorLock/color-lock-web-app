@@ -24,6 +24,7 @@ import TutorialWarningModal from './components/TutorialWarningModal';
 import LandingScreen from './components/LandingScreen';
 import SignUpButton from './components/SignUpButton';
 import HamburgerMenu from './components/HamburgerMenu';
+import UsageStatsScreen from './components/UsageStatsScreen';
 
 // Utils
 import { generateShareText, shareToTwitter, shareToFacebook, copyToClipboard } from './utils/shareUtils';
@@ -36,9 +37,13 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataCacheProvider, useDataCache } from './contexts/DataCacheContext';
 
 // Create a context for navigating between screens
+type ScreenType = 'landing' | 'game' | 'usageStats';
+
 interface NavigationContextType {
   showLandingPage: boolean;
   setShowLandingPage: (show: boolean) => void;
+  currentScreen: ScreenType;
+  navigateToScreen: (screen: ScreenType) => void;
 }
 
 const NavigationContext = createContext<NavigationContextType | undefined>(undefined);
@@ -485,10 +490,45 @@ const GameContainer = () => {
 };
 
 const App: React.FC = () => {
-  const [showLandingPage, setShowLandingPage] = useState(true);
+  // Check URL path for direct navigation (e.g., /stats)
+  const getInitialScreen = (): ScreenType => {
+    const path = window.location.pathname.toLowerCase();
+    if (path === '/stats' || path === '/stats/') {
+      return 'usageStats';
+    }
+    return 'landing';
+  };
+
+  const initialScreen = getInitialScreen();
+  const [showLandingPage, setShowLandingPage] = useState(initialScreen === 'landing');
+  const [currentScreen, setCurrentScreen] = useState<ScreenType>(initialScreen);
+
+  const navigateToScreen = (screen: ScreenType) => {
+    setCurrentScreen(screen);
+    setShowLandingPage(screen === 'landing');
+    // Update URL without page reload
+    const newPath = screen === 'usageStats' ? '/stats' : '/';
+    window.history.pushState({}, '', newPath);
+  };
+
+  // Handle browser back/forward navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      const screen = getInitialScreen();
+      setCurrentScreen(screen);
+      setShowLandingPage(screen === 'landing');
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   return (
-    <NavigationContext.Provider value={{ showLandingPage, setShowLandingPage }}>
+    <NavigationContext.Provider value={{
+      showLandingPage,
+      setShowLandingPage,
+      currentScreen,
+      navigateToScreen
+    }}>
       <AuthProvider>
         <DataCacheProvider>
           <AuthenticatedApp />
@@ -500,7 +540,7 @@ const App: React.FC = () => {
 
 const AuthenticatedApp: React.FC = () => {
   const { isAuthenticated, isLoading, currentUser } = useAuth();
-  const { showLandingPage } = useNavigation();
+  const { showLandingPage, currentScreen } = useNavigation();
   const { fetchAndCacheData, isInitialFetchDone } = useDataCache();
   const fetchInitiated = useRef(false);
 
@@ -523,7 +563,10 @@ const AuthenticatedApp: React.FC = () => {
   }
 
   if (isAuthenticated) {
-    if (showLandingPage) {
+    // Handle navigation based on currentScreen
+    if (currentScreen === 'usageStats') {
+      return <UsageStatsScreen />;
+    } else if (showLandingPage) {
       return <LandingScreen />;
     } else {
       return (
