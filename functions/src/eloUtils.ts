@@ -12,7 +12,7 @@ const logger = v2Logger;
  * For first attempts (N <= 1), there's no penalty.
  * For subsequent attempts, a penalty is calculated based on attempt number.
  */
-function calculateEloAttemptPenalty(winAttempt: number | null | undefined): number {
+export function calculateEloAttemptPenalty(winAttempt: number | null | undefined): number {
   if (winAttempt === null || winAttempt === undefined || winAttempt <= 1) {
     return 0;
   }
@@ -86,57 +86,4 @@ export function calculateEloScore(
     logger.debug(`Elo components for ${dateStr}: winBonus=${winBonus}, tieOrBeatBonus=${tieOrBeatBonus}, diffMultiplier=${difficultyMultiplier}, hintMultiplier=${hintPenaltyMultiplier}, attemptPenalty=${cumulativeAttemptPenalty.toFixed(2)}, firstToBeatBotBonus=${firstToBeatBotBonus}, finalScore=${Math.round(finalScore)}`);
 
     return Math.round(finalScore);
-}
-
-
-/**
- * Calculates Elo statistics (all-time and last 30 days) for a user.
- * @param {object | undefined} eloScoresByDay - The user's eloScoreByDay map.
- * @returns {object} - An object containing calculated Elo stats.
- */
-export function calculateAggregateEloStats(eloScoresByDay: { [date: string]: number } | undefined = {}) {
-    let eloTotal = 0;
-    let eloCount = 0;
-    let eloTotalLast30 = 0;
-    let eloCountLast30 = 0;
-
-    const today = new Date();
-    const thirtyDaysAgo = new Date(today);
-    thirtyDaysAgo.setDate(today.getDate() - 30);
-    thirtyDaysAgo.setHours(0, 0, 0, 0); // Normalize to start of the day
-
-    const scores = eloScoresByDay || {};
-
-    for (const dateStr in scores) {
-        const score = scores[dateStr];
-        if (typeof score === 'number' && !isNaN(score)) {
-            eloTotal += score;
-            eloCount++;
-
-            try {
-                const parts = dateStr.split('-');
-                if (parts.length === 3) {
-                    const scoreDate = new Date(Date.UTC(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10)));
-                    if (!isNaN(scoreDate.getTime()) && scoreDate >= thirtyDaysAgo) {
-                        eloTotalLast30 += score;
-                        eloCountLast30++;
-                    }
-                } else {
-                    logger.warn(`Invalid date format '${dateStr}' encountered during Elo calculation.`);
-                }
-            } catch (e) {
-                logger.warn(`Could not parse date string '${dateStr}' during Elo calculation`, e);
-            }
-        }
-    }
-
-    const eloScoreAvg = eloCount > 0 ? Math.round(eloTotal / eloCount) : null;
-    const eloScoreAvgLast30 = eloCountLast30 > 0 ? Math.round(eloTotalLast30 / eloCountLast30) : null;
-
-    return {
-        eloScoreAvg,
-        eloScoreTotal: eloTotal,
-        eloScoreAvgLast30,
-        eloScoreTotalLast30: eloTotalLast30,
-    };
 }

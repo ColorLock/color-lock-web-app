@@ -29,7 +29,7 @@ import {
 
 // Import types
 import { FirestorePuzzleData } from '../types';
-import { GameStatistics, LeaderboardEntry } from '../types/stats';
+import { GameStatistics } from '../types/stats';
 
 // Connect to emulators if in development
 if (useEmulators && firebaseAuth && firebaseFirestore && firebaseFunctions) {
@@ -84,24 +84,8 @@ const getCallableFunction = <RequestData, ResponseData>(name: string) => {
 // Define callable function for fetching puzzle
 export const fetchPuzzleCallable = getCallableFunction<{ date: string }, { success: boolean; data?: FirestorePuzzleData; error?: string }>('fetchPuzzle');
 
-// Define callable function for updating stats (legacy)
-export const updateUserStatsCallable = getCallableFunction<any, { success: boolean; updatedStats?: any; error?: string }>('updateUserStats');
-
-// New: Define callable function for recording completed puzzle history
+// Define callable function for recording completed puzzle history
 export const recordPuzzleHistoryCallable = getCallableFunction<any, { success: boolean; error?: string }>('recordPuzzleHistory');
-
-
-// Define callable function for getting daily score stats
-export const getDailyScoresStatsCallable = getCallableFunction<{ puzzleId: string }, { success: boolean; stats?: any; error?: string }>('getDailyScoresStats');
-
-// Define callable function for getting global leaderboard
-interface GetGlobalLeaderboardResponse {
-  success: boolean;
-  leaderboard?: LeaderboardEntry[];
-  error?: string;
-}
-
-export const getGlobalLeaderboardCallable = getCallableFunction<void, GetGlobalLeaderboardResponse>('getGlobalLeaderboard');
 
 // V2 daily scores per-difficulty stats
 interface GetDailyScoresV2StatsResponse {
