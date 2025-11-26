@@ -175,19 +175,36 @@ const UsageStatsScreen: React.FC = () => {
     if (timeFilter === 'alltime') {
       // Aggregate by month - properly count unique users per month
       const monthlyMap = new Map<string, { userIds: Set<string>; totalAttempts: number }>();
-      
+
+      // DEBUG: Check if userIds exist in the data
+      const sampleEntry = statsData[0];
+      console.log('[UsageStats] Sample entry for debugging:', {
+        puzzleId: sampleEntry?.puzzleId,
+        uniqueUsers: sampleEntry?.uniqueUsers,
+        hasUserIds: !!sampleEntry?.userIds,
+        userIdsLength: sampleEntry?.userIds?.length,
+        totalAttempts: sampleEntry?.totalAttempts
+      });
+
       statsData.forEach(entry => {
         const monthKey = entry.puzzleId.substring(0, 7); // YYYY-MM
         const existing = monthlyMap.get(monthKey) || { userIds: new Set<string>(), totalAttempts: 0 };
-        
+
         // Add user IDs to the set for this month (automatically deduplicates)
         if (entry.userIds && Array.isArray(entry.userIds)) {
           entry.userIds.forEach(uid => existing.userIds.add(uid));
         }
-        
+
         existing.totalAttempts += entry.totalAttempts;
         monthlyMap.set(monthKey, existing);
       });
+
+      // DEBUG: Log monthly aggregation results
+      console.log('[UsageStats] Monthly aggregation:', Array.from(monthlyMap.entries()).map(([month, data]) => ({
+        month,
+        uniqueUsers: data.userIds.size,
+        totalAttempts: data.totalAttempts
+      })));
 
       return Array.from(monthlyMap.entries())
         .sort((a, b) => a[0].localeCompare(b[0]))

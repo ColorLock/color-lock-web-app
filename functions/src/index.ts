@@ -1098,6 +1098,10 @@ export const sendDailyPuzzleReminders = onSchedule(
                 isAnonymous: boolean;
             }
 
+            interface UserToNotify extends UserInfo {
+                allUserIdsForToken: string[]; // All user IDs that share this FCM token (for checking if ANY played)
+            }
+
             const tokenToUsersMap = new Map<string, UserInfo[]>();
 
             // First pass: Group users by FCM token and check if they're anonymous
@@ -1136,20 +1140,24 @@ export const sendDailyPuzzleReminders = onSchedule(
             }
 
             // Second pass: Select one user per FCM token (prefer non-anonymous)
-            const usersToNotify: UserInfo[] = [];
+            // Also track ALL userIds for that token so we can check if ANY of them played today
+            const usersToNotify: UserToNotify[] = [];
 
             for (const [fcmToken, users] of tokenToUsersMap.entries()) {
+                // Collect all userIds associated with this FCM token
+                const allUserIdsForToken = users.map(u => u.userId);
+                
                 // Find non-anonymous user if exists
                 const nonAnonymousUser = users.find(u => !u.isAnonymous);
                 
                 if (nonAnonymousUser) {
-                    usersToNotify.push(nonAnonymousUser);
+                    usersToNotify.push({ ...nonAnonymousUser, allUserIdsForToken });
                     if (users.length > 1) {
-                        logger.info(`sendDailyPuzzleReminders: Token ${fcmToken.substring(0, 10)}... has ${users.length} accounts, prioritizing non-anonymous user ${nonAnonymousUser.userId}`);
+                        logger.info(`sendDailyPuzzleReminders: Token ${fcmToken.substring(0, 10)}... has ${users.length} accounts (${allUserIdsForToken.join(', ')}), prioritizing non-anonymous user ${nonAnonymousUser.userId}`);
                     }
                 } else {
                     // All users are anonymous, pick the first one
-                    usersToNotify.push(users[0]);
+                    usersToNotify.push({ ...users[0], allUserIdsForToken });
                 }
             }
 
@@ -1173,9 +1181,11 @@ export const sendDailyPuzzleReminders = onSchedule(
 
                     logger.info(`sendDailyPuzzleReminders: User ${userId} is at 8:30 PM in ${timezone}`);
 
-                    // Step 3: Check if user has already played today
-                    if (uniquePlayerIds.has(userId)) {
-                        logger.info(`sendDailyPuzzleReminders: User ${userId} already played today, skipping`);
+                    // Step 3: Check if ANY user on this device has already played today
+                    // This handles the case where a device has multiple accounts (e.g., guest + authenticated)
+                    const playedUserIds = userInfo.allUserIdsForToken.filter(uid => uniquePlayerIds.has(uid));
+                    if (playedUserIds.length > 0) {
+                        logger.info(`sendDailyPuzzleReminders: Device already played today via user(s): ${playedUserIds.join(', ')}, skipping notification to ${userId}`);
                         skippedCount++;
                         continue;
                     }
