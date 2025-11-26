@@ -1339,39 +1339,61 @@ async function updateAggregateStats(latestPuzzleId: string): Promise<void> {
         logger.info(`updateAggregateStats: ${docId} - ${uniqueUserIds.size} unique users, ${totalAttempts} attempts, ${daysWithData} days`);
     }
 
-    // Calculate all-time stats
+    // Calculate all-time stats with monthly aggregation
     const allUniqueUserIds = new Set<string>();
+    const monthlyStatsMap = new Map<string, { userIds: Set<string>; totalAttempts: number }>();
     let allTotalAttempts = 0;
     let allDaysWithData = 0;
     let earliestDate: string | null = null;
 
     const allStatsSnapshot = await db.collection("usageStats").get();
-    
+
     allStatsSnapshot.forEach(doc => {
         // Skip aggregate documents
         if (doc.id.startsWith("aggregate_")) return;
-        
+
         const data = doc.data();
-        
+
         // Track earliest date
         if (!earliestDate || doc.id < earliestDate) {
             earliestDate = doc.id;
         }
-        
-        // Collect unique user IDs
+
+        // Collect unique user IDs for all-time
         if (data.userIds && Array.isArray(data.userIds)) {
             data.userIds.forEach((uid: string) => allUniqueUserIds.add(uid));
         }
-        
-        // Sum total attempts
+
+        // Sum total attempts for all-time
         if (typeof data.totalAttempts === "number") {
             allTotalAttempts += data.totalAttempts;
         }
-        
+
+        // Aggregate by month
+        const monthKey = doc.id.substring(0, 7); // YYYY-MM
+        const monthlyData = monthlyStatsMap.get(monthKey) || { userIds: new Set<string>(), totalAttempts: 0 };
+
+        if (data.userIds && Array.isArray(data.userIds)) {
+            data.userIds.forEach((uid: string) => monthlyData.userIds.add(uid));
+        }
+        if (typeof data.totalAttempts === "number") {
+            monthlyData.totalAttempts += data.totalAttempts;
+        }
+
+        monthlyStatsMap.set(monthKey, monthlyData);
         allDaysWithData++;
     });
 
-    // Write all-time aggregate document
+    // Convert monthly stats map to a serializable object
+    const monthlyStats: Record<string, { uniqueUsers: number; totalAttempts: number }> = {};
+    monthlyStatsMap.forEach((data, monthKey) => {
+        monthlyStats[monthKey] = {
+            uniqueUsers: data.userIds.size,
+            totalAttempts: data.totalAttempts,
+        };
+    });
+
+    // Write all-time aggregate document with monthly stats
     await db.collection("usageStats").doc("aggregate_allTime").set({
         uniqueUsers: allUniqueUserIds.size,
         totalAttempts: allTotalAttempts,
@@ -1379,10 +1401,11 @@ async function updateAggregateStats(latestPuzzleId: string): Promise<void> {
         startDate: earliestDate || latestPuzzleId,
         endDate: latestPuzzleId,
         userIds: Array.from(allUniqueUserIds).sort(),
+        monthlyStats, // Map of YYYY-MM -> {uniqueUsers, totalAttempts}
         processedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    logger.info(`updateAggregateStats: aggregate_allTime - ${allUniqueUserIds.size} unique users, ${allTotalAttempts} attempts, ${allDaysWithData} days`);
+    logger.info(`updateAggregateStats: aggregate_allTime - ${allUniqueUserIds.size} unique users, ${allTotalAttempts} attempts, ${allDaysWithData} days, ${monthlyStatsMap.size} months`);
 }
 
 /**
@@ -1493,6 +1516,7 @@ export const collectDailyUsageStats = onSchedule(
 interface GetUsageStatsRequest {
     startDate: string; // YYYY-MM-DD format
     endDate: string;   // YYYY-MM-DD format
+    aggregateByMonth?: boolean; // If true, return monthly aggregated data instead of daily
 }
 
 interface UsageStatsEntry {
@@ -1510,9 +1534,9 @@ export const getUsageStats = onCall(
     },
     async (request) => {
         const userId = request.auth?.uid || "guest/unauthenticated";
-        const { startDate, endDate } = (request.data || {}) as GetUsageStatsRequest;
+        const { startDate, endDate, aggregateByMonth = false } = (request.data || {}) as GetUsageStatsRequest;
 
-        logger.info(`getUsageStats: Called by ${userId}, range: ${startDate} to ${endDate}`);
+        logger.info(`getUsageStats: Called by ${userId}, range: ${startDate} to ${endDate}, aggregateByMonth: ${aggregateByMonth}`);
 
         if (!startDate || !endDate) {
             throw new HttpsError("invalid-argument", "startDate and endDate are required (YYYY-MM-DD format).");
@@ -1618,12 +1642,78 @@ export const getUsageStats = onCall(
                 logger.info(`getUsageStats: Calculated ${totalUniqueUsers} unique users, ${totalAttempts} attempts from ${stats.length} daily stats`);
             }
 
-            logger.info(`getUsageStats: Returning ${stats.length} entries, ${totalUniqueUsers} total unique users, ${totalAttempts} total attempts`);
+            // If aggregateByMonth is requested, try to use pre-computed monthly stats from aggregate_allTime
+            let finalStats = stats;
+            if (aggregateByMonth && stats.length > 0) {
+                // Check if aggregate_allTime has monthly stats
+                try {
+                    const aggregateDoc = await db.collection("usageStats").doc("aggregate_allTime").get();
+                    if (aggregateDoc.exists) {
+                        const aggregateData = aggregateDoc.data();
+                        const monthlyStats = aggregateData?.monthlyStats as Record<string, { uniqueUsers: number; totalAttempts: number }> | undefined;
+
+                        if (monthlyStats && typeof monthlyStats === "object") {
+                            // Use pre-computed monthly stats
+                            finalStats = Object.entries(monthlyStats)
+                                .filter(([monthKey]) => monthKey >= startDate.substring(0, 7) && monthKey <= endDate.substring(0, 7))
+                                .sort((a, b) => a[0].localeCompare(b[0]))
+                                .map(([monthKey, data]) => ({
+                                    puzzleId: monthKey, // YYYY-MM format
+                                    uniqueUsers: data.uniqueUsers,
+                                    totalAttempts: data.totalAttempts,
+                                }));
+
+                            logger.info(`getUsageStats: Using pre-computed monthly stats from aggregate_allTime: ${finalStats.length} months`);
+                        } else {
+                            // Fallback: aggregate manually from daily stats
+                            logger.warn(`getUsageStats: aggregate_allTime missing monthlyStats, falling back to manual aggregation`);
+                            finalStats = aggregateMonthlyFromDaily(stats);
+                        }
+                    } else {
+                        // Fallback: aggregate manually from daily stats
+                        logger.warn(`getUsageStats: aggregate_allTime document not found, falling back to manual aggregation`);
+                        finalStats = aggregateMonthlyFromDaily(stats);
+                    }
+                } catch (error) {
+                    logger.error(`getUsageStats: Error reading aggregate_allTime, falling back to manual aggregation:`, error);
+                    finalStats = aggregateMonthlyFromDaily(stats);
+                }
+            }
+
+            function aggregateMonthlyFromDaily(dailyStats: UsageStatsEntry[]): UsageStatsEntry[] {
+                const monthlyMap = new Map<string, { userIds: Set<string>; totalAttempts: number }>();
+
+                for (const stat of dailyStats) {
+                    const monthKey = stat.puzzleId.substring(0, 7); // YYYY-MM format
+                    const existing = monthlyMap.get(monthKey) || { userIds: new Set<string>(), totalAttempts: 0 };
+
+                    // Add user IDs to the set for this month (automatically deduplicates)
+                    if (stat.userIds && Array.isArray(stat.userIds)) {
+                        stat.userIds.forEach(uid => existing.userIds.add(uid));
+                    }
+
+                    existing.totalAttempts += stat.totalAttempts;
+                    monthlyMap.set(monthKey, existing);
+                }
+
+                const result = Array.from(monthlyMap.entries())
+                    .sort((a, b) => a[0].localeCompare(b[0]))
+                    .map(([monthKey, data]) => ({
+                        puzzleId: monthKey,
+                        uniqueUsers: data.userIds.size,
+                        totalAttempts: data.totalAttempts,
+                    }));
+
+                logger.info(`getUsageStats: Manually aggregated ${dailyStats.length} daily stats into ${result.length} monthly stats`);
+                return result;
+            }
+
+            logger.info(`getUsageStats: Returning ${finalStats.length} entries, ${totalUniqueUsers} total unique users, ${totalAttempts} total attempts`);
 
             return {
                 success: true,
-                stats,
-                count: stats.length,
+                stats: finalStats,
+                count: finalStats.length,
                 totalUniqueUsers,
                 totalAttempts,
             };

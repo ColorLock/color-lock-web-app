@@ -180,6 +180,7 @@ export interface GetUsageStatsResponse {
 export const getUsageStatsCallable = getCallableFunction<{
   startDate: string;  // YYYY-MM-DD format
   endDate: string;    // YYYY-MM-DD format
+  aggregateByMonth?: boolean; // If true, return monthly aggregated data
 }, GetUsageStatsResponse>('getUsageStats');
 
 // Backfill usage stats callable (admin function)
