@@ -173,16 +173,20 @@ const UsageStatsScreen: React.FC = () => {
     if (statsData.length === 0) return [];
 
     if (timeFilter === 'alltime') {
-      // Aggregate by month
-      const monthlyMap = new Map<string, { uniqueUsers: number; totalAttempts: number }>();
+      // Aggregate by month - properly count unique users per month
+      const monthlyMap = new Map<string, { userIds: Set<string>; totalAttempts: number }>();
       
       statsData.forEach(entry => {
         const monthKey = entry.puzzleId.substring(0, 7); // YYYY-MM
-        const existing = monthlyMap.get(monthKey) || { uniqueUsers: 0, totalAttempts: 0 };
-        monthlyMap.set(monthKey, {
-          uniqueUsers: existing.uniqueUsers + entry.uniqueUsers,
-          totalAttempts: existing.totalAttempts + entry.totalAttempts,
-        });
+        const existing = monthlyMap.get(monthKey) || { userIds: new Set<string>(), totalAttempts: 0 };
+        
+        // Add user IDs to the set for this month (automatically deduplicates)
+        if (entry.userIds && Array.isArray(entry.userIds)) {
+          entry.userIds.forEach(uid => existing.userIds.add(uid));
+        }
+        
+        existing.totalAttempts += entry.totalAttempts;
+        monthlyMap.set(monthKey, existing);
       });
 
       return Array.from(monthlyMap.entries())
@@ -193,7 +197,7 @@ const UsageStatsScreen: React.FC = () => {
           return {
             label: `${monthName} '${year.slice(2)}`,
             date: monthKey,
-            uniqueUsers: data.uniqueUsers,
+            uniqueUsers: data.userIds.size, // Count of unique users in the month
             totalAttempts: data.totalAttempts,
           };
         });

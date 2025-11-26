@@ -165,6 +165,7 @@ export interface UsageStatsEntry {
   puzzleId: string;
   uniqueUsers: number;
   totalAttempts: number;
+  userIds?: string[]; // Optional: array of user IDs for proper monthly aggregation
 }
 
 export interface GetUsageStatsResponse {

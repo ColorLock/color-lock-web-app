@@ -1489,6 +1489,7 @@ interface UsageStatsEntry {
     puzzleId: string;
     uniqueUsers: number;
     totalAttempts: number;
+    userIds?: string[];
 }
 
 export const getUsageStats = onCall(
@@ -1532,6 +1533,7 @@ export const getUsageStats = onCall(
                         puzzleId: docId,
                         uniqueUsers: typeof data.uniqueUsers === "number" ? data.uniqueUsers : 0,
                         totalAttempts: typeof data.totalAttempts === "number" ? data.totalAttempts : 0,
+                        userIds: Array.isArray(data.userIds) ? data.userIds : undefined,
                     });
                 }
             });
@@ -1596,17 +1598,9 @@ export const getUsageStats = onCall(
                     // Sum total attempts from daily stats
                     totalAttempts += stat.totalAttempts;
                     
-                    // Read the daily document to get userIds
-                    try {
-                        const dailyDoc = await db.collection("usageStats").doc(stat.puzzleId).get();
-                        if (dailyDoc.exists) {
-                            const dailyData = dailyDoc.data();
-                            if (dailyData?.userIds && Array.isArray(dailyData.userIds)) {
-                                dailyData.userIds.forEach((uid: string) => uniqueUserIds.add(uid));
-                            }
-                        }
-                    } catch (dailyError) {
-                        logger.warn(`getUsageStats: Error reading daily doc ${stat.puzzleId}:`, dailyError);
+                    // Add user IDs from already-fetched stats (no need to re-query database)
+                    if (stat.userIds && Array.isArray(stat.userIds)) {
+                        stat.userIds.forEach((uid: string) => uniqueUserIds.add(uid));
                     }
                 }
 
