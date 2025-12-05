@@ -25,6 +25,7 @@ import LandingScreen from './components/LandingScreen';
 import SignUpButton from './components/SignUpButton';
 import HamburgerMenu from './components/HamburgerMenu';
 import UsageStatsScreen from './components/UsageStatsScreen';
+import DeleteAccountPage from './components/DeleteAccountPage';
 
 // Utils
 import { generateShareText, shareToTwitter, shareToFacebook, copyToClipboard } from './utils/shareUtils';
@@ -37,7 +38,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataCacheProvider, useDataCache } from './contexts/DataCacheContext';
 
 // Create a context for navigating between screens
-type ScreenType = 'landing' | 'game' | 'usageStats';
+type ScreenType = 'landing' | 'game' | 'usageStats' | 'deleteAccount';
 
 interface NavigationContextType {
   showLandingPage: boolean;
@@ -490,11 +491,14 @@ const GameContainer = () => {
 };
 
 const App: React.FC = () => {
-  // Check URL path for direct navigation (e.g., /stats)
+  // Check URL path for direct navigation (e.g., /stats, /delete-account)
   const getInitialScreen = (): ScreenType => {
     const path = window.location.pathname.toLowerCase();
     if (path === '/stats' || path === '/stats/') {
       return 'usageStats';
+    }
+    if (path === '/delete-account' || path === '/delete-account/') {
+      return 'deleteAccount';
     }
     return 'landing';
   };
@@ -507,7 +511,9 @@ const App: React.FC = () => {
     setCurrentScreen(screen);
     setShowLandingPage(screen === 'landing');
     // Update URL without page reload
-    const newPath = screen === 'usageStats' ? '/stats' : '/';
+    let newPath = '/';
+    if (screen === 'usageStats') newPath = '/stats';
+    else if (screen === 'deleteAccount') newPath = '/delete-account';
     window.history.pushState({}, '', newPath);
   };
 
@@ -560,6 +566,11 @@ const AuthenticatedApp: React.FC = () => {
         </div>
       </div>
     );
+  }
+
+  // Handle delete account page - accessible even if not authenticated
+  if (currentScreen === 'deleteAccount') {
+    return <DeleteAccountPage />;
   }
 
   if (isAuthenticated) {

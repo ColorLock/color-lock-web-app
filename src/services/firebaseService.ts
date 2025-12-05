@@ -200,6 +200,20 @@ export const backfillUsageStatsCallable = getCallableFunction<{
   dryRun?: boolean;
 }, BackfillUsageStatsResponse>('backfillUsageStats');
 
+// Delete Account callable
+export interface DeleteAccountRequest {
+  email: string;
+  password: string;
+}
+
+export interface DeleteAccountResponse {
+  success: boolean;
+  message?: string;
+  error?: string;
+}
+
+export const deleteAccountCallable = getCallableFunction<DeleteAccountRequest, DeleteAccountResponse>('deleteAccount');
+
 // Add a helper function to verify auth state - useful for debugging
 export const verifyAuthState = () => {
   if (!firebaseAuth) {

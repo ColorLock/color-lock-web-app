@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { User, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, EmailAuthProvider, linkWithCredential, updateProfile } from 'firebase/auth';
-import { auth } from '../services/firebaseService';
+import { auth, deleteAccountCallable } from '../services/firebaseService';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -11,6 +11,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, displayName: string) => Promise<User>;
   logOut: () => Promise<void>;
   playAsGuest: () => Promise<void>;
+  deleteAccount: (email: string, password: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -189,6 +190,57 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
+  const deleteAccount = async (email: string, password: string): Promise<void> => {
+    if (!auth) {
+      throw new Error('Authentication service is not available');
+    }
+    
+    if (!currentUser) {
+      throw new Error('No user is currently signed in');
+    }
+    
+    if (currentUser.isAnonymous) {
+      throw new Error('Anonymous accounts cannot be deleted this way. Please sign in with an email account first.');
+    }
+    
+    console.log(`Attempting to delete account for user: ${currentUser.uid}`);
+    
+    try {
+      // Call the Cloud Function to delete the account
+      const result = await deleteAccountCallable({ email, password });
+      
+      if (result.data.success) {
+        console.log('Account deleted successfully via Cloud Function');
+        
+        // Clear local state
+        setCurrentUser(null);
+        setIsAuthenticated(false);
+        setIsGuest(false);
+        localStorage.removeItem('authPreference');
+        
+        // Clear any other local storage data related to the app
+        // Note: The Cloud Function already deleted server-side data
+        localStorage.clear();
+        
+        console.log('Local state cleared after account deletion');
+      } else {
+        throw new Error(result.data.error || 'Failed to delete account');
+      }
+    } catch (error: any) {
+      console.error('Delete account error:', error);
+      
+      // Extract error message from Firebase Functions error
+      if (error.code === 'functions/invalid-argument') {
+        throw new Error(error.message || 'Invalid email or password');
+      } else if (error.code === 'functions/unauthenticated') {
+        throw new Error('You must be signed in to delete your account');
+      } else if (error.code === 'functions/failed-precondition') {
+        throw new Error(error.message || 'Account deletion is not available for this account type');
+      }
+      
+      throw error;
+    }
+  };
 
   const value: AuthContextType = {
     currentUser,
@@ -198,7 +250,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     signIn,
     signUp,
     logOut,
-    playAsGuest
+    playAsGuest,
+    deleteAccount
   };
 
   return (

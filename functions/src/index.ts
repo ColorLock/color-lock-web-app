@@ -398,6 +398,11 @@ export const recordPuzzleHistory = onCall(
                     }
                     newFirstTryLongest = Math.max(newFirstTryCurrent, prevFirstTryLongest);
                     newLastFirstTryDate = puzzleId;
+                } else if (prevLastFirstTryDate !== puzzleId) {
+                    // User won but didn't meet first-try criteria (not first attempt, didn't tie bot, or used hint)
+                    // Reset streak to 0 unless we already processed this puzzle today
+                    newFirstTryCurrent = 0;
+                    newLastFirstTryDate = puzzleId;
                 }
 
                 // Goals achieved/beaten
@@ -1049,36 +1054,12 @@ export const sendDailyPuzzleReminders = onSchedule(
         let sentCount = 0;
         let skippedCount = 0;
         let errorCount = 0;
-        let dailyPlayersCount = 0;
 
         try {
-            // Step 1: Calculate today's puzzle ID and count unique players
+            // Step 1: Get current UTC time
+            // Note: We calculate puzzle IDs per-user based on their timezone
+            // since the client app generates puzzle IDs using local time
             const nowUtc = DateTime.utc();
-            const todayPuzzleId = nowUtc.toFormat("yyyy-MM-dd");
-            const yesterdayPuzzleId = nowUtc.minus({ days: 1 }).toFormat("yyyy-MM-dd");
-
-            logger.info(`sendDailyPuzzleReminders: Today's puzzle ID: ${todayPuzzleId}`);
-
-            // Query all three difficulties to get unique players who played today
-            const dailyScoresRef = db.collection("dailyScoresV2").doc(todayPuzzleId);
-            const dailyScoresSnap = await dailyScoresRef.get();
-
-            const uniquePlayerIds = new Set<string>();
-
-            if (dailyScoresSnap.exists) {
-                const data = dailyScoresSnap.data();
-
-                // Collect user IDs from all difficulties
-                for (const difficulty of ["easy", "medium", "hard"]) {
-                    const diffData = data?.[difficulty];
-                    if (diffData && typeof diffData === "object") {
-                        Object.keys(diffData).forEach(userId => uniquePlayerIds.add(userId));
-                    }
-                }
-            }
-
-            dailyPlayersCount = uniquePlayerIds.size;
-            logger.info(`sendDailyPuzzleReminders: ${dailyPlayersCount} unique players have played today's puzzle`);
 
             // Step 2 & 3: Get all users with FCM tokens and timezones, filter for 8:30 PM local time
             // Note: Firestore only allows one inequality filter per query, so we filter for fcmToken
@@ -1171,8 +1152,20 @@ export const sendDailyPuzzleReminders = onSchedule(
                 const { userId, fcmToken, timezone } = userInfo;
 
                 try {
-                    // Calculate user's local time
-                    const userLocalTime = nowUtc.setZone(timezone);
+                    // Validate timezone before using it
+                    let userLocalTime: DateTime;
+                    try {
+                        userLocalTime = nowUtc.setZone(timezone);
+                        if (!userLocalTime.isValid) {
+                            logger.warn(`sendDailyPuzzleReminders: Invalid timezone for user ${userId}: ${timezone}, skipping`);
+                            skippedCount++;
+                            continue;
+                        }
+                    } catch (tzError) {
+                        logger.warn(`sendDailyPuzzleReminders: Error validating timezone for user ${userId}: ${timezone}`, tzError);
+                        skippedCount++;
+                        continue;
+                    }
 
                     // Check if it's 8:30 PM in user's timezone
                     if (userLocalTime.hour !== targetHour || userLocalTime.minute !== targetMinute) {
@@ -1181,16 +1174,48 @@ export const sendDailyPuzzleReminders = onSchedule(
 
                     logger.info(`sendDailyPuzzleReminders: User ${userId} is at 8:30 PM in ${timezone}`);
 
-                    // Step 3: Check if ANY user on this device has already played today
+                    // Step 3: Calculate today's puzzle ID based on user's local time
+                    // Client apps generate puzzle IDs using local time, so we must do the same
+                    const todayPuzzleId = userLocalTime.toFormat("yyyy-MM-dd");
+                    const yesterdayPuzzleId = userLocalTime.minus({ days: 1 }).toFormat("yyyy-MM-dd");
+
+                    logger.info(`sendDailyPuzzleReminders: User ${userId} - timezone: ${timezone}, UTC: ${nowUtc.toISO()}, local: ${userLocalTime.toISO()}, todayPuzzleId: ${todayPuzzleId}`);
+
+                    // Step 4: Fetch today's puzzle scores and check if ANY user on this device has played
+                    const dailyScoresRef = db.collection("dailyScoresV2").doc(todayPuzzleId);
+                    const dailyScoresSnap = await dailyScoresRef.get();
+
+                    const uniquePlayerIds = new Set<string>();
+                    let todaysTotalPlayers = 0;
+
+                    if (dailyScoresSnap.exists) {
+                        const data = dailyScoresSnap.data();
+
+                        // Collect user IDs from all difficulties
+                        for (const difficulty of ["easy", "medium", "hard"]) {
+                            const diffData = data?.[difficulty];
+                            if (diffData && typeof diffData === "object") {
+                                Object.keys(diffData).forEach(uid => uniquePlayerIds.add(uid));
+                            }
+                        }
+                        todaysTotalPlayers = uniquePlayerIds.size;
+                    }
+
+                    // Check if ANY user on this device has already played today's puzzle
                     // This handles the case where a device has multiple accounts (e.g., guest + authenticated)
                     const playedUserIds = userInfo.allUserIdsForToken.filter(uid => uniquePlayerIds.has(uid));
+
+                    logger.info(`sendDailyPuzzleReminders: User ${userId} check for ${todayPuzzleId} - AllUserIds: [${userInfo.allUserIdsForToken.join(', ')}], PlayedUserIds: [${playedUserIds.join(', ')}], TodayTotalPlayers: ${todaysTotalPlayers}`);
+
                     if (playedUserIds.length > 0) {
-                        logger.info(`sendDailyPuzzleReminders: Device already played today via user(s): ${playedUserIds.join(', ')}, skipping notification to ${userId}`);
+                        logger.info(`sendDailyPuzzleReminders: ✓ User has played - NOT sending notification. Device already played ${todayPuzzleId} via user(s): ${playedUserIds.join(', ')}, skipping notification to ${userId}`);
                         skippedCount++;
                         continue;
                     }
 
-                    // Step 4: Determine notification message based on streak status
+                    logger.info(`sendDailyPuzzleReminders: User ${userId} has not played today's puzzle (${todayPuzzleId}) yet, will send notification`);
+
+                    // Step 5: Determine notification message based on streak status
                     const userHistoryRef = db.collection("userPuzzleHistory").doc(userId);
                     const levelAgnosticRef = userHistoryRef.collection("leaderboard").doc("levelAgnostic");
                     const levelAgnosticSnap = await levelAgnosticRef.get();
@@ -1213,17 +1238,17 @@ export const sendDailyPuzzleReminders = onSchedule(
                         } else {
                             // Case B: User didn't play yesterday (no active streak)
                             notificationTitle = "ColorLock Daily Puzzle";
-                            notificationBody = `It looks like you haven't completed today's ColorLock. Join the ${dailyPlayersCount} players who have solved today's puzzle!`;
+                            notificationBody = `It looks like you haven't completed today's ColorLock. Join the ${todaysTotalPlayers} players who have solved today's puzzle!`;
                             logger.info(`sendDailyPuzzleReminders: User ${userId} has no active streak`);
                         }
                     } else {
                         // No history, treat as Case B
                         notificationTitle = "ColorLock Daily Puzzle";
-                        notificationBody = `It looks like you haven't completed today's ColorLock. Join the ${dailyPlayersCount} players who have solved today's puzzle!`;
+                        notificationBody = `It looks like you haven't completed today's ColorLock. Join the ${todaysTotalPlayers} players who have solved today's puzzle!`;
                         logger.info(`sendDailyPuzzleReminders: User ${userId} has no puzzle history`);
                     }
 
-                    // Step 5: Send FCM notification
+                    // Step 6: Send FCM notification
                     const message = {
                         token: fcmToken,
                         notification: {
@@ -1259,7 +1284,6 @@ export const sendDailyPuzzleReminders = onSchedule(
                 sent: sentCount,
                 skipped: skippedCount,
                 errors: errorCount,
-                dailyPlayers: dailyPlayersCount,
             };
 
             logger.info(`sendDailyPuzzleReminders: Execution complete`, summary);
@@ -1270,7 +1294,6 @@ export const sendDailyPuzzleReminders = onSchedule(
                 sent: sentCount,
                 skipped: skippedCount,
                 errors: errorCount,
-                dailyPlayers: dailyPlayersCount,
             });
         }
     }
@@ -1733,6 +1756,219 @@ interface BackfillUsageStatsRequest {
     startDate?: string; // Optional: YYYY-MM-DD format
     endDate?: string;   // Optional: YYYY-MM-DD format
     dryRun?: boolean;   // If true, only logs what would be done
+}
+
+// --- Account Deletion Endpoint ---
+
+/**
+ * Deletes a user's account and all associated data
+ * Requires re-authentication with email/password for security
+ * 
+ * Flow:
+ * 1. Verify user is authenticated
+ * 2. Re-authenticate with provided credentials (email/password)
+ * 3. Delete Firestore data (users/{userId}, userPuzzleHistory/{userId})
+ * 4. Delete Firebase Auth account
+ */
+interface DeleteAccountRequest {
+    email: string;
+    password: string;
+}
+
+export const deleteAccount = onCall(
+    {
+        memory: "256MiB",
+        timeoutSeconds: 60,
+        ...getAppCheckConfig(),
+    },
+    async (request) => {
+        // Step 1: Verify user is authenticated
+        if (!request.auth) {
+            logger.error("deleteAccount: unauthenticated call");
+            throw new HttpsError("unauthenticated", "Authentication required.");
+        }
+        
+        const userId = request.auth.uid;
+        const { email, password } = (request.data || {}) as DeleteAccountRequest;
+        
+        logger.info(`deleteAccount: Request received for user ${userId}`);
+        
+        // Validate input
+        if (!email || !password) {
+            throw new HttpsError("invalid-argument", "Email and password are required for account deletion.");
+        }
+        
+        try {
+            // Step 2: Verify the user's credentials match
+            // Get the user's auth record to verify email matches
+            const userRecord = await admin.auth().getUser(userId);
+            
+            if (!userRecord.email) {
+                logger.error(`deleteAccount: User ${userId} has no email (anonymous user)`);
+                throw new HttpsError(
+                    "failed-precondition", 
+                    "Account deletion requires an email-based account. Anonymous accounts cannot be deleted this way."
+                );
+            }
+            
+            if (userRecord.email.toLowerCase() !== email.toLowerCase()) {
+                logger.error(`deleteAccount: Email mismatch for user ${userId}`);
+                throw new HttpsError("invalid-argument", "The provided email does not match your account.");
+            }
+            
+            // For security, we verify the password by attempting to sign in via REST API
+            // This is the recommended approach for server-side password verification
+            const { apiKey, isEmulator } = getFirebaseApiKey();
+            
+            if (isEmulator) {
+                // In emulator mode, skip password verification for easier testing
+                logger.warn(`deleteAccount: Skipping password verification (emulator mode)`);
+            } else if (apiKey) {
+                // Production with API key configured - verify password
+                const isValidPassword = await verifyPassword(email, password, apiKey);
+                if (!isValidPassword) {
+                    logger.error(`deleteAccount: Invalid password for user ${userId}`);
+                    throw new HttpsError("invalid-argument", "The provided password is incorrect.");
+                }
+                logger.info(`deleteAccount: Password verified for user ${userId}`);
+            } else {
+                // Production without API key - FAIL the request for security
+                logger.error(`deleteAccount: FIREBASE_API_KEY not configured in production. Cannot verify password.`);
+                throw new HttpsError(
+                    "failed-precondition", 
+                    "Account deletion is temporarily unavailable. Please try again later."
+                );
+            }
+            
+            // Step 3: Delete Firestore data using a batch operation
+            logger.info(`deleteAccount: Deleting Firestore data for user ${userId}`);
+            
+            const batch = db.batch();
+            
+            // Delete user document
+            const userDocRef = db.collection("users").doc(userId);
+            batch.delete(userDocRef);
+            
+            // Delete userPuzzleHistory document (and subcollections will be orphaned but that's ok)
+            const userHistoryRef = db.collection("userPuzzleHistory").doc(userId);
+            batch.delete(userHistoryRef);
+            
+            // Note: Firestore doesn't delete subcollections automatically
+            // For a complete cleanup, we'd need to delete subcollections too
+            // Let's delete the leaderboard and puzzles subcollections
+            try {
+                // Delete puzzles subcollection
+                const puzzlesSnapshot = await userHistoryRef.collection("puzzles").get();
+                puzzlesSnapshot.docs.forEach(doc => {
+                    batch.delete(doc.ref);
+                });
+                
+                // Delete leaderboard subcollection
+                const leaderboardSnapshot = await userHistoryRef.collection("leaderboard").get();
+                leaderboardSnapshot.docs.forEach(doc => {
+                    batch.delete(doc.ref);
+                });
+                
+                logger.info(`deleteAccount: Queued ${puzzlesSnapshot.size} puzzle docs and ${leaderboardSnapshot.size} leaderboard docs for deletion`);
+            } catch (subcollectionError) {
+                logger.warn(`deleteAccount: Error querying subcollections for user ${userId}:`, subcollectionError);
+                // Continue with deletion even if subcollection query fails
+            }
+            
+            // Commit the batch
+            await batch.commit();
+            logger.info(`deleteAccount: Firestore data deleted for user ${userId}`);
+            
+            // Step 4: Delete Firebase Auth account
+            // This is done AFTER Firestore deletion to ensure data is cleaned up
+            // even if auth deletion fails (the user would just need to re-authenticate)
+            logger.info(`deleteAccount: Deleting Auth account for user ${userId}`);
+            await admin.auth().deleteUser(userId);
+            logger.info(`deleteAccount: Auth account deleted for user ${userId}`);
+            
+            return { 
+                success: true, 
+                message: "Account and all associated data have been permanently deleted." 
+            };
+            
+        } catch (error: any) {
+            logger.error(`deleteAccount: Error deleting account for user ${userId}:`, error);
+            
+            // Re-throw HttpsError as-is
+            if (error instanceof HttpsError) {
+                throw error;
+            }
+            
+            // Handle specific Firebase errors
+            if (error.code === 'auth/user-not-found') {
+                throw new HttpsError("not-found", "User account not found.");
+            }
+            
+            throw new HttpsError("internal", "Failed to delete account. Please try again later.");
+        }
+    }
+);
+
+/**
+ * Helper function to verify password via Firebase Auth REST API
+ * This is used for server-side password verification
+ */
+async function verifyPassword(email: string, password: string, apiKey: string): Promise<boolean> {
+    try {
+        const response = await fetch(
+            `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    email,
+                    password,
+                    returnSecureToken: false,
+                }),
+            }
+        );
+        
+        if (response.ok) {
+            return true;
+        }
+        
+        const errorData = await response.json();
+        logger.warn(`verifyPassword: Auth verification failed:`, errorData.error?.message);
+        return false;
+    } catch (error) {
+        logger.error(`verifyPassword: Network error during password verification:`, error);
+        // In case of network error, we fail closed (reject the request)
+        return false;
+    }
+}
+
+/**
+ * Helper function to get Firebase API key and detect environment
+ * Returns both the API key (if available) and whether we're in emulator mode
+ * 
+ * In production, FIREBASE_API_KEY must be set for password verification to work.
+ * In emulator mode, password verification can be safely skipped.
+ */
+function getFirebaseApiKey(): { apiKey: string | null; isEmulator: boolean } {
+    // Detect emulator mode (must match getAppCheckConfig() logic)
+    const isEmulator = 
+        process.env.FUNCTIONS_EMULATOR === 'true' || 
+        process.env.FIRESTORE_EMULATOR_HOST !== undefined ||
+        process.env.FIREBASE_CONFIG?.includes('"emulators"') ||
+        process.env.NODE_ENV === 'development';
+    
+    // Check environment variable for API key
+    const apiKey = process.env.FIREBASE_API_KEY || null;
+    
+    if (isEmulator) {
+        logger.info("getFirebaseApiKey: Running in emulator mode");
+    } else if (!apiKey) {
+        logger.error("getFirebaseApiKey: FIREBASE_API_KEY not set in production environment!");
+    }
+    
+    return { apiKey, isEmulator };
 }
 
 export const backfillUsageStats = onCall(
