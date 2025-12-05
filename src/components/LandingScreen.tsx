@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { sendPasswordResetEmail } from 'firebase/auth';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigation } from '../App';
+import { auth } from '../services/firebaseService';
 import '../scss/main.scss';
 import { dateKeyForToday } from '../utils/dateUtils';
 import { useDataCache } from '../contexts/DataCacheContext'; // Import the new context hook
@@ -24,11 +26,12 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
   const { dailyScoresStats, dailyScoresV2Stats, loadingStates, errorStates } = useDataCache(); // Use the cache context
 
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  const [authMode, setAuthMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [authError, setAuthError] = useState<string | null>(null); // Rename error state for clarity
+  const [authSuccess, setAuthSuccess] = useState<string | null>(null); // Success message state
   const [authLoading, setAuthLoading] = useState(false); // Rename loading state
   const [showAppContent, setShowAppContent] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
@@ -109,12 +112,13 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    setAuthSuccess(null);
     setAuthLoading(true);
 
     try {
       if (authMode === 'signin') {
         await signIn(email, password);
-      } else {
+      } else if (authMode === 'signup') {
         await signUp(email, password, displayName);
         console.log("Sign up completed successfully in LandingScreen");
       }
@@ -128,6 +132,40 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
     } catch (err: any) {
       console.error('Authentication error:', err);
       setAuthError(err.message || 'An error occurred during authentication');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setAuthSuccess(null);
+    setAuthLoading(true);
+
+    if (!email) {
+      setAuthError('Please enter your email address');
+      setAuthLoading(false);
+      return;
+    }
+
+    try {
+      if (!auth) {
+        throw new Error('Authentication service is not available');
+      }
+      await sendPasswordResetEmail(auth, email);
+      setAuthSuccess('Password reset email sent! Check your inbox.');
+    } catch (err: any) {
+      console.error('Password reset error:', err);
+      if (err.code === 'auth/user-not-found') {
+        setAuthError('No account found with this email address');
+      } else if (err.code === 'auth/invalid-email') {
+        setAuthError('Please enter a valid email address');
+      } else if (err.code === 'auth/too-many-requests') {
+        setAuthError('Too many requests. Please try again later.');
+      } else {
+        setAuthError(err.message || 'Failed to send password reset email');
+      }
     } finally {
       setAuthLoading(false);
     }
@@ -191,14 +229,30 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
   const toggleAuthMode = () => {
     setAuthMode(prevMode => (prevMode === 'signin' ? 'signup' : 'signin'));
     setAuthError(null);
+    setAuthSuccess(null);
     setEmail('');
     setPassword('');
     setDisplayName('');
   };
 
+  const goToForgotPassword = () => {
+    setAuthMode('forgot');
+    setAuthError(null);
+    setAuthSuccess(null);
+    setPassword('');
+  };
+
+  const backToSignIn = () => {
+    setAuthMode('signin');
+    setAuthError(null);
+    setAuthSuccess(null);
+  };
+
   const handleCloseModal = () => {
     setShowAuthModal(false);
+    setAuthMode('signin');
     setAuthError(null);
+    setAuthSuccess(null);
     setEmail('');
     setPassword('');
     setDisplayName('');
@@ -332,102 +386,166 @@ const LandingScreen: React.FC<LandingScreenProps> = () => {
           <div className="auth-modal">
             <button className="modal-close" onClick={handleCloseModal}>×</button>
 
-            <form className="auth-form" onSubmit={handleSubmit}>
-              <h2>{authMode === 'signin' ? 'Sign In' : 'Create Account'}</h2>
+            {/* Forgot Password Form */}
+            {authMode === 'forgot' ? (
+              <>
+                <form className="auth-form" onSubmit={handleForgotPassword}>
+                  <h2>Reset Password</h2>
+                  <p className="auth-subtitle">
+                    Enter your email address and we'll send you a link to reset your password.
+                  </p>
 
-              {authError && <div className="auth-error">{authError}</div>}
+                  {authError && <div className="auth-error">{authError}</div>}
+                  {authSuccess && <div className="auth-success">{authSuccess}</div>}
 
-              {/* Display Name Input (only for signup) */}
-              {authMode === 'signup' && (
-                <div className="form-group">
-                  <label htmlFor="display-name">Display Name</label>
-                  <input
-                    type="text"
-                    id="display-name"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    placeholder="Choose a username"
-                    required
-                    className="auth-input"
-                  />
+                  {/* Email Input */}
+                  <div className="form-group">
+                    <label htmlFor="email">Email</label>
+                    <input
+                      type="email"
+                      id="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="your@email.com"
+                      required
+                      className="auth-input"
+                    />
+                  </div>
+
+                  {/* Submit Button */}
+                  <button
+                    type="submit"
+                    className="auth-button primary-button"
+                    disabled={authLoading}
+                  >
+                    {authLoading ? 'Sending...' : 'Send Reset Link'}
+                  </button>
+                </form>
+
+                {/* Back to Sign In */}
+                <div className="auth-toggle">
+                  <p>
+                    Remember your password?{' '}
+                    <button onClick={backToSignIn} className="toggle-button">
+                      Back to Sign In
+                    </button>
+                  </p>
                 </div>
-              )}
+              </>
+            ) : (
+              <>
+                <form className="auth-form" onSubmit={handleSubmit}>
+                  <h2>{authMode === 'signin' ? 'Sign In' : 'Create Account'}</h2>
 
-              {/* Email Input */}
-              <div className="form-group">
-                <label htmlFor="email">Email</label>
-                <input
-                  type="email"
-                  id="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="your@email.com"
-                  required
-                  className="auth-input"
-                />
-              </div>
+                  {authError && <div className="auth-error">{authError}</div>}
+                  {authSuccess && <div className="auth-success">{authSuccess}</div>}
 
-              {/* Password Input */}
-              <div className="form-group">
-                <label htmlFor="password">Password</label>
-                <input
-                  type="password"
-                  id="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                  className="auth-input"
-                />
-              </div>
+                  {/* Display Name Input (only for signup) */}
+                  {authMode === 'signup' && (
+                    <div className="form-group">
+                      <label htmlFor="display-name">Display Name</label>
+                      <input
+                        type="text"
+                        id="display-name"
+                        value={displayName}
+                        onChange={(e) => setDisplayName(e.target.value)}
+                        placeholder="Choose a username"
+                        required
+                        className="auth-input"
+                      />
+                    </div>
+                  )}
 
-              {/* Submit Button */}
-              <button
-                type="submit"
-                className="auth-button primary-button"
-                disabled={authLoading}
-              >
-                {authLoading
-                  ? 'Loading...'
-                  : authMode === 'signin'
-                    ? 'Sign In'
-                    : 'Sign Up'
-                }
-              </button>
-            </form>
+                  {/* Email Input */}
+                  <div className="form-group">
+                    <label htmlFor="email">Email</label>
+                    <input
+                      type="email"
+                      id="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="your@email.com"
+                      required
+                      className="auth-input"
+                    />
+                  </div>
 
-            {/* Separator */}
-            <div className="auth-separator">
-              <span>OR</span>
-            </div>
+                  {/* Password Input */}
+                  <div className="form-group">
+                    <label htmlFor="password">Password</label>
+                    <input
+                      type="password"
+                      id="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      required
+                      className="auth-input"
+                    />
+                  </div>
 
-            {/* Guest Button */}
-            <button
-              onClick={handleGuestMode}
-              className="auth-button guest-button"
-              disabled={authLoading}
-            >
-              Continue as Guest
-            </button>
+                  {/* Forgot Password Link (only for signin) */}
+                  {authMode === 'signin' && (
+                    <div className="forgot-password-link">
+                      <button 
+                        type="button" 
+                        onClick={goToForgotPassword} 
+                        className="toggle-button"
+                      >
+                        Forgot Password?
+                      </button>
+                    </div>
+                  )}
 
-            {/* Toggle Auth Mode */}
-            <div className="auth-toggle">
-              {authMode === 'signin' ? (
-                <p>
-                  Don't have an account?{' '}
-                  <button onClick={toggleAuthMode} className="toggle-button">
-                    Sign Up
+                  {/* Submit Button */}
+                  <button
+                    type="submit"
+                    className="auth-button primary-button"
+                    disabled={authLoading}
+                  >
+                    {authLoading
+                      ? 'Loading...'
+                      : authMode === 'signin'
+                        ? 'Sign In'
+                        : 'Sign Up'
+                    }
                   </button>
-                </p>
-              ) : (
-                <p>
-                  Already have an account?{' '}
-                  <button onClick={toggleAuthMode} className="toggle-button">
-                    Sign In
-                  </button>
-                </p>
-              )}
-            </div>
+                </form>
+
+                {/* Separator */}
+                <div className="auth-separator">
+                  <span>OR</span>
+                </div>
+
+                {/* Guest Button */}
+                <button
+                  onClick={handleGuestMode}
+                  className="auth-button guest-button"
+                  disabled={authLoading}
+                >
+                  Continue as Guest
+                </button>
+
+                {/* Toggle Auth Mode */}
+                <div className="auth-toggle">
+                  {authMode === 'signin' ? (
+                    <p>
+                      Don't have an account?{' '}
+                      <button onClick={toggleAuthMode} className="toggle-button">
+                        Sign Up
+                      </button>
+                    </p>
+                  ) : (
+                    <p>
+                      Already have an account?{' '}
+                      <button onClick={toggleAuthMode} className="toggle-button">
+                        Sign In
+                      </button>
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
