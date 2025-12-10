@@ -59,7 +59,7 @@ function createSampleEloScores(dates) {
 // Create sample data
 async function seedData() {
   try {
-    console.log('Seeding puzzles, user histories, leaderboards, and daily scores...');
+    console.log('Seeding puzzles, puzzlesV2, user histories, leaderboards, and daily scores...');
 
     // 1) Create puzzles for the last 10 days plus today
     console.log(`Creating/updating sample puzzles for ${DATES.length} dates...`);
@@ -88,6 +88,64 @@ async function seedData() {
     }
     await puzzleBatch.commit();
     console.log('Created/Updated sample puzzles');
+
+    // 1b) Create a sample set of puzzlesV2 docs for the fetchPuzzleV2 structure
+    console.log(`Creating puzzlesV2 examples for ${todayStr} (easy/medium/hard)...`);
+    const puzzlesV2Examples = {
+      easy: {
+        algoScore: 10,
+        targetColor: "green",
+        colorMap: [0, 1, 2, 3, 4, 5],
+        actions: [3, 18, 22, 45, 67, 10],
+        states: [
+          {
+            0: ["red", "green", "blue", "yellow"],
+            1: ["purple", "orange", "green", "blue"],
+            2: ["yellow", "red", "purple", "green"],
+            3: ["blue", "orange", "red", "yellow"]
+          }
+        ]
+      },
+      medium: {
+        algoScore: 13,
+        targetColor: "purple",
+        colorMap: [0, 1, 2, 3, 4, 5],
+        actions: [77, 14, 130, 64, 18, 99, 45],
+        states: [
+          {
+            0: ["orange", "blue", "blue", "green", "yellow"],
+            1: ["yellow", "orange", "red", "red", "green"],
+            2: ["blue", "purple", "yellow", "green", "red"],
+            3: ["green", "yellow", "purple", "orange", "orange"],
+            4: ["red", "green", "blue", "purple", "blue"]
+          }
+        ]
+      },
+      hard: {
+        algoScore: 16,
+        targetColor: "blue",
+        colorMap: [0, 1, 2, 3, 4, 5],
+        actions: [17, 58, 99, 135, 180, 201, 215],
+        states: [
+          {
+            0: ["purple", "yellow", "green", "blue", "red", "orange"],
+            1: ["blue", "purple", "orange", "orange", "green", "yellow"],
+            2: ["red", "yellow", "blue", "yellow", "purple", "green"],
+            3: ["orange", "green", "red", "green", "blue", "purple"],
+            4: ["yellow", "blue", "purple", "red", "orange", "green"],
+            5: ["green", "orange", "yellow", "blue", "red", "purple"]
+          }
+        ]
+      }
+    };
+
+    const puzzlesV2Batch = db.batch();
+    for (const [difficulty, data] of Object.entries(puzzlesV2Examples)) {
+      const docRef = db.collection('puzzlesV2').doc(`${todayStr}-${difficulty}`);
+      puzzlesV2Batch.set(docRef, data, { merge: true });
+    }
+    await puzzlesV2Batch.commit();
+    console.log(`Created puzzlesV2 sample documents for ${todayStr}`);
 
     // 2) Generate 10 UIDs
     const userIds = [];
@@ -279,9 +337,9 @@ async function seedData() {
       let moves = 0;
       for (const d of datesPlayed) {
         const entry = historyByDate[d];
-        if (entry.easy) { puzzleAttempts += entry.easy.attemptNumber; moves += entry.easy.moves; }
-        if (entry.medium) { puzzleAttempts += entry.medium.attemptNumber; moves += entry.medium.moves; }
-        if (entry.hard) { puzzleAttempts += entry.hard.attemptNumber; moves += entry.hard.moves; }
+        if (entry.easy) { puzzleAttempts += (entry.easy.attempts || 0); moves += entry.easy.moves; }
+        if (entry.medium) { puzzleAttempts += (entry.medium.attempts || 0); moves += entry.medium.moves; }
+        if (entry.hard) { puzzleAttempts += (entry.hard.attempts || 0); moves += entry.hard.moves; }
       }
       const levelAgnostic = {
         puzzleAttempts,

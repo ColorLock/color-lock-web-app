@@ -1,11 +1,10 @@
 import React, { createContext, useState, useEffect, useContext, ReactNode, useCallback } from 'react';
 import { TileColor, DailyPuzzle, FirestorePuzzleData } from '../types';
-import { AppSettings, defaultSettings, DifficultyLevel } from '../types/settings';
+import { AppSettings, DifficultyLevel } from '../types/settings';
 import { GameStatistics, defaultStats } from '../types/stats';
 import { HintResult } from '../utils/hintUtils';
 import {
-    auth, // Keep auth import if needed elsewhere
-    fetchPuzzleCallable,
+    fetchPuzzleV2Callable,
     getPersonalStatsCallable,
     recordPuzzleHistoryCallable,
     getWinModalStatsCallable
@@ -87,16 +86,14 @@ interface GameProviderProps {
 
 // Game provider component
 export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
-  const GRID_SIZE = 5;
   const DATE_TO_USE = dateKeyForToday();
   const { setShowLandingPage } = useNavigation();
   const { currentUser } = useAuth();
   const { 
-    puzzleData: cachedPuzzleData, 
+    puzzleDataV2: cachedPuzzleDataMap, 
     userStats: cachedUserStats, 
     winModalStats: cachedWinModalStats,
-    loadingStates: cacheLoadingStates, 
-    errorStates: cacheErrorStates 
+    loadingStates: cacheLoadingStates 
   } = useDataCache(); // Use cache hook
 
   // Game state
@@ -115,8 +112,12 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [isLostReported, setIsLostReported] = useState(false);
   const [hasRecordedCompletion, setHasRecordedCompletion] = useState(false);
 
-  // Local state for tracking attempt details
-  const [attemptNumberToday, setAttemptNumberToday] = useState<number>(1);
+  // Local state for tracking attempt details (per-difficulty)
+  const [attemptsByDifficulty, setAttemptsByDifficulty] = useState<{
+    easy: number;
+    medium: number;
+    hard: number;
+  }>({ easy: 1, medium: 1, hard: 1 });
   const [isFirstTryOfDay, setIsFirstTryOfDay] = useState<boolean>(true);
   const [hintsUsedThisGame, setHintsUsedThisGame] = useState<number>(0);
   const [movesThisAttempt, setMovesThisAttempt] = useState<number>(0);
@@ -213,21 +214,29 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   // --- Effects ---
 
-  // Load puzzle on mount (Use fetchPuzzleCallable)
+  // Load puzzle on mount (Use fetchPuzzleV2 callable and cached per-difficulty data)
   useEffect(() => {
     const loadPuzzle = async () => {
       setLoading(true);
       setError(null); // Clear previous errors
 
+      const difficulty = settings.difficultyLevel;
+
       // 1. Check Cache
-      if (cachedPuzzleData) {
+      const cachedPuzzleForDifficulty = cachedPuzzleDataMap?.[difficulty];
+      if (cachedPuzzleForDifficulty) {
         console.log("GameContext: Using cached puzzle data.");
         try {
-            setFirestoreData(cachedPuzzleData); // Store raw data
-            const newPuzzle = generatePuzzleFromDB(cachedPuzzleData, DATE_TO_USE, settings);
+            setFirestoreData(cachedPuzzleForDifficulty); // Store raw data
+            const newPuzzle = generatePuzzleFromDB(
+              cachedPuzzleForDifficulty,
+              DATE_TO_USE,
+              settings,
+              { skipDifficultyAdjustments: true }
+            );
             setPuzzle(newPuzzle);
-            // Reset attempt state for the new puzzle/day
-            setAttemptNumberToday(1);
+            // Reset attempt state for the new puzzle/day (all difficulties)
+            setAttemptsByDifficulty({ easy: 1, medium: 1, hard: 1 });
             setIsFirstTryOfDay(true);
             setHintsUsedThisGame(0);
             setMovesThisAttempt(0);
@@ -242,18 +251,31 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         }
       }
 
+      // 1b. If cache is still loading, wait for it to finish before fetching
+      if (cacheLoadingStates.puzzle) {
+        return;
+      }
+
       // 2. Fetch if not in cache (or cache processing failed)
-      console.log(`GameContext: No cached puzzle data, fetching for date: ${DATE_TO_USE} via callable function`);
+      console.log(`GameContext: No cached puzzle data for ${difficulty}, fetching for date: ${DATE_TO_USE} via fetchPuzzleV2Callable`);
       try {
-        const result = await fetchPuzzleCallable({ date: DATE_TO_USE }); // Use imported callable
+        const result = await fetchPuzzleV2Callable({ date: DATE_TO_USE }); // Use imported callable
         if (result.data.success && result.data.data) {
-          console.log('GameContext: Successfully fetched puzzle data via callable (fallback)');
-          const fetchedFirestoreData = result.data.data;
+          console.log('GameContext: Successfully fetched puzzle data via fetchPuzzleV2Callable (fallback)');
+          const fetchedFirestoreData = result.data.data[difficulty];
+          if (!fetchedFirestoreData) {
+            throw new Error(`Puzzle data for difficulty ${difficulty} is missing from fetchPuzzleV2 response`);
+          }
           setFirestoreData(fetchedFirestoreData); // Store raw data
-          const newPuzzle = generatePuzzleFromDB(fetchedFirestoreData, DATE_TO_USE, settings);
+          const newPuzzle = generatePuzzleFromDB(
+            fetchedFirestoreData,
+            DATE_TO_USE,
+            settings,
+            { skipDifficultyAdjustments: true }
+          );
           setPuzzle(newPuzzle);
-          // Reset attempt state
-          setAttemptNumberToday(1);
+          // Reset attempt state (all difficulties)
+          setAttemptsByDifficulty({ easy: 1, medium: 1, hard: 1 });
           setIsFirstTryOfDay(true);
           setHintsUsedThisGame(0);
           setMovesThisAttempt(0);
@@ -268,7 +290,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         // Map Firebase error codes to user-friendly messages
         if (err.code === 'auth/unauthenticated') {
              errMsg = 'Authentication failed. Please log in or play as guest.';
-        } else if (err.code === 'auth/not-found') {
+        } else if (err.code === 'auth/not-found' || err.code === 'not-found' || err.code === 'functions/not-found') {
              errMsg = `Today's puzzle (${DATE_TO_USE}) is not available yet. Please check back later.`;
         } else if (err.code === 'failed-precondition') {
              errMsg = 'App verification failed. Please ensure your app is registered and up-to-date.';
@@ -287,7 +309,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     loadInitialStats(); // Load stats from storage (cache)
     loadPuzzle(); // Load puzzle (checks cache first)
 
-  }, [DATE_TO_USE, settings, loadInitialStats, cachedPuzzleData]); // Add cachedPuzzleData dependency
+  }, [DATE_TO_USE, settings, loadInitialStats, cachedPuzzleDataMap, cacheLoadingStates.puzzle]); // Add cachedPuzzleData dependency
 
   // When the puzzle is first loaded, set the game start time
   useEffect(() => {
@@ -328,7 +350,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
           recordPuzzleHistory({
             puzzle_id: puzzle.dateString,
             difficulty: settings.difficultyLevel,
-            attemptNumber: attemptNumberToday,
+            attemptNumber: attemptsByDifficulty[settings.difficultyLevel],
             moves: movesThisAttempt,
             hintUsed: hintsUsedThisGame > 0,
             botMoves: puzzle.algoScore,
@@ -337,7 +359,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
           setIsLostReported(true);
           setHasRecordedCompletion(true);
       }
-  }, [puzzle?.isLost, puzzle?.dateString, puzzle?.algoScore, hintsUsedThisGame, isLostReported, movesThisAttempt, recordPuzzleHistory, settings.difficultyLevel, isFirstTryOfDay, attemptNumberToday]);
+  }, [puzzle?.isLost, puzzle?.dateString, puzzle?.algoScore, hintsUsedThisGame, isLostReported, movesThisAttempt, recordPuzzleHistory, settings.difficultyLevel, isFirstTryOfDay, attemptsByDifficulty]);
 
   // Load cached win modal stats on mount
   useEffect(() => {
@@ -412,7 +434,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     if (hint) {
       setHintCell(hint);
       setHintsUsedThisGame(prev => prev + 1);
-      console.log(`[HINT ${new Date().toISOString()}] Hint used at position [${hint.row},${hint.col}] - puzzle ID: ${puzzle.dateString}. Attempt number: ${attemptNumberToday}`);
+      console.log(`[HINT ${new Date().toISOString()}] Hint used at position [${hint.row},${hint.col}] - puzzle ID: ${puzzle.dateString}. Attempt number: ${attemptsByDifficulty[settings.difficultyLevel]}`);
     } else {
       console.log("No valid hint could be generated.");
     }
@@ -426,7 +448,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       if (!prevStats) {
         // First win of the day - initialize with basic values
         return {
-          totalAttempts: attemptNumberToday,
+          totalAttempts: attemptsByDifficulty[settings.difficultyLevel],
           currentPuzzleCompletedStreak: 1,
           currentTieBotStreak: solvedPuzzle.userMovesUsed <= solvedPuzzle.algoScore ? 1 : 0,
           currentFirstTryStreak: isFirstTryOfDay && hintsUsedThisGame === 0 && solvedPuzzle.userMovesUsed <= solvedPuzzle.algoScore ? 1 : 0,
@@ -436,7 +458,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       // Subsequent wins - increment attempt count, keep streaks as-is for now
       return {
         ...prevStats,
-        totalAttempts: attemptNumberToday,
+        totalAttempts: attemptsByDifficulty[settings.difficultyLevel],
         difficulty: settings.difficultyLevel,
       };
     });
@@ -448,7 +470,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     recordPuzzleHistory({
       puzzle_id: solvedPuzzle.dateString,
       difficulty: settings.difficultyLevel,
-      attemptNumber: attemptNumberToday,
+      attemptNumber: attemptsByDifficulty[settings.difficultyLevel],
       moves: solvedPuzzle.userMovesUsed,
       hintUsed: hintsUsedThisGame > 0,
       botMoves: solvedPuzzle.algoScore,
@@ -491,7 +513,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       recordPuzzleHistory({
         puzzle_id: puzzle.dateString,
         difficulty: settings.difficultyLevel,
-        attemptNumber: attemptNumberToday,
+        attemptNumber: attemptsByDifficulty[settings.difficultyLevel],
         moves: movesThisAttempt,
         hintUsed: hintsUsedThisGame > 0,
         botMoves: puzzle.algoScore,
@@ -502,11 +524,19 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
     try {
       setLoading(true);
-      const newPuzzle = generatePuzzleFromDB(firestoreData, DATE_TO_USE, settings);
+      const newPuzzle = generatePuzzleFromDB(
+        firestoreData,
+        DATE_TO_USE,
+        settings,
+        { skipDifficultyAdjustments: true }
+      );
       setPuzzle(newPuzzle);
 
-      // Reset attempt-specific state
-      setAttemptNumberToday(prev => prev + 1); // Still track attempt number locally if needed
+      // Reset attempt-specific state (increment only current difficulty)
+      setAttemptsByDifficulty(prev => ({
+        ...prev,
+        [settings.difficultyLevel]: prev[settings.difficultyLevel] + 1
+      }));
       setIsFirstTryOfDay(false);
       setHintsUsedThisGame(0);
       setMovesThisAttempt(0);
@@ -570,7 +600,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         if (!prevStats) {
           // First win of the day - initialize with basic values
           return {
-            totalAttempts: attemptNumberToday,
+            totalAttempts: attemptsByDifficulty[settings.difficultyLevel],
             currentPuzzleCompletedStreak: 1,
             currentTieBotStreak: completedPuzzle.userMovesUsed <= completedPuzzle.algoScore ? 1 : 0,
             currentFirstTryStreak: isFirstTryOfDay && hintsUsedThisGame === 0 && completedPuzzle.userMovesUsed <= completedPuzzle.algoScore ? 1 : 0,
@@ -580,7 +610,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         // Subsequent wins - increment attempt count, keep streaks as-is for now
         return {
           ...prevStats,
-          totalAttempts: attemptNumberToday,
+          totalAttempts: attemptsByDifficulty[settings.difficultyLevel],
           difficulty: settings.difficultyLevel,
         };
       });
@@ -593,7 +623,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       recordPuzzleHistory({
         puzzle_id: completedPuzzle.dateString,
         difficulty: settings.difficultyLevel,
-        attemptNumber: attemptNumberToday,
+        attemptNumber: attemptsByDifficulty[settings.difficultyLevel],
         moves: completedPuzzle.userMovesUsed,
         hintUsed: hintsUsedThisGame > 0,
         botMoves: completedPuzzle.algoScore,

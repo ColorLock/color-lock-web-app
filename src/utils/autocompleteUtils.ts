@@ -4,32 +4,35 @@ import { findLargestRegion } from './gameLogic';
 /**
  * Checks if the puzzle meets the conditions for autocomplete:
  * 1. The locked region is the target color
- * 2. The locked region size is greater than or equal to 22 tiles
+ * 2. The locked region size is greater than or equal to (boardSize - 3) tiles
  */
 export const shouldShowAutocomplete = (puzzle: DailyPuzzle): boolean => {
   if (!puzzle || puzzle.isSolved || puzzle.isLost) {
     return false;
   }
 
+  // Calculate the total board size
+  const boardSize = puzzle.grid.length * puzzle.grid[0].length;
+
   // Get the size of the locked region
   const lockedRegionSize = puzzle.lockedCells.size;
-  
-  // First check: locked region size is at least 22
-  if (lockedRegionSize < 22) {
+
+  // First check: locked region size is at least (boardSize - 3)
+  if (lockedRegionSize < boardSize - 3) {
     return false;
   }
-  
+
   // Second check: locked region is the target color
   // Get the first cell of the locked region to check its color
   if (lockedRegionSize > 0) {
     const firstCell = puzzle.lockedCells.values().next().value as string;
     const [row, col] = firstCell.split(',').map(Number);
     const lockedColor = puzzle.grid[row][col];
-    
+
     // Check if the locked color is the target color
     return lockedColor === puzzle.targetColor;
   }
-  
+
   return false;
 };
 

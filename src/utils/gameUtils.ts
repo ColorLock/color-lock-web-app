@@ -1,6 +1,7 @@
 import { TileColor, DailyPuzzle, FirestorePuzzleData } from '../types';
-import { HintResult, getHint, getValidActions, computeActionDifference, NUM_COLORS, decodeActionId } from './hintUtils';
+import { HintResult, NUM_COLORS, decodeActionId } from './hintUtils';
 import { floodFill, findLargestRegion, isBoardUnified } from './gameLogic';
+import { DEFAULT_LOSS_THRESHOLD } from './puzzleUtils';
 
 // Grid size constant
 export const GRID_SIZE = 5;
@@ -164,6 +165,7 @@ export const applyColorChange = (
   let newIsSolved = false;
   let newIsLost = false;
   const newUserMoves = puzzle.userMovesUsed + 1;
+  const lossThreshold = puzzle.lossThreshold ?? DEFAULT_LOSS_THRESHOLD;
 
   // Determine which set of locked cells to use:
   // Only update if the new largest region is STRICTLY larger than the previous one.
@@ -179,14 +181,14 @@ export const applyColorChange = (
     } else {
       newIsLost = true; // Unified but wrong color
     }
-  } else if (finalLockedCells.size >= 13) { // Check based on the potentially updated locked cells
+  } else if (finalLockedCells.size >= lossThreshold) { // Check based on the potentially updated locked cells
     // Check if the determined largest region (whether old or new) is the wrong color
     // Ensure finalLockedCells is not empty before accessing its first element
     if (finalLockedCells.size > 0) {
         const firstCellKey = finalLockedCells.values().next().value as string;
         const [fr, fc] = firstCellKey.split(',').map(Number);
         if (newGrid[fr][fc] !== puzzle.targetColor) {
-          newIsLost = true; // Locked region >= 13 and wrong color
+          newIsLost = true; // Locked region met threshold and is the wrong color
         }
     }
   }

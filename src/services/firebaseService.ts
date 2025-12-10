@@ -81,8 +81,14 @@ const getCallableFunction = <RequestData, ResponseData>(name: string) => {
   }
 };
 
-// Define callable function for fetching puzzle
-export const fetchPuzzleCallable = getCallableFunction<{ date: string }, { success: boolean; data?: FirestorePuzzleData; error?: string }>('fetchPuzzle');
+// Define callable function for fetching puzzles V2 (easy/medium/hard)
+export interface FetchPuzzleV2Response {
+  success: boolean;
+  data?: Record<'easy' | 'medium' | 'hard', FirestorePuzzleData>;
+  error?: string | null;
+}
+
+export const fetchPuzzleV2Callable = getCallableFunction<{ date: string }, FetchPuzzleV2Response>('fetchPuzzleV2');
 
 // Define callable function for recording completed puzzle history
 export const recordPuzzleHistoryCallable = getCallableFunction<any, { success: boolean; error?: string }>('recordPuzzleHistory');

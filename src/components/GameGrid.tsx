@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { TileColor } from '../types';
 import { HintResult } from '../utils/hintUtils';
 import Tile from './Tile';
@@ -22,23 +22,42 @@ const GameGrid: React.FC<GameGridProps> = ({
   onTileClick,
   getColorCSS
 }) => {
+  // Calculate dynamic tile sizes based on grid dimensions
+  const gridStyle = useMemo(() => {
+    const gridSize = grid.length; // Number of rows (assuming square grid)
+    const maxBoardSize = 380; // Fixed board size in pixels
+    const cellMargin = 2; // Margin between cells
+
+    // Calculate cell container size: (maxBoardSize / gridSize)
+    const cellContainerSize = maxBoardSize / gridSize;
+
+    // Calculate actual cell size: containerSize - (2 * margin)
+    const cellSize = cellContainerSize - (2 * cellMargin);
+
+    return {
+      '--grid-cell-container-size': `${cellContainerSize}px`,
+      '--grid-cell-size': `${cellSize}px`,
+      '--grid-cell-margin': `${cellMargin}px`,
+    } as React.CSSProperties;
+  }, [grid.length]);
+
   // Function to check if a cell is part of the hint
   const isPartOfHint = (row: number, col: number): boolean => {
     if (!hintCell) return false;
-    
+
     // The primary hint cell
     if (hintCell.row === row && hintCell.col === col) return true;
-    
+
     // Check connected cells
     if (hintCell.connectedCells) {
       return hintCell.connectedCells.some(([r, c]) => r === row && c === col);
     }
-    
+
     return false;
   };
 
   return (
-    <div className="grid" style={{ position: 'relative' }}>
+    <div className="grid" style={{ ...gridStyle, position: 'relative' }}>
       {grid.map((row, rIdx) => (
         <div key={rIdx} className="grid-row">
           {row.map((color, cIdx) => {
@@ -46,7 +65,7 @@ const GameGrid: React.FC<GameGridProps> = ({
             const isLocked = lockedCells.has(key);
             const isHinted = isPartOfHint(rIdx, cIdx);
             const isPartOfLargestRegion = isLocked && settings.highlightLargestRegion;
-            
+
             return (
               <div key={key} className="grid-cell-container">
                 <Tile

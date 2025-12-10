@@ -46,6 +46,7 @@ export interface DailyPuzzle {
   totalMovesForThisBoard: number;
   algoScore: number; // Remains the score from the TRUE initial state
   effectiveStartingMoveIndex: number; // 0 for Hard, 1 for Medium, 3 for Easy
+  lossThreshold?: number;
 }
 
 export interface PuzzleGrid {

@@ -166,7 +166,7 @@ The backend logic resides in Firebase Cloud Functions, which provide secure, sca
 
 2. **Firebase Authentication**: Verifies user identity.
    - All functions that modify user data require authentication.
-   - Some functions (like `fetchPuzzle`) allow guest/unauthenticated access.
+   - Some functions (like `fetchPuzzleV2`) allow guest/unauthenticated access.
 
 3. **Callable Functions**: Used instead of HTTP endpoints.
    - Automatically handle CORS, token management, and serialization.
@@ -184,7 +184,8 @@ This architecture ensures:
 
 Firestore is used to store persistent data:
 
-*   **`puzzles/{date}`**: Stores the daily puzzle configuration, including the initial grid state (`states[0]`), target color, algorithm score (`algoScore`), and the sequence of optimal moves (`actions`). *Client access is blocked by rules; accessed only via `fetchPuzzle` function.*
+*   **`puzzles/{date}`**: Stores the legacy daily puzzle configuration, including the initial grid state (`states[0]`), target color, algorithm score (`algoScore`), and the sequence of optimal moves (`actions`). *Client access is blocked by rules; accessed only via the deprecated `fetchPuzzle` function.*
+*   **`puzzlesV2/{date}-{difficulty}`**: Stores the per-difficulty puzzle configuration returned by `fetchPuzzleV2` (fields: `states`, `actions`, `targetColor`, `algoScore`, `colorMap`). *Client access is blocked by rules; accessed via `fetchPuzzleV2`.*
 *   **`userStats/{userId}`**: Stores individual user statistics directly at the root level (e.g., `currentPuzzleCompletedStreak`, `totalWins`, `bestScoresByDay`, `eloScoreByDay`, etc.). *Accessible only by the authenticated user.* See `src/types/stats.ts` for the full `GameStatistics` structure.
 *   **`dailyScores/{date}/scores/{userId}`**: Stores the best score achieved by each user for a specific puzzle date. This structure allows efficient querying for daily leaderboards or global stats. *Client access is blocked by rules; written by `updateUserStats` function, read by `getDailyScoresStats` function.*
 *   **`users/{userId}`**: (Optional, based on rules) Could store general user profile information separate from stats.
@@ -199,17 +200,17 @@ Understanding how data moves through the application is key:
 
 1.  `App.tsx` mounts -> `AuthProvider` checks auth state.
 2.  If authenticated, `GameProvider` mounts.
-3.  `GameProvider`'s `useEffect` calls `fetchPuzzleCallable` (in `firebaseService.ts`).
-4.  `fetchPuzzleCallable` is a Firebase callable function that automatically:
+3.  `GameProvider`'s `useEffect` calls `fetchPuzzleV2Callable` (in `firebaseService.ts`).
+4.  `fetchPuzzleV2Callable` is a Firebase callable function that automatically:
     * Attaches the user's authentication token (if available)
     * Attaches an App Check token (proving the request is from your app)
     * Sends the request to the Firebase Functions backend
-5.  **Cloud Functions (fetchPuzzle)** receives the request:
+5.  **Cloud Functions (fetchPuzzleV2)** receives the request:
     * Firebase automatically verifies the App Check token
     * Firebase validates authentication (though this function allows unauthenticated access)
     * The function accesses the `context` parameter to get user information
-    * Reads the puzzle data from `puzzles/{date}` in Firestore.
-    * Returns the puzzle data in the response.
+    * Reads the puzzle data from `puzzlesV2/{date}-{difficulty}` in Firestore.
+    * Returns the per-difficulty puzzle data in the response.
 6.  `GameProvider` receives the data, processes it, and updates state.
 7.  Components re-render.
 
@@ -275,7 +276,7 @@ Understanding how data moves through the application is key:
 *   **Authentication (`AuthContext.tsx`, `SignInScreen.tsx`, `SignUpButton.tsx`):** Manages user sign-in, sign-up, guest access, and sign-out using Firebase Auth.
 *   **Tutorial System (`TutorialContext.tsx`, `tutorialConfig.ts`, `tutorialUtils.ts`, `Tutorial*.tsx` components):** Provides an interactive step-by-step guide for new players, using a predefined puzzle and solution path. Manages highlighting, overlays, and user interaction validation during the tutorial.
 *   **Settings (`settings.ts`, `useSettings.ts`, `SettingsModal.tsx`, `colorUtils.ts`):** Allows users to customize accessibility (high contrast, color blindness modes) and visual/gameplay options (animations, sound, difficulty). Settings are persisted in local storage.
-*   **Firebase Services (`firebaseService.ts`, `firebaseConfig.tsx`):** Initializes and exports Firebase instances, handles emulator connections, and provides core interaction functions like `fetchPuzzle`.
+*   **Firebase Services (`firebaseService.ts`, `firebaseConfig.tsx`):** Initializes and exports Firebase instances, handles emulator connections, and provides core interaction functions like `fetchPuzzleV2`.
 
 ---
 

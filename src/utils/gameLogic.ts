@@ -2,6 +2,7 @@ import { TileColor, FirestorePuzzleData, DailyPuzzle, PuzzleGrid } from '../type
 import { createSwiftSeededGenerator, stableSeedForDate } from './dateUtils';
 import { AppSettings, DifficultyLevel } from '../types/settings';
 import { applyActionToGrid } from './gameUtils';
+import { getLossThresholdForDifficulty } from './puzzleUtils';
 
 /**
  * Flood fill algorithm for finding connected regions of the same color
@@ -100,8 +101,10 @@ export function isBoardUnified(grid: TileColor[][]): boolean {
 export function generatePuzzleFromDB(
   firestoreData: FirestorePuzzleData,
   dateStr: string,
-  settings: AppSettings // Now required to determine difficulty
+  settings: AppSettings, // Now required to determine difficulty
+  options?: { skipDifficultyAdjustments?: boolean }
 ): DailyPuzzle {
+  const skipDifficultyAdjustments = options?.skipDifficultyAdjustments ?? false;
   // Create a specific RNG instance for today's date (might not be needed anymore)
   // const rng = createSwiftSeededGenerator(stableSeedForDate(dateStr));
 
@@ -117,39 +120,41 @@ export function generatePuzzleFromDB(
 
   console.log(`Generating puzzle for difficulty: ${settings.difficultyLevel}`);
 
-  // Apply initial moves based on difficulty
-  switch (settings.difficultyLevel) {
-    case DifficultyLevel.Medium:
-      if (actions.length >= 1) {
-        console.log("Applying 1 action for Medium difficulty...");
-        currentGridState = applyActionToGrid(currentGridState, actions[0], firestoreData);
-        effectiveStartingMoveIndex = 1;
-      } else {
-        console.warn("Not enough actions in Firestore data for Medium difficulty, starting from Hard.");
-      }
-      break;
-    case DifficultyLevel.Easy:
-      if (actions.length >= 3) {
-        console.log("Applying 3 actions for Easy difficulty...");
-        currentGridState = applyActionToGrid(currentGridState, actions[0], firestoreData);
-        currentGridState = applyActionToGrid(currentGridState, actions[1], firestoreData);
-        currentGridState = applyActionToGrid(currentGridState, actions[2], firestoreData);
-        effectiveStartingMoveIndex = 3;
-      } else {
-         console.warn(`Not enough actions (${actions.length}) in Firestore data for Easy difficulty, applying fewer moves.`);
-         // Apply as many moves as possible up to 3
-         for(let i = 0; i < Math.min(actions.length, 3); i++) {
-             currentGridState = applyActionToGrid(currentGridState, actions[i], firestoreData);
-         }
-         effectiveStartingMoveIndex = Math.min(actions.length, 3);
-      }
-      break;
-    case DifficultyLevel.Hard:
-    default:
-      // No actions applied for Hard difficulty
-      console.log("Using original initial state for Hard difficulty.");
-      effectiveStartingMoveIndex = 0;
-      break;
+  // Apply initial moves based on difficulty when using a single shared puzzle source
+  if (!skipDifficultyAdjustments) {
+    switch (settings.difficultyLevel) {
+      case DifficultyLevel.Medium:
+        if (actions.length >= 1) {
+          console.log("Applying 1 action for Medium difficulty...");
+          currentGridState = applyActionToGrid(currentGridState, actions[0], firestoreData);
+          effectiveStartingMoveIndex = 1;
+        } else {
+          console.warn("Not enough actions in Firestore data for Medium difficulty, starting from Hard.");
+        }
+        break;
+      case DifficultyLevel.Easy:
+        if (actions.length >= 3) {
+          console.log("Applying 3 actions for Easy difficulty...");
+          currentGridState = applyActionToGrid(currentGridState, actions[0], firestoreData);
+          currentGridState = applyActionToGrid(currentGridState, actions[1], firestoreData);
+          currentGridState = applyActionToGrid(currentGridState, actions[2], firestoreData);
+          effectiveStartingMoveIndex = 3;
+        } else {
+           console.warn(`Not enough actions (${actions.length}) in Firestore data for Easy difficulty, applying fewer moves.`);
+           // Apply as many moves as possible up to 3
+           for(let i = 0; i < Math.min(actions.length, 3); i++) {
+               currentGridState = applyActionToGrid(currentGridState, actions[i], firestoreData);
+           }
+           effectiveStartingMoveIndex = Math.min(actions.length, 3);
+        }
+        break;
+      case DifficultyLevel.Hard:
+      default:
+        // No actions applied for Hard difficulty
+        console.log("Using original initial state for Hard difficulty.");
+        effectiveStartingMoveIndex = 0;
+        break;
+    }
   }
 
   // Find the initial locked region based on the *difficulty-adjusted* starting grid
@@ -172,6 +177,7 @@ export function generatePuzzleFromDB(
     totalMovesForThisBoard: 0,
     algoScore: algoScore, // Use the original algoScore
     effectiveStartingMoveIndex: effectiveStartingMoveIndex, // Store the starting index
+    lossThreshold: getLossThresholdForDifficulty(settings.difficultyLevel),
   };
 }
 

@@ -1,4 +1,5 @@
 import { TileColor, FirestorePuzzleData } from '../types';
+import { DEFAULT_LOSS_THRESHOLD } from './puzzleUtils';
 
 // Constants
 const GRID_SIZE = 5;
@@ -95,7 +96,8 @@ export function computeActionDifference(
   lockedCells: Set<string>,
   targetColor: TileColor,
   actionIdx: number,
-  firestoreData: FirestorePuzzleData
+  firestoreData: FirestorePuzzleData,
+  lossThreshold: number = DEFAULT_LOSS_THRESHOLD
 ): number {
   // Decode action (use SAME logic as in decodeActionId)
   const row = (GRID_SIZE - 1) - Math.floor(actionIdx / (GRID_SIZE * NUM_COLORS));
@@ -182,7 +184,7 @@ export function computeActionDifference(
   // Get final merged size
   const [afterSize] = _floodFillStatic(gridCopy, row, col, newColor);
 
-  if (afterSize >= 13 && newColor !== targetColor) {
+  if (afterSize >= lossThreshold && newColor !== targetColor) {
     return -999999;
   }
 

@@ -75,9 +75,10 @@ $transition-slow: 0.3s;
 $transition-very-slow: 0.4s;
 
 // Grid values
-$grid-cell-size: 72px;
+$grid-max-board-size: 380px; // Fixed board size for all difficulties
 $grid-cell-margin: 2px;
-$grid-cell-container-size: 76px;
+$grid-cell-size: 72px; // Default size (will be overridden by dynamic sizing)
+$grid-cell-container-size: 76px; // Default size (will be overridden by dynamic sizing)
 
 // Z-index
 $z-index-base: 1;

@@ -4,7 +4,7 @@ import { GameStatistics, defaultStats } from '../types/stats';
 import { LeaderboardEntryV2 } from '../services/firebaseService';
 import { DifficultyLevel } from '../types/settings';
 import {
-    fetchPuzzleCallable,
+    fetchPuzzleV2Callable,
     getPersonalStatsCallable,
     getGlobalLeaderboardV2Callable,
     getDailyScoresV2StatsCallable,
@@ -58,6 +58,7 @@ interface DataCacheContextValue {
     dailyScoresStats: DailyScoreStats | null;
     dailyScoresV2Stats: DailyScoresV2Stats | null;
     puzzleData: FirestorePuzzleData | null;
+    puzzleDataV2: Record<'easy' | 'medium' | 'hard', FirestorePuzzleData> | null;
     userStats: GameStatistics | null;
     globalLeaderboard: LeaderboardEntryV2[] | null;
     winModalStats: WinModalStats | null;
@@ -102,6 +103,7 @@ export const DataCacheProvider: React.FC<DataCacheProviderProps> = ({ children }
     const [dailyScoresStats, setDailyScoresStats] = useState<DailyScoreStats | null>(null);
     const [dailyScoresV2Stats, setDailyScoresV2Stats] = useState<DailyScoresV2Stats | null>(null);
     const [puzzleData, setPuzzleData] = useState<FirestorePuzzleData | null>(null);
+    const [puzzleDataV2, setPuzzleDataV2] = useState<Record<'easy' | 'medium' | 'hard', FirestorePuzzleData> | null>(null);
     const [userStats, setUserStats] = useState<GameStatistics | null>(null);
     const [globalLeaderboard, setGlobalLeaderboard] = useState<LeaderboardEntryV2[] | null>(null);
     const [winModalStats, setWinModalStats] = useState<WinModalStats | null>(null);
@@ -137,21 +139,21 @@ export const DataCacheProvider: React.FC<DataCacheProviderProps> = ({ children }
             setLoadingStates(prev => ({ ...prev, dailyScores: false }));
         }
 
-        // --- 2. Fetch Puzzle Data ---
+        // --- 2. Fetch Puzzle Data V2 (all difficulties) ---
         setLoadingStates(prev => ({ ...prev, puzzle: true }));
         setErrorStates(prev => ({ ...prev, puzzle: null }));
         try {
-            console.log("DataCacheContext: Fetching Puzzle Data...");
-            const result = await fetchPuzzleCallable({ date: today });
+            console.log("DataCacheContext: Fetching Puzzle Data V2 (all difficulties)...");
+            const result = await fetchPuzzleV2Callable({ date: today });
             if (result.data.success && result.data.data) {
-                setPuzzleData(result.data.data);
-                console.log("DataCacheContext: Puzzle Data fetched successfully.");
-                console.log("DataCacheContext: Puzzle Data:", result.data.data);
+                setPuzzleDataV2(result.data.data);
+                console.log("DataCacheContext: Puzzle Data V2 fetched successfully.");
+                console.log("DataCacheContext: Puzzle Data V2:", result.data.data);
             } else {
                 throw new Error(result.data.error || 'Failed to fetch puzzle data');
             }
         } catch (error: any) {
-            console.error("DataCacheContext: Error fetching puzzle data:", error);
+            console.error("DataCacheContext: Error fetching puzzle data V2:", error);
             setErrorStates(prev => ({ ...prev, puzzle: error.message || 'Failed to load puzzle' }));
         } finally {
             setLoadingStates(prev => ({ ...prev, puzzle: false }));
@@ -270,6 +272,7 @@ export const DataCacheProvider: React.FC<DataCacheProviderProps> = ({ children }
         dailyScoresStats,
         dailyScoresV2Stats,
         puzzleData,
+        puzzleDataV2,
         userStats,
         globalLeaderboard,
         winModalStats,

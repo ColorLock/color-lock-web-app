@@ -67,40 +67,110 @@ export const fetchPuzzle = onCall(
         // request.app will be defined if enforceAppCheck is true and validation passed
         // request.auth contains user authentication info (or null if unauthenticated)
         const userId = request.auth?.uid || "guest/unauthenticated";
-        logger.info(`v2/fetchPuzzle invoked by user: ${userId}, App Check verified: ${!!request.app}`);
+        logger.info(`fetchPuzzle invoked by user: ${userId}, App Check verified: ${!!request.app}`);
 
         // Validate Input Data
         const date = request.data.date;
-        if (!date) {
-            logger.error("Missing 'date' parameter in v2/fetchPuzzle call.");
-            throw new HttpsError("invalid-argument", "The function must be called with a \"date\" argument.");
+        if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            logger.error("Missing or invalid 'date' parameter in fetchPuzzle call.");
+            throw new HttpsError("invalid-argument", "The function must be called with a valid \"date\" argument in YYYY-MM-DD format.");
         }
 
         // Function Logic
         try {
-            logger.info(`v2: Attempting to fetch puzzle for date: ${date}`);
+            logger.info(`Attempting to fetch puzzle for date: ${date}`);
             const puzzleRef = db.collection("puzzles").doc(date);
             const puzzleSnap = await puzzleRef.get();
 
             if (puzzleSnap.exists) {
-                logger.info("v2: Puzzle found in Firestore");
+                logger.info("Puzzle found in Firestore");
                 const puzzleData = puzzleSnap.data();
 
                 // Add stricter validation
                 if (!puzzleData || typeof puzzleData.algoScore !== "number" || !puzzleData.targetColor || !Array.isArray(puzzleData.states) || puzzleData.states.length === 0 || !Array.isArray(puzzleData.actions)) {
-                    logger.error(`v2: Invalid puzzle data format found for date: ${date}`, puzzleData);
+                    logger.error(`Invalid puzzle data format found for date: ${date}`, puzzleData);
                     throw new HttpsError("internal", "Invalid puzzle data format found.");
                 }
 
                 return { success: true, data: puzzleData }; // Return data on success
             } else {
-                logger.warn(`v2: No puzzle found for date: ${date}`);
+                logger.warn(`No puzzle found for date: ${date}`);
                 throw new HttpsError("not-found", `Puzzle not found for date: ${date}`);
             }
         } catch (error) {
-            logger.error(`v2: Error in fetchPuzzle for date ${date}:`, error);
+            logger.error(`Error in fetchPuzzle for date ${date}:`, error);
             if (error instanceof HttpsError) {
                 throw error; // Re-throw HttpsError
+            }
+            throw new HttpsError("internal", "Internal server error fetching puzzle");
+        }
+    }
+);
+
+/**
+ * v2 Firebase Cloud Function to fetch all puzzles (easy/medium/hard) for a date from puzzlesV2
+ */
+export const fetchPuzzleV2 = onCall(
+    {
+        memory: "256MiB",
+        timeoutSeconds: 60,
+        ...getAppCheckConfig(),
+    },
+    async (request) => {
+        const userId = request.auth?.uid || "guest/unauthenticated";
+        const date = request.data?.date as string | undefined;
+
+        logger.info(`fetchPuzzleV2 invoked by user: ${userId}, date: ${date}`);
+
+        if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            logger.error("Missing or invalid 'date' parameter in fetchPuzzleV2 call.");
+            throw new HttpsError("invalid-argument", "The function must be called with a valid \"date\" argument in YYYY-MM-DD format.");
+        }
+
+        const difficulties = ["easy", "medium", "hard"] as const;
+
+        try {
+            logger.info(`fetchPuzzleV2: Attempting to fetch puzzles for date: ${date}`);
+            const docRefs = difficulties.map((difficulty) => db.collection("puzzlesV2").doc(`${date}-${difficulty}`));
+            const docSnaps = await Promise.all(docRefs.map((ref) => ref.get()));
+
+            const missingDifficulties = docSnaps
+                .map((snap, idx) => (!snap.exists ? difficulties[idx] : null))
+                .filter((v): v is typeof difficulties[number] => v !== null);
+
+            if (missingDifficulties.length > 0) {
+                logger.warn(`fetchPuzzleV2: Missing puzzle documents for difficulties: ${missingDifficulties.join(", ")}`);
+                throw new HttpsError("not-found", `Puzzle(s) not found for difficulties: ${missingDifficulties.join(", ")}`);
+            }
+
+            const puzzleData = {} as Record<(typeof difficulties)[number], any>;
+
+            docSnaps.forEach((snap, idx) => {
+                const difficulty = difficulties[idx];
+                const data = snap.data();
+
+                if (
+                    !data ||
+                    typeof data.algoScore !== "number" ||
+                    typeof data.targetColor !== "string" ||
+                    !Array.isArray(data.states) ||
+                    data.states.length === 0 ||
+                    !Array.isArray(data.actions) ||
+                    !Array.isArray(data.colorMap) ||
+                    data.colorMap.length === 0
+                ) {
+                    logger.error(`fetchPuzzleV2: Invalid puzzle data format for ${date}-${difficulty}`, data);
+                    throw new HttpsError("internal", `Invalid puzzle data format for difficulty: ${difficulty}`);
+                }
+
+                puzzleData[difficulty] = data;
+            });
+
+            return { success: true, data: puzzleData };
+        } catch (error) {
+            logger.error(`fetchPuzzleV2: Error fetching puzzles for date ${date}:`, error);
+            if (error instanceof HttpsError) {
+                throw error;
             }
             throw new HttpsError("internal", "Internal server error fetching puzzle");
         }
@@ -113,7 +183,6 @@ interface RecordPuzzlePayload {
     puzzle_id: string;
     user_id?: string;
     difficulty: DifficultyLevel | "easy" | "medium" | "hard";
-    attemptNumber: number;
     moves: number;
     hintUsed: boolean;
     botMoves: number;
@@ -182,8 +251,11 @@ export const recordPuzzleHistory = onCall(
         const userId = request.auth.uid;
         const payload = request.data as RecordPuzzlePayload;
 
-        if (!payload || !payload.puzzle_id || !payload.difficulty || typeof payload.attemptNumber !== 'number' || typeof payload.moves !== 'number' || typeof payload.hintUsed !== 'boolean' || typeof payload.botMoves !== 'number' || (payload.win_loss !== 'win' && payload.win_loss !== 'loss')) {
+        if (!payload || !payload.puzzle_id || !payload.difficulty || typeof payload.moves !== 'number' || typeof payload.hintUsed !== 'boolean' || typeof payload.botMoves !== 'number' || (payload.win_loss !== 'win' && payload.win_loss !== 'loss')) {
             throw new HttpsError("invalid-argument", "Invalid or missing fields in payload.");
+        }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.puzzle_id)) {
+            throw new HttpsError("invalid-argument", "Invalid puzzle_id format. Expected YYYY-MM-DD.");
         }
         if (payload.user_id && payload.user_id !== userId) {
             throw new HttpsError("permission-denied", "User ID mismatch.");
@@ -232,9 +304,28 @@ export const recordPuzzleHistory = onCall(
             const globalAttemptNumber = prevTotalAttempts + 1;
             (puzzleData as any).totalAttempts = globalAttemptNumber;
 
-            // firstTry is true only if this is the first-ever attempt on this puzzle,
-            // the user ties/beats the bot, and no hint was used on that first attempt
-            firstTry = globalAttemptNumber === 1 && moves <= botMoves && !hintUsed;
+            // Compute difficulty-specific attempt count
+            const diffKey = difficulty; // 'easy' | 'medium' | 'hard'
+            // Read existing difficulty data once (used throughout for both win/loss cases)
+            const existingDiffData = (puzzleData as any)[diffKey] as {
+                attempts?: number;
+                attemptNumber?: number;
+                lowestMovesAttemptNumber?: number;
+                moves?: number;
+                hintUsed?: boolean;
+                firstTry?: boolean;
+                firstToBeatBot?: boolean;
+                eloScore?: number;
+                elo?: number;
+                attemptToTieBot?: number;
+                attemptToBeatBot?: number;
+            } | undefined;
+            const prevDifficultyAttempts = typeof existingDiffData?.attempts === 'number' ? existingDiffData.attempts : 0;
+            const difficultyAttemptNumber = prevDifficultyAttempts + 1;
+
+            // firstTry is true only if this is the first attempt on THIS difficulty,
+            // the user ties/beats the bot, and no hint was used on that attempt
+            firstTry = difficultyAttemptNumber === 1 && moves <= botMoves && !hintUsed;
 
             // Persist global hintUsed across difficulties; once true, remains true
             const prevGlobalHintUsed = !!(puzzleData as any).hintUsed;
@@ -247,17 +338,17 @@ export const recordPuzzleHistory = onCall(
 
             // Potential puzzle-level update (only on win); ensure difficulty doc exists on loss
             if (isWin) {
-                const diffKey = difficulty; // 'easy' | 'medium' | 'hard'
-                const existing = (puzzleData as any)[diffKey] as { attemptNumber: number; moves: number; hintUsed: boolean; firstTry?: boolean; firstToBeatBot?: boolean; eloScore?: number; elo?: number } | undefined;
+                // Reuse existingDiffData read earlier (no redundant read)
+                const existing = existingDiffData;
                 let newDiffObj: any;
-                // Prepare Elo input using the global attempt number and global hint usage
+                // Prepare Elo input using the difficulty-specific attempt number and global hint usage
                 const gameStatsForElo: GameStatistics = {
                     ...defaultStats,
-                    attemptsToWinByDay: { [puzzleId]: globalAttemptNumber },
+                    attemptsToWinByDay: { [puzzleId]: difficultyAttemptNumber },
                     // Penalize Elo if any hint was used on this puzzle (attempt index not tracked)
                     attemptWhenHintUsed: { [puzzleId]: globalHintUsed ? 1 : null },
-                    attemptsToAchieveBotScore: (moves < botMoves || moves === botMoves) ? { [puzzleId]: globalAttemptNumber } : {},
-                    attemptsToBeatBotScore: (moves < botMoves) ? { [puzzleId]: globalAttemptNumber } : {},
+                    attemptsToAchieveBotScore: (moves < botMoves || moves === botMoves) ? { [puzzleId]: difficultyAttemptNumber } : {},
+                    attemptsToBeatBotScore: (moves < botMoves) ? { [puzzleId]: difficultyAttemptNumber } : {},
                     bestScoresByDayDifficulty: { [puzzleId]: difficulty },
                 } as GameStatistics;
                 elo = calculateEloScore(gameStatsForElo, { algoScore: botMoves }, puzzleId, moves, firstToBeatBot, difficulty);
@@ -269,18 +360,19 @@ export const recordPuzzleHistory = onCall(
                 const shouldReplaceMoves = !existing || typeof existingMovesVal !== 'number' || (typeof existingMovesVal === 'number' && moves < existingMovesVal);
 
                 if (!existing) {
-                    newDiffObj = { attemptNumber: globalAttemptNumber, moves, firstTry, eloScore: elo };
-                    if (achievedTieNow) newDiffObj.attemptToTieBot = globalAttemptNumber;
-                    if (achievedBeatNow) newDiffObj.attemptToBeatBot = globalAttemptNumber;
+                    newDiffObj = { attempts: difficultyAttemptNumber, lowestMovesAttemptNumber: difficultyAttemptNumber, moves, firstTry, eloScore: elo };
+                    if (achievedTieNow) newDiffObj.attemptToTieBot = difficultyAttemptNumber;
+                    if (achievedBeatNow) newDiffObj.attemptToBeatBot = difficultyAttemptNumber;
                     newDiffObj.firstToBeatBot = difficulty === DifficultyLevel.Hard ? firstToBeatBot : false;
                 } else {
                     // Preserve first recorded attempts; only set if not previously set
-                    const attemptToTieBot = (existing as any).attemptToTieBot ?? (achievedTieNow ? globalAttemptNumber : null);
-                    const attemptToBeatBot = (existing as any).attemptToBeatBot ?? (achievedBeatNow ? globalAttemptNumber : null);
+                    const attemptToTieBot = (existing as any).attemptToTieBot ?? (achievedTieNow ? difficultyAttemptNumber : null);
+                    const attemptToBeatBot = (existing as any).attemptToBeatBot ?? (achievedBeatNow ? difficultyAttemptNumber : null);
 
                     if (shouldReplaceMoves) {
                         newDiffObj = {
-                            attemptNumber: globalAttemptNumber,
+                            attempts: difficultyAttemptNumber,
+                            lowestMovesAttemptNumber: difficultyAttemptNumber,
                             moves,
                             firstTry: existing.firstTry ?? firstTry, // Preserve existing firstTry value
                             eloScore: elo,
@@ -290,8 +382,11 @@ export const recordPuzzleHistory = onCall(
                         // Allow firstToBeatBot to be set on any attempt where user achieves it
                         newDiffObj.firstToBeatBot = difficulty === DifficultyLevel.Hard ? (existing.firstToBeatBot || firstToBeatBot) : false;
                     } else {
+                        // Keep existing best score
+                        // Note: lowestMovesAttemptNumber may be null for legacy data (old attemptNumber was global, not per-difficulty)
                         newDiffObj = {
-                            attemptNumber: existing.attemptNumber,
+                            attempts: difficultyAttemptNumber,
+                            lowestMovesAttemptNumber: existing.lowestMovesAttemptNumber ?? null,
                             moves: existing.moves,
                             firstTry: existing.firstTry ?? firstTry,
                             eloScore: (existing as any).eloScore ?? (existing as any).elo ?? elo,
@@ -320,11 +415,11 @@ export const recordPuzzleHistory = onCall(
                 }
             } else {
                 // Loss: ensure difficulty entry exists with defaults on first recorded loss
-                const diffKey = difficulty; // 'easy' | 'medium' | 'hard'
-                const existingLoss = (puzzleData as any)[diffKey] as { attemptNumber?: number } | undefined;
-                if (!existingLoss) {
+                // Reuse existingDiffData read earlier (no redundant read)
+                if (!existingDiffData) {
                     (puzzleData as any)[diffKey] = {
-                        attemptNumber: globalAttemptNumber,
+                        attempts: difficultyAttemptNumber,
+                        lowestMovesAttemptNumber: null,
                         moves: null,
                         attemptToBeatBot: null,
                         attemptToTieBot: null,
@@ -334,6 +429,12 @@ export const recordPuzzleHistory = onCall(
                     };
                     // Loss: Do NOT write to dailyScoresV2
                     logger.info("Loss recorded for puzzle history only, not writing to dailyScoresV2", { puzzleId, difficulty: diffKey, userId });
+                } else {
+                    // Update attempts counter for existing losses
+                    (puzzleData as any)[diffKey] = {
+                        ...existingDiffData,
+                        attempts: difficultyAttemptNumber,
+                    };
                 }
             }
 
@@ -381,11 +482,11 @@ export const recordPuzzleHistory = onCall(
                 const prevTieLongest = typeof d?.longestTieBotStreak === 'number' ? d.longestTieBotStreak : 0;
                 const prevLastTieDate = typeof d?.lastTieBotDate === 'string' ? d.lastTieBotDate : null;
 
-                // First try streak
+                // First try streak (per-difficulty)
                 let newFirstTryCurrent = prevFirstTryCurrent;
                 let newFirstTryLongest = prevFirstTryLongest;
                 let newLastFirstTryDate = prevLastFirstTryDate;
-                if (globalAttemptNumber === 1 && moves <= botMoves && !hintUsed) {
+                if (difficultyAttemptNumber === 1 && moves <= botMoves && !hintUsed) {
                     if (!prevLastFirstTryDate) {
                         newFirstTryCurrent = 1;
                     } else if (prevLastFirstTryDate === puzzleId) {
@@ -399,7 +500,7 @@ export const recordPuzzleHistory = onCall(
                     newFirstTryLongest = Math.max(newFirstTryCurrent, prevFirstTryLongest);
                     newLastFirstTryDate = puzzleId;
                 } else if (prevLastFirstTryDate !== puzzleId) {
-                    // User won but didn't meet first-try criteria (not first attempt, didn't tie bot, or used hint)
+                    // User won but didn't meet first-try criteria (not first attempt on this difficulty, didn't tie bot, or used hint)
                     // Reset streak to 0 unless we already processed this puzzle today
                     newFirstTryCurrent = 0;
                     newLastFirstTryDate = puzzleId;
@@ -453,10 +554,51 @@ export const recordPuzzleHistory = onCall(
 
                 // --- Level-agnostic Elo maintenance ---
                 try {
+                    // Elo Scoring Strategy: Sum across all three difficulties
+                    // This design encourages players to complete all difficulty levels for each puzzle.
+                    // Each difficulty awards Elo independently based on performance, and the total
+                    // represents comprehensive engagement with each day's puzzle.
+                    // Note: This differs from traditional single-value Elo systems but aligns with
+                    // the multi-difficulty puzzle structure where each difficulty is a distinct challenge.
+                    const easyElo = typeof (puzzleData as any).easy?.eloScore === 'number'
+                        ? (puzzleData as any).easy.eloScore
+                        : 0;
+                    const mediumElo = typeof (puzzleData as any).medium?.eloScore === 'number'
+                        ? (puzzleData as any).medium.eloScore
+                        : 0;
+                    const hardElo = typeof (puzzleData as any).hard?.eloScore === 'number'
+                        ? (puzzleData as any).hard.eloScore
+                        : 0;
+
+                    const totalElo = easyElo + mediumElo + hardElo;
+
+                    // Log the sum calculation for verification
+                    logger.info('[ELO SUM] Calculated Elo sum for puzzle', {
+                        puzzleId,
+                        userId,
+                        easyElo,
+                        mediumElo,
+                        hardElo,
+                        totalElo,
+                        currentDifficulty: difficulty
+                    });
+
+                    // Update eloScoreByDay
                     const existingEloMap = (la && typeof la.eloScoreByDay === 'object') ? { ...(la.eloScoreByDay as Record<string, number>) } : {} as Record<string, number>;
-                    const prevDayElo = typeof existingEloMap[puzzleId] === 'number' ? existingEloMap[puzzleId] : undefined;
-                    if (prevDayElo === undefined || elo > prevDayElo) {
-                        existingEloMap[puzzleId] = elo;
+                    const prevDayElo = typeof existingEloMap[puzzleId] === 'number' ? existingEloMap[puzzleId] : 0;
+
+                    // Only update if new sum is higher (preserve maximum sum)
+                    if (totalElo > prevDayElo) {
+                        existingEloMap[puzzleId] = totalElo;
+
+                        logger.info('[ELO SUM] Updated eloScoreByDay', {
+                            puzzleId,
+                            userId,
+                            prevSum: prevDayElo,
+                            newSum: totalElo,
+                            increase: totalElo - prevDayElo
+                        });
+
                         // Recompute aggregates
                         let eloAllTime = 0;
                         let eloLast30 = 0;
@@ -489,6 +631,13 @@ export const recordPuzzleHistory = onCall(
                             eloScoreLast30: eloLast30,
                             eloScoreLast7: eloLast7,
                         };
+                    } else {
+                        logger.info('[ELO SUM] Sum not higher, keeping existing eloScoreByDay', {
+                            puzzleId,
+                            userId,
+                            currentSum: prevDayElo,
+                            calculatedSum: totalElo
+                        });
                     }
                 } catch (e) {
                     logger.warn('Failed to recompute elo aggregates for user leaderboard', e);
@@ -759,8 +908,8 @@ export const getPersonalStats = onCall(
                 bestEloScore: typeof laData.eloScoreByDay?.[puzzleId] === 'number' 
                     ? laData.eloScoreByDay[puzzleId] 
                     : null,
-                totalAttempts: typeof puzzleData.totalAttempts === 'number' 
-                    ? puzzleData.totalAttempts 
+                totalAttempts: typeof diffData.attempts === 'number' 
+                    ? diffData.attempts 
                     : null,
                 fewestMoves: typeof diffData.moves === 'number' 
                     ? diffData.moves 
@@ -1233,18 +1382,18 @@ export const sendDailyPuzzleReminders = onSchedule(
                         // Case A: User played yesterday (streak is active)
                         if (lastCompletedDate === yesterdayPuzzleId) {
                             notificationTitle = "Don't lose your streak!";
-                            notificationBody = `Don't forget to solve today's ColorLock! You're in danger of losing your ${currentStreak} day streak!`;
+                            notificationBody = `Don't forget to solve today's Color Lock! You're in danger of losing your ${currentStreak} day streak!`;
                             logger.info(`sendDailyPuzzleReminders: User ${userId} has active ${currentStreak} day streak`);
                         } else {
                             // Case B: User didn't play yesterday (no active streak)
-                            notificationTitle = "ColorLock Daily Puzzle";
-                            notificationBody = `It looks like you haven't completed today's ColorLock. Join the ${todaysTotalPlayers} players who have solved today's puzzle!`;
+                            notificationTitle = "Color Lock Daily Puzzle";
+                            notificationBody = `It looks like you haven't completed today's Color Lock. Join the ${todaysTotalPlayers} players who have solved today's puzzle!`;
                             logger.info(`sendDailyPuzzleReminders: User ${userId} has no active streak`);
                         }
                     } else {
                         // No history, treat as Case B
-                        notificationTitle = "ColorLock Daily Puzzle";
-                        notificationBody = `It looks like you haven't completed today's ColorLock. Join the ${todaysTotalPlayers} players who have solved today's puzzle!`;
+                        notificationTitle = "Colo Lock Daily Puzzle";
+                        notificationBody = `It looks like you haven't completed today's Color Lock. Join the ${todaysTotalPlayers} players who have solved today's puzzle!`;
                         logger.info(`sendDailyPuzzleReminders: User ${userId} has no puzzle history`);
                     }
 

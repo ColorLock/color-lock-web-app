@@ -52,38 +52,55 @@ export function calculateEloScore(
 
     if (difficulty === DifficultyLevel.Easy) {
         difficultyMultiplier = 0.5;
+    } else if (difficulty === DifficultyLevel.Medium) {
+        difficultyMultiplier = 0.75;
     }
     logger.debug(`Calculating Elo for ${dateStr}: Difficulty=${difficulty}, Multiplier=${difficultyMultiplier}, UserScore=${userScore}, AlgoScore=${algoScore}`);
     // --- End Difficulty Multiplier ---
 
     const winBonus = (winAttempt !== null && winAttempt >= 1) ? 200 : 0;
-    let tieOrBeatBonus = (difficulty === DifficultyLevel.Hard && userScore <= algoScore)
-        ? (200 * (algoScore - userScore + 1))
-        : 0;
+
+    // Tie or Beat Bonus: Scaled by difficulty to reflect challenge level
+    // Easy: 30 points base (adjusted lower as it's easier to achieve)
+    // Medium: 60 points base (moderate challenge)
+    // Hard: 200 points base (highest challenge)
+    // Bonus increases linearly based on how much better you did than the algorithm
+    // Note: This bonus is NOT multiplied by difficultyMultiplier (unlike winBonus)
+    // to maintain balanced scoring across difficulty levels
+    let tieOrBeatBonus = 0;
+    if (difficulty === DifficultyLevel.Easy && userScore <= algoScore) {
+        tieOrBeatBonus = 30 * (algoScore - userScore + 1);
+    } else if (difficulty === DifficultyLevel.Medium && userScore <= algoScore) {
+        tieOrBeatBonus = 60 * (algoScore - userScore + 1);
+    } else if (difficulty === DifficultyLevel.Hard && userScore <= algoScore) {
+        tieOrBeatBonus = 200 * (algoScore - userScore + 1);
+    }
 
 
     // Apply difficulty multiplier to bonuses
     const adjustedWinBonus = winBonus * difficultyMultiplier;
-    const adjustedTieOrBeatBonus = tieOrBeatBonus * difficultyMultiplier;
 
-    const totalRawBonus = adjustedWinBonus + adjustedTieOrBeatBonus;
+    const totalRawBonus = adjustedWinBonus + tieOrBeatBonus;
 
     const applyHintPenalty = (hintAttempt !== null && hintAttempt <= achieveBotAttempt);
     const hintPenaltyMultiplier = applyHintPenalty ? 0.5 : 1.0;
     const adjustedBonusWithHint = totalRawBonus * hintPenaltyMultiplier;
 
     const cumulativeAttemptPenalty = calculateEloAttemptPenalty(
-        userStats?.attemptsToBeatBotScore?.[dateStr] ?? 
-        userStats?.attemptsToAchieveBotScore?.[dateStr] ?? 
+        userStats?.attemptsToBeatBotScore?.[dateStr] ??
+        userStats?.attemptsToAchieveBotScore?.[dateStr] ??
         winAttempt
     );
 
+    // Apply difficulty multiplier to attempt penalty
+    const adjustedAttemptPenalty = cumulativeAttemptPenalty * difficultyMultiplier;
+
     // Add first-to-beat-bot bonus of 100 points if applicable
     const firstToBeatBotBonus = isFirstToBeatBot ? 200 : 0;
-    
-    const finalScore = adjustedBonusWithHint + cumulativeAttemptPenalty + firstToBeatBotBonus;
 
-    logger.debug(`Elo components for ${dateStr}: winBonus=${winBonus}, tieOrBeatBonus=${tieOrBeatBonus}, diffMultiplier=${difficultyMultiplier}, hintMultiplier=${hintPenaltyMultiplier}, attemptPenalty=${cumulativeAttemptPenalty.toFixed(2)}, firstToBeatBotBonus=${firstToBeatBotBonus}, finalScore=${Math.round(finalScore)}`);
+    const finalScore = adjustedBonusWithHint + adjustedAttemptPenalty + firstToBeatBotBonus;
+
+    logger.debug(`Elo components for ${dateStr}: winBonus=${winBonus}, tieOrBeatBonus=${tieOrBeatBonus}, diffMultiplier=${difficultyMultiplier}, hintMultiplier=${hintPenaltyMultiplier}, attemptPenalty=${cumulativeAttemptPenalty.toFixed(2)}, adjustedAttemptPenalty=${adjustedAttemptPenalty.toFixed(2)}, firstToBeatBotBonus=${firstToBeatBotBonus}, finalScore=${Math.round(finalScore)}`);
 
     return Math.round(finalScore);
 }

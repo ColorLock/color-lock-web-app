@@ -1,9 +1,13 @@
 @use '../abstracts' as *;
 
-// Grid styling (5x5) with bigger tiles
+// Grid styling with dynamic tile sizing
 .grid {
   display: inline-block;
   position: relative;
+  // CSS custom properties with fallback to SCSS variables
+  --grid-cell-container-size: #{$grid-cell-container-size};
+  --grid-cell-size: #{$grid-cell-size};
+  --grid-cell-margin: #{$grid-cell-margin};
 }
 
 .grid-row {
@@ -12,41 +16,41 @@
 
 .grid-cell-container {
   position: relative;
-  width: $grid-cell-container-size;
-  height: $grid-cell-container-size;
+  width: var(--grid-cell-container-size);
+  height: var(--grid-cell-container-size);
   margin: 0;
 }
 
 .grid-cell {
   position: relative;
-  width: $grid-cell-size;
-  height: $grid-cell-size;
-  margin: $grid-cell-margin;
+  width: var(--grid-cell-size);
+  height: var(--grid-cell-size);
+  margin: var(--grid-cell-margin);
   border-radius: $border-radius-small;
   cursor: pointer;
   transition: transform $transition-fast;
   box-sizing: border-box;
-  
+
   &:hover {
     transform: scale(1.05);
   }
-  
+
   // Highlighted region style
   &.highlight-largest-region {
     box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 8px 2px rgba(255, 255, 255, 0.7);
   }
-  
+
   // Hinted cell with improved animation
   &.hint-cell {
     animation: color-fade 3s infinite, hint-pulsate 3s infinite;
     animation-fill-mode: both;
     z-index: 2;
     box-shadow: 0 0 5px 1px rgba(30, 144, 255, 0.5);
-    
+
     // Add a more subtle border to mark the cell
     border: 1px solid rgba(30, 144, 255, 0.7) !important;
   }
-  
+
   // Neon glow effect
   &.neon-glow::before {
     content: "";
@@ -60,7 +64,7 @@
     z-index: -1;
     animation: neon-glow-pulse 2s infinite alternate;
   }
-  
+
   // High contrast mode
   .high-contrast-mode & {
     border: 2px solid $color-black;
@@ -78,11 +82,11 @@
 // Locked overlay styling
 .locked-overlay {
   position: absolute;
-  top: 0; 
+  top: 0;
   left: 0;
-  width: $grid-cell-size;
-  height: $grid-cell-size;
-  margin: $grid-cell-margin;
+  width: var(--grid-cell-size);
+  height: var(--grid-cell-size);
+  margin: var(--grid-cell-margin);
   border-radius: $border-radius-small;
   background-color: rgba(0, 0, 0, 0.3);
   @include flex-center;
@@ -122,8 +126,8 @@
   position: absolute;
   top: 2px;
   left: 2px;
-  width: $grid-cell-size;
-  height: $grid-cell-size;
+  width: var(--grid-cell-size);
+  height: var(--grid-cell-size);
   border-radius: $border-radius-small;
   z-index: 1;
   animation: preview-pulse 1.5s infinite;
