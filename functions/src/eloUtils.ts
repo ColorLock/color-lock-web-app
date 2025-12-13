@@ -82,9 +82,7 @@ export function calculateEloScore(
 
     const totalRawBonus = adjustedWinBonus + tieOrBeatBonus;
 
-    const applyHintPenalty = (hintAttempt !== null && hintAttempt <= achieveBotAttempt);
-    const hintPenaltyMultiplier = applyHintPenalty ? 0.5 : 1.0;
-    const adjustedBonusWithHint = totalRawBonus * hintPenaltyMultiplier;
+    // No longer apply hint penalty - users who use bot solution get 0 points (handled at record level)
 
     const cumulativeAttemptPenalty = calculateEloAttemptPenalty(
         userStats?.attemptsToBeatBotScore?.[dateStr] ??
@@ -95,12 +93,22 @@ export function calculateEloScore(
     // Apply difficulty multiplier to attempt penalty
     const adjustedAttemptPenalty = cumulativeAttemptPenalty * difficultyMultiplier;
 
-    // Add first-to-beat-bot bonus of 100 points if applicable
-    const firstToBeatBotBonus = isFirstToBeatBot ? 200 : 0;
+    // Add first-to-beat-bot bonus (difficulty-scaled)
+    // Hard: 200 points, Medium: 100 points, Easy: 50 points
+    let firstToBeatBotBonus = 0;
+    if (isFirstToBeatBot) {
+        if (difficulty === DifficultyLevel.Hard) {
+            firstToBeatBotBonus = 200;
+        } else if (difficulty === DifficultyLevel.Medium) {
+            firstToBeatBotBonus = 100;
+        } else if (difficulty === DifficultyLevel.Easy) {
+            firstToBeatBotBonus = 50;
+        }
+    }
 
-    const finalScore = adjustedBonusWithHint + adjustedAttemptPenalty + firstToBeatBotBonus;
+    const finalScore = totalRawBonus + adjustedAttemptPenalty + firstToBeatBotBonus;
 
-    logger.debug(`Elo components for ${dateStr}: winBonus=${winBonus}, tieOrBeatBonus=${tieOrBeatBonus}, diffMultiplier=${difficultyMultiplier}, hintMultiplier=${hintPenaltyMultiplier}, attemptPenalty=${cumulativeAttemptPenalty.toFixed(2)}, adjustedAttemptPenalty=${adjustedAttemptPenalty.toFixed(2)}, firstToBeatBotBonus=${firstToBeatBotBonus}, finalScore=${Math.round(finalScore)}`);
+    logger.debug(`Elo components for ${dateStr}: winBonus=${winBonus}, tieOrBeatBonus=${tieOrBeatBonus}, diffMultiplier=${difficultyMultiplier}, attemptPenalty=${cumulativeAttemptPenalty.toFixed(2)}, adjustedAttemptPenalty=${adjustedAttemptPenalty.toFixed(2)}, firstToBeatBotBonus=${firstToBeatBotBonus}, finalScore=${Math.round(finalScore)}`);
 
     return Math.round(finalScore);
 }

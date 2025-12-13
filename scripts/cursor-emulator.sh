@@ -44,6 +44,10 @@ trap handle_exit INT TERM
 # Step 1: Cleanup
 cleanup
 
+# Step 1.5: Reset emulator data to ensure a fresh state
+log_info "Clearing persisted emulator data (firebase-emulator-data)..."
+rm -rf firebase-emulator-data || true
+
 # Step 2: Build functions
 log_info "Building Cloud Functions..."
 (cd functions && npm run build)

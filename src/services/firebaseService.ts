@@ -93,6 +93,9 @@ export const fetchPuzzleV2Callable = getCallableFunction<{ date: string }, Fetch
 // Define callable function for recording completed puzzle history
 export const recordPuzzleHistoryCallable = getCallableFunction<any, { success: boolean; error?: string }>('recordPuzzleHistory');
 
+// Callable to mark hint/solution usage for a puzzle+difficulty
+export const setHintUsedForPuzzleCallable = getCallableFunction<{ puzzleId: string; difficulty: string }, { success: boolean; error?: string }>('setHintUsedForPuzzle');
+
 // V2 daily scores per-difficulty stats
 interface GetDailyScoresV2StatsResponse {
   success: boolean;

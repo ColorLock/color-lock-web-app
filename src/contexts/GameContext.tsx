@@ -1,13 +1,15 @@
-import React, { createContext, useState, useEffect, useContext, ReactNode, useCallback } from 'react';
+import React, { createContext, useState, useEffect, useContext, ReactNode, useCallback, useRef } from 'react';
 import { TileColor, DailyPuzzle, FirestorePuzzleData } from '../types';
 import { AppSettings, DifficultyLevel } from '../types/settings';
 import { GameStatistics, defaultStats } from '../types/stats';
-import { HintResult } from '../utils/hintUtils';
+import { HintResult, decodeActionId } from '../utils/hintUtils';
+import { floodFill } from '../utils/gameLogic';
 import {
     fetchPuzzleV2Callable,
     getPersonalStatsCallable,
     recordPuzzleHistoryCallable,
-    getWinModalStatsCallable
+    getWinModalStatsCallable,
+    setHintUsedForPuzzleCallable
 } from '../services/firebaseService';
 import { dateKeyForToday } from '../utils/dateUtils';
 import { findLargestRegion, generatePuzzleFromDB } from '../utils/gameLogic';
@@ -53,7 +55,12 @@ interface GameContextValue {
   closeColorPicker: () => void;
   handleTryAgain: () => Promise<void>;
   resetLostState: () => void;
-  handleHint: () => void;
+  handleBotSolutionClick: () => void;
+  handleBotSolutionConfirm: () => void;
+  handleCancelAutoSolution: () => void;
+  isAutoSolving: boolean;
+  showBotSolutionModal: boolean;
+  setShowBotSolutionModal: (show: boolean) => void;
   handleSettingsChange: (newSettings: AppSettings) => void;
   getColorCSSWithSettings: (color: TileColor) => string;
   getLockedRegionSize: () => number;
@@ -111,6 +118,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [hasDeclinedAutocomplete, setHasDeclinedAutocomplete] = useState(false);
   const [isLostReported, setIsLostReported] = useState(false);
   const [hasRecordedCompletion, setHasRecordedCompletion] = useState(false);
+  const [hasUsedBotSolutionThisAttempt, setHasUsedBotSolutionThisAttempt] = useState(false);
 
   // Local state for tracking attempt details (per-difficulty)
   const [attemptsByDifficulty, setAttemptsByDifficulty] = useState<{
@@ -121,6 +129,10 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [isFirstTryOfDay, setIsFirstTryOfDay] = useState<boolean>(true);
   const [hintsUsedThisGame, setHintsUsedThisGame] = useState<number>(0);
   const [movesThisAttempt, setMovesThisAttempt] = useState<number>(0);
+  const [isAutoSolving, setIsAutoSolving] = useState<boolean>(false);
+  const [autoSolveIntervalId, setAutoSolveIntervalId] = useState<NodeJS.Timeout | null>(null);
+  const autoSolveTimeoutIdsRef = useRef<NodeJS.Timeout[]>([]);
+  const [showBotSolutionModal, setShowBotSolutionModal] = useState<boolean>(false);
   const [winModalStats, setWinModalStats] = useState<{
     totalAttempts: number | null;
     currentPuzzleCompletedStreak: number | null;
@@ -242,6 +254,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
             setMovesThisAttempt(0);
             setIsLostReported(false);
             setHasRecordedCompletion(false);
+            setHasUsedBotSolutionThisAttempt(false);
             setLoading(false);
             return; // Exit early, used cache
         } catch (genError) {
@@ -281,6 +294,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
           setMovesThisAttempt(0);
           setIsLostReported(false);
           setHasRecordedCompletion(false);
+          setHasUsedBotSolutionThisAttempt(false);
         } else {
           throw new Error(result.data.error || 'Failed to fetch puzzle data');
         }
@@ -338,10 +352,10 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   // Check for autocomplete conditions
   useEffect(() => {
-    if (puzzle && !puzzle.isSolved && !puzzle.isLost && shouldShowAutocomplete(puzzle) && !hasDeclinedAutocomplete) {
+    if (puzzle && !puzzle.isSolved && !puzzle.isLost && shouldShowAutocomplete(puzzle) && !hasDeclinedAutocomplete && !isAutoSolving) {
       setShowAutocompleteModal(true);
     }
-  }, [puzzle, hasDeclinedAutocomplete]);
+  }, [puzzle, hasDeclinedAutocomplete, isAutoSolving]);
 
   // Report loss event (record only on completion)
   useEffect(() => {
@@ -376,9 +390,21 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     }
   }, [showStatsState, fetchAndSetUserStats]);
 
+  // Cleanup auto-solve interval and timeouts on unmount or puzzle change
+  useEffect(() => {
+    return () => {
+      if (autoSolveIntervalId) {
+        clearInterval(autoSolveIntervalId);
+      }
+      // Clear all pending timeouts
+      autoSolveTimeoutIdsRef.current.forEach((timeoutId: NodeJS.Timeout) => clearTimeout(timeoutId));
+    };
+  }, [autoSolveIntervalId]);
+
   // --- Event Handlers ---
 
   const handleTileClick = (row: number, col: number) => {
+    if (isAutoSolving) return; // Block input during auto-solve
     if (!puzzle || puzzle.isSolved || puzzle.isLost) return;
     if (puzzle.lockedCells.has(`${row},${col}`)) return;
     setSelectedTile({ row, col });
@@ -386,6 +412,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   };
 
   const handleColorSelect = (newColor: TileColor) => {
+    if (isAutoSolving) return; // Block input during auto-solve
     if (!selectedTile || !puzzle) return;
 
     setHintCell(null);
@@ -417,7 +444,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       // Loss event is handled by useEffect, need to clear there too
     }
 
-    if (!updatedPuzzle.isSolved && !updatedPuzzle.isLost && shouldShowAutocomplete(updatedPuzzle) && !hasDeclinedAutocomplete) {
+    if (!updatedPuzzle.isSolved && !updatedPuzzle.isLost && shouldShowAutocomplete(updatedPuzzle) && !hasDeclinedAutocomplete && !isAutoSolving) {
       setShowAutocompleteModal(true);
     }
   };
@@ -427,17 +454,227 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setSelectedTile(null);
   };
 
-  const handleHint = () => {
-    if (!puzzle || !firestoreData || puzzle.isSolved || puzzle.isLost) return;
+  const handleBotSolutionClick = () => {
+    if (!puzzle || puzzle.isSolved || puzzle.isLost) return;
+    if (isAutoSolving) return; // Ignore if already auto-solving
+    setShowBotSolutionModal(true);
+  };
 
-    const hint = getGameHint(puzzle, firestoreData, isOnOptimalPath);
-    if (hint) {
-      setHintCell(hint);
-      setHintsUsedThisGame(prev => prev + 1);
-      console.log(`[HINT ${new Date().toISOString()}] Hint used at position [${hint.row},${hint.col}] - puzzle ID: ${puzzle.dateString}. Attempt number: ${attemptsByDifficulty[settings.difficultyLevel]}`);
-    } else {
-      console.log("No valid hint could be generated.");
+  const handleBotSolutionConfirm = () => {
+    setShowBotSolutionModal(false);
+    setHintsUsedThisGame(1); // Mark that solution was used
+    setHasUsedBotSolutionThisAttempt(true);
+    console.log(`[BOT SOLUTION ${new Date().toISOString()}] Bot solution requested - puzzle ID: ${puzzle?.dateString}. Attempt number: ${attemptsByDifficulty[settings.difficultyLevel]}`);
+
+    // Start the solution immediately
+    executeAutoSolution();
+
+    // Persist hint/solution usage for this puzzle+difficulty in the background (don't await)
+    if (puzzle) {
+      setHintUsedForPuzzleCallable({
+        puzzleId: puzzle.dateString,
+        difficulty: settings.difficultyLevel
+      }).catch(err => {
+        console.error('Failed to mark hint/solution usage for puzzle', err);
+      });
     }
+  };
+
+  const executeAutoSolution = () => {
+    if (!puzzle) {
+      setError("Cannot execute bot solution - puzzle data incomplete");
+      return;
+    }
+
+    setIsAutoSolving(true);
+    autoSolveTimeoutIdsRef.current = []; // Clear any previous timeout IDs
+
+    // Check if we have valid bot solution data
+    const hasValidBotSolution = firestoreData &&
+                                 firestoreData.actions &&
+                                 firestoreData.actions.length > 0;
+
+    if (hasValidBotSolution) {
+      // Try to use bot solution from actions array
+      let currentActionIndex = puzzle.userMovesUsed + puzzle.effectiveStartingMoveIndex;
+
+      // Track current grid state to calculate connected cells correctly
+      let currentGrid = puzzle.grid.map(row => [...row]);
+
+      const interval = setInterval(() => {
+        // Check if we've completed all actions
+        if (currentActionIndex >= firestoreData.actions.length) {
+          clearInterval(interval);
+          setIsAutoSolving(false);
+          setHintCell(null);
+          autoSolveTimeoutIdsRef.current = [];
+          return;
+        }
+
+        // Get next action and decode it
+        const actionId = firestoreData.actions[currentActionIndex];
+        const hint = decodeActionId(actionId, firestoreData);
+
+        if (!hint || !hint.valid) {
+          clearInterval(interval);
+          setIsAutoSolving(false);
+          autoSolveTimeoutIdsRef.current = [];
+          console.error("Invalid hint during auto-solve, falling back to simple solution");
+          // Fall back to simple solution
+          executeSimpleFallbackSolution();
+          return;
+        }
+
+        // Calculate connected cells for this hint using flood fill on CURRENT grid
+        const currentColor = currentGrid[hint.row][hint.col];
+        const [rowIndices, colIndices] = floodFill(currentGrid, hint.row, hint.col, currentColor);
+        const connectedCells: [number, number][] = [];
+        for (let i = 0; i < rowIndices.length; i++) {
+          connectedCells.push([rowIndices[i], colIndices[i]]);
+        }
+
+        // Show hint animation with connected cells (reuse existing highlight)
+        setHintCell({ ...hint, connectedCells });
+
+        // After 2 seconds, apply the move automatically
+        const timeoutId = setTimeout(() => {
+          setPuzzle(prevPuzzle => {
+            if (!prevPuzzle) return prevPuzzle;
+
+            try {
+              const updatedPuzzle = applyColorChange(prevPuzzle, hint.row, hint.col, hint.newColor);
+              // Don't increment movesThisAttempt during bot solution
+              setHintCell(null);
+
+              // Update our tracked grid to match
+              currentGrid = updatedPuzzle.grid.map(row => [...row]);
+
+              // Check if puzzle is now solved
+              if (updatedPuzzle.isSolved) {
+                clearInterval(interval);
+                setIsAutoSolving(false);
+                autoSolveTimeoutIdsRef.current = [];
+                // Don't call handlePuzzleSolved - bot solution doesn't count as completing the puzzle
+              }
+
+              return updatedPuzzle;
+            } catch (error) {
+              console.error("Error applying bot solution move, falling back to simple solution:", error);
+              clearInterval(interval);
+              setIsAutoSolving(false);
+              setHintCell(null);
+              autoSolveTimeoutIdsRef.current = [];
+              // Fall back to simple solution
+              const fallbackTimeoutId = setTimeout(() => executeSimpleFallbackSolution(), 100);
+              autoSolveTimeoutIdsRef.current = [fallbackTimeoutId];
+              return prevPuzzle;
+            }
+          });
+        }, 2000); // 2 seconds to show hint
+
+        // Track this timeout ID
+        autoSolveTimeoutIdsRef.current.push(timeoutId);
+
+        currentActionIndex++;
+      }, 3000); // 3 seconds between moves
+
+      setAutoSolveIntervalId(interval);
+    } else {
+      // No valid bot solution data, use fallback
+      console.log("No valid bot solution data, using simple fallback solution");
+      executeSimpleFallbackSolution();
+    }
+  };
+
+  // Fallback solution: simply change each non-target-color cell to target color
+  const executeSimpleFallbackSolution = () => {
+    if (!puzzle) return;
+
+    setIsAutoSolving(true);
+    autoSolveTimeoutIdsRef.current = []; // Clear any previous timeout IDs
+    const targetColor = puzzle.targetColor;
+
+    const interval = setInterval(() => {
+      setPuzzle(prevPuzzle => {
+        if (!prevPuzzle) return prevPuzzle;
+
+        // Find first non-locked cell that's not the target color
+        for (let row = 0; row < prevPuzzle.grid.length; row++) {
+          for (let col = 0; col < prevPuzzle.grid[row].length; col++) {
+            const cellKey = `${row},${col}`;
+            const isLocked = prevPuzzle.lockedCells.has(cellKey);
+            const currentColor = prevPuzzle.grid[row][col];
+
+            if (!isLocked && currentColor !== targetColor) {
+              // Found a cell to change - calculate connected cells using flood fill
+              const [rowIndices, colIndices] = floodFill(prevPuzzle.grid, row, col, currentColor);
+              const connectedCells: [number, number][] = [];
+              for (let i = 0; i < rowIndices.length; i++) {
+                connectedCells.push([rowIndices[i], colIndices[i]]);
+              }
+
+              const hint: HintResult = {
+                row,
+                col,
+                newColor: targetColor,
+                valid: true,
+                connectedCells
+              };
+
+              setHintCell(hint);
+
+              const timeoutId = setTimeout(() => {
+                setPuzzle(innerPuzzle => {
+                  if (!innerPuzzle) return innerPuzzle;
+
+                  const updatedPuzzle = applyColorChange(innerPuzzle, row, col, targetColor);
+                  // Don't increment movesThisAttempt during bot solution
+                  setHintCell(null);
+
+                  // Check if puzzle is now solved
+                  if (updatedPuzzle.isSolved) {
+                    clearInterval(interval);
+                    setIsAutoSolving(false);
+                    autoSolveTimeoutIdsRef.current = [];
+                    // Don't call handlePuzzleSolved - bot solution doesn't count as completing the puzzle
+                  }
+
+                  return updatedPuzzle;
+                });
+              }, 2000);
+
+              // Track this timeout ID
+              autoSolveTimeoutIdsRef.current.push(timeoutId);
+
+              // Exit the loop - we found a move for this iteration
+              return prevPuzzle;
+            }
+          }
+        }
+
+        // If we get here, no valid move was found - puzzle might be solved or stuck
+        clearInterval(interval);
+        setIsAutoSolving(false);
+        setHintCell(null);
+        autoSolveTimeoutIdsRef.current = [];
+        return prevPuzzle;
+      });
+    }, 3000); // 3 seconds between moves
+
+    setAutoSolveIntervalId(interval);
+  };
+
+  const handleCancelAutoSolution = () => {
+    if (autoSolveIntervalId) {
+      clearInterval(autoSolveIntervalId);
+      setAutoSolveIntervalId(null);
+    }
+    // Clear all pending timeouts
+    autoSolveTimeoutIdsRef.current.forEach((timeoutId: NodeJS.Timeout) => clearTimeout(timeoutId));
+    autoSolveTimeoutIdsRef.current = [];
+    setIsAutoSolving(false);
+    setHintCell(null);
+    // Note: hintsUsedThisGame remains > 0, so stats still reflect solution usage
   };
 
   const handlePuzzleSolved = async (solvedPuzzle: DailyPuzzle) => {
@@ -508,8 +745,31 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
     console.log(`[STATS-EVENT ${new Date().toISOString()}] User clicked Try Again - puzzle ID: ${puzzle.dateString}, moves: ${movesThisAttempt}, hints: ${hintsUsedThisGame}, isSolved: ${puzzle.isSolved}, isLost: ${puzzle.isLost}.`);
 
+    // Cancel any running bot solution
+    if (autoSolveIntervalId) {
+      clearInterval(autoSolveIntervalId);
+      setAutoSolveIntervalId(null);
+    }
+    // Clear all pending timeouts
+    autoSolveTimeoutIdsRef.current.forEach((timeoutId: NodeJS.Timeout) => clearTimeout(timeoutId));
+    autoSolveTimeoutIdsRef.current = [];
+    setIsAutoSolving(false);
+
+    // If a bot solution was used, make a last attempt to persist hintUsed without counting stats
+    if (hasUsedBotSolutionThisAttempt && puzzle) {
+      try {
+        await setHintUsedForPuzzleCallable({
+          puzzleId: puzzle.dateString,
+          difficulty: settings.difficultyLevel
+        });
+      } catch (err) {
+        console.error('Failed to persist hint usage before reset', err);
+      }
+    }
+
     // Always record a loss when the user clicks Try Again if not already recorded
-    if (!hasRecordedCompletion) {
+    // Skip recording if a bot solution was used on this attempt (we don't count those attempts)
+    if (!hasRecordedCompletion && !hasUsedBotSolutionThisAttempt) {
       recordPuzzleHistory({
         puzzle_id: puzzle.dateString,
         difficulty: settings.difficultyLevel,
@@ -542,6 +802,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       setMovesThisAttempt(0);
       setIsLostReported(false);
       setHasRecordedCompletion(false);
+      setHasUsedBotSolutionThisAttempt(false);
 
       // Reset UI state
       setHintCell(null);
@@ -725,7 +986,12 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     closeColorPicker,
     handleTryAgain,
     resetLostState,
-    handleHint,
+    handleBotSolutionClick,
+    handleBotSolutionConfirm,
+    handleCancelAutoSolution,
+    isAutoSolving,
+    showBotSolutionModal,
+    setShowBotSolutionModal,
     handleSettingsChange,
     getColorCSSWithSettings,
     getLockedRegionSize,

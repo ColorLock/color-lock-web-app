@@ -212,28 +212,32 @@ export function isDayAfter(prevDateStr: string | null | undefined, currentDateSt
     }
 }
 
-async function getLowestHardDailyScore(puzzleId: string, excludeUserId?: string): Promise<number | null> {
+async function getLowestDailyScore(
+    puzzleId: string,
+    difficulty: DifficultyLevel,
+    excludeUserId?: string
+): Promise<number | null> {
     const docSnap = await db.collection("dailyScoresV2").doc(puzzleId).get();
     if (!docSnap.exists) return null;
-    
+
     const data = docSnap.data();
-    const hardScores = data?.hard;
-    
-    if (!hardScores || typeof hardScores !== "object") return null;
-    
+    const difficultyScores = data?.[difficulty]; // 'easy', 'medium', or 'hard'
+
+    if (!difficultyScores || typeof difficultyScores !== "object") return null;
+
     let minScore: number | null = null;
-    for (const userId in hardScores) {
+    for (const userId in difficultyScores) {
         // Skip the current user when checking if they're first to beat bot
         if (excludeUserId && userId === excludeUserId) continue;
-        
-        const moves = hardScores[userId];
+
+        const moves = difficultyScores[userId];
         if (typeof moves === "number" && !isNaN(moves)) {
             if (minScore === null || moves < minScore) {
                 minScore = moves;
             }
         }
     }
-    
+
     return minScore;
 }
 
@@ -268,14 +272,24 @@ export const recordPuzzleHistory = onCall(
         const botMoves = payload.botMoves;
         const isWin = payload.win_loss === 'win';
 
-        // Determine firstToBeatBot by looking at existing dailyScores (Hard difficulty only, ignoring Easy/Medium entries)
+        // Determine firstToBeatBot with difficulty-specific thresholds
+        // Hard: beat bot (moves < botMoves)
+        // Medium: beat bot by 2+ moves (moves < botMoves - 1)
+        // Easy: beat bot by 3+ moves (moves < botMoves - 2)
         // Exclude the current user's previous scores when checking if they're first to beat bot
-        const qualifiesVsBot = moves < botMoves;
-        let firstToBeatBot = false;
+        let qualifiesVsBot = false;
         if (difficulty === DifficultyLevel.Hard) {
-            const lowestExisting = await getLowestHardDailyScore(puzzleId, userId); // null => no hard scores yet from other users
-            firstToBeatBot = qualifiesVsBot && (lowestExisting === null || lowestExisting > moves);
+            qualifiesVsBot = moves < botMoves;
+        } else if (difficulty === DifficultyLevel.Medium) {
+            qualifiesVsBot = moves < (botMoves - 1);
+        } else if (difficulty === DifficultyLevel.Easy) {
+            qualifiesVsBot = moves < (botMoves - 2);
         }
+
+        const lowestExisting = await getLowestDailyScore(puzzleId, difficulty, userId);
+        const firstToBeatBot = qualifiesVsBot && (lowestExisting === null || lowestExisting > moves);
+
+        logger.info(`firstToBeatBot calculation: difficulty=${difficulty}, moves=${moves}, botMoves=${botMoves}, qualifiesVsBot=${qualifiesVsBot}, lowestExisting=${lowestExisting}, firstToBeatBot=${firstToBeatBot}`);
         // These will be computed using global attempt number inside the transaction
         let firstTry = false;
         let elo = 0;
@@ -284,6 +298,18 @@ export const recordPuzzleHistory = onCall(
         const puzzleRef = userHistoryRef.collection("puzzles").doc(puzzleId);
         const levelAgnosticRef = userHistoryRef.collection("leaderboard").doc("levelAgnostic");
         const difficultyRef = userHistoryRef.collection("leaderboard").doc(difficulty);
+
+        logger.info("recordPuzzleHistory: Starting transaction", {
+            userId,
+            puzzleId,
+            difficulty,
+            moves,
+            isWin,
+            hintUsed,
+            puzzlePath: puzzleRef.path,
+            levelAgnosticPath: levelAgnosticRef.path,
+            difficultyPath: difficultyRef.path
+        });
 
         let v2Writes: Array<{ diffKey: DifficultyLevel; moves: number }> = [];
         await db.runTransaction(async (tx) => {
@@ -298,11 +324,6 @@ export const recordPuzzleHistory = onCall(
             const puzzleData = puzzleSnap.exists ? (puzzleSnap.data() || {}) : {} as Record<string, unknown>;
             const la = laSnap.exists ? (laSnap.data() as any) : {};
             const d = dSnap.exists ? (dSnap.data() as any) : {};
-
-            // Compute and persist global per-puzzle attempt count
-            const prevTotalAttempts = typeof (puzzleData as any).totalAttempts === 'number' ? (puzzleData as any).totalAttempts : 0;
-            const globalAttemptNumber = prevTotalAttempts + 1;
-            (puzzleData as any).totalAttempts = globalAttemptNumber;
 
             // Compute difficulty-specific attempt count
             const diffKey = difficulty; // 'easy' | 'medium' | 'hard'
@@ -321,104 +342,156 @@ export const recordPuzzleHistory = onCall(
                 attemptToBeatBot?: number;
             } | undefined;
             const prevDifficultyAttempts = typeof existingDiffData?.attempts === 'number' ? existingDiffData.attempts : 0;
+            const solutionUsedThisAttempt = hintUsed;
+            const solutionUsedPreviously = existingDiffData?.hintUsed === true;
+            const solutionEverUsedOnThisDifficulty = solutionUsedThisAttempt || solutionUsedPreviously;
+
+            // Always count attempts (global + per difficulty)
+            const prevTotalAttempts = typeof (puzzleData as any).totalAttempts === 'number' ? (puzzleData as any).totalAttempts : 0;
+            const globalAttemptNumber = prevTotalAttempts + 1;
+            (puzzleData as any).totalAttempts = globalAttemptNumber;
+
             const difficultyAttemptNumber = prevDifficultyAttempts + 1;
 
             // firstTry is true only if this is the first attempt on THIS difficulty,
-            // the user ties/beats the bot, and no hint was used on that attempt
-            firstTry = difficultyAttemptNumber === 1 && moves <= botMoves && !hintUsed;
-
-            // Persist global hintUsed across difficulties; once true, remains true
-            const prevGlobalHintUsed = !!(puzzleData as any).hintUsed;
-            if (!prevGlobalHintUsed && hintUsed) {
-                (puzzleData as any).hintUsed = true;
-            } else if (prevGlobalHintUsed) {
-                (puzzleData as any).hintUsed = true;
-            }
-            const globalHintUsed = !!(puzzleData as any).hintUsed;
+            // the user ties/beats the bot, and no hint/solution was ever used on this difficulty
+            firstTry = difficultyAttemptNumber === 1 && moves <= botMoves && !solutionEverUsedOnThisDifficulty;
 
             // Potential puzzle-level update (only on win); ensure difficulty doc exists on loss
             if (isWin) {
                 // Reuse existingDiffData read earlier (no redundant read)
                 const existing = existingDiffData;
                 let newDiffObj: any;
-                // Prepare Elo input using the difficulty-specific attempt number and global hint usage
-                const gameStatsForElo: GameStatistics = {
-                    ...defaultStats,
-                    attemptsToWinByDay: { [puzzleId]: difficultyAttemptNumber },
-                    // Penalize Elo if any hint was used on this puzzle (attempt index not tracked)
-                    attemptWhenHintUsed: { [puzzleId]: globalHintUsed ? 1 : null },
-                    attemptsToAchieveBotScore: (moves < botMoves || moves === botMoves) ? { [puzzleId]: difficultyAttemptNumber } : {},
-                    attemptsToBeatBotScore: (moves < botMoves) ? { [puzzleId]: difficultyAttemptNumber } : {},
-                    bestScoresByDayDifficulty: { [puzzleId]: difficulty },
-                } as GameStatistics;
-                elo = calculateEloScore(gameStatsForElo, { algoScore: botMoves }, puzzleId, moves, firstToBeatBot, difficulty);
 
-                const achievedTieNow = moves <= botMoves;
-                const achievedBeatNow = moves < botMoves;
-
-                const existingMovesVal = (existing as any)?.moves;
-                const shouldReplaceMoves = !existing || typeof existingMovesVal !== 'number' || (typeof existingMovesVal === 'number' && moves < existingMovesVal);
-
-                if (!existing) {
-                    newDiffObj = { attempts: difficultyAttemptNumber, lowestMovesAttemptNumber: difficultyAttemptNumber, moves, firstTry, eloScore: elo };
-                    if (achievedTieNow) newDiffObj.attemptToTieBot = difficultyAttemptNumber;
-                    if (achievedBeatNow) newDiffObj.attemptToBeatBot = difficultyAttemptNumber;
-                    newDiffObj.firstToBeatBot = difficulty === DifficultyLevel.Hard ? firstToBeatBot : false;
-                } else {
-                    // Preserve first recorded attempts; only set if not previously set
-                    const attemptToTieBot = (existing as any).attemptToTieBot ?? (achievedTieNow ? difficultyAttemptNumber : null);
-                    const attemptToBeatBot = (existing as any).attemptToBeatBot ?? (achievedBeatNow ? difficultyAttemptNumber : null);
-
-                    if (shouldReplaceMoves) {
+                if (solutionEverUsedOnThisDifficulty) {
+                    // Solution has been used on this difficulty (now or before)
+                    // Count attempt but do NOT write score/Elo/streak updates
+                    if (!existing) {
                         newDiffObj = {
                             attempts: difficultyAttemptNumber,
+                            totalAttempts: difficultyAttemptNumber,
+                            lowestMovesAttemptNumber: null,
+                            moves,
+                            firstTry: false,
+                            eloScore: null,
+                            attemptToTieBot: null,
+                            attemptToBeatBot: null,
+                            firstToBeatBot: false,
+                            hintUsed: true
+                        };
+                    } else {
+                        newDiffObj = {
+                            ...existing,
+                            attempts: difficultyAttemptNumber,
+                            totalAttempts: difficultyAttemptNumber,
+                            moves: typeof existing.moves === 'number' ? existing.moves : moves,
+                            hintUsed: true
+                            // ALL other fields (moves, eloScore, attemptToTieBot, etc.) preserved from previous attempts
+                        };
+                    }
+                    // Do NOT write to dailyScoresV2 (no score to record)
+
+                } else {
+                    // Normal win path - no solution ever used on this difficulty
+                    // Calculate Elo and update scores
+                    const gameStatsForElo: GameStatistics = {
+                        ...defaultStats,
+                        attemptsToWinByDay: { [puzzleId]: difficultyAttemptNumber },
+                        attemptWhenHintUsed: { [puzzleId]: null }, // No hint used
+                        attemptsToAchieveBotScore: (moves < botMoves || moves === botMoves) ? { [puzzleId]: difficultyAttemptNumber } : {},
+                        attemptsToBeatBotScore: (moves < botMoves) ? { [puzzleId]: difficultyAttemptNumber } : {},
+                        bestScoresByDayDifficulty: { [puzzleId]: difficulty },
+                    } as GameStatistics;
+                    elo = calculateEloScore(gameStatsForElo, { algoScore: botMoves }, puzzleId, moves, firstToBeatBot, difficulty);
+
+                    const achievedTieNow = moves <= botMoves;
+                    const achievedBeatNow = moves < botMoves;
+
+                    const existingMovesVal = (existing as any)?.moves;
+                    const shouldReplaceMoves = !existing || typeof existingMovesVal !== 'number' || (typeof existingMovesVal === 'number' && moves < existingMovesVal);
+
+                    if (!existing) {
+                        newDiffObj = {
+                            attempts: difficultyAttemptNumber,
+                            totalAttempts: difficultyAttemptNumber,
                             lowestMovesAttemptNumber: difficultyAttemptNumber,
                             moves,
-                            firstTry: existing.firstTry ?? firstTry, // Preserve existing firstTry value
+                            firstTry,
                             eloScore: elo,
-                            attemptToTieBot,
-                            attemptToBeatBot,
+                            hintUsed: false
                         };
-                        // Allow firstToBeatBot to be set on any attempt where user achieves it
-                        newDiffObj.firstToBeatBot = difficulty === DifficultyLevel.Hard ? (existing.firstToBeatBot || firstToBeatBot) : false;
+                        if (achievedTieNow) newDiffObj.attemptToTieBot = difficultyAttemptNumber;
+                        if (achievedBeatNow) newDiffObj.attemptToBeatBot = difficultyAttemptNumber;
+                        newDiffObj.firstToBeatBot = firstToBeatBot;
                     } else {
-                        // Keep existing best score
-                        // Note: lowestMovesAttemptNumber may be null for legacy data (old attemptNumber was global, not per-difficulty)
-                        newDiffObj = {
-                            attempts: difficultyAttemptNumber,
-                            lowestMovesAttemptNumber: existing.lowestMovesAttemptNumber ?? null,
-                            moves: existing.moves,
-                            firstTry: existing.firstTry ?? firstTry,
-                            eloScore: (existing as any).eloScore ?? (existing as any).elo ?? elo,
-                            attemptToTieBot,
-                            attemptToBeatBot,
-                        };
-                        newDiffObj.firstToBeatBot = difficulty === DifficultyLevel.Hard ? (existing.firstToBeatBot || false) : false;
+                        // Preserve first recorded attempts; only set if not previously set
+                        const attemptToTieBot = (existing as any).attemptToTieBot ?? (achievedTieNow ? difficultyAttemptNumber : null);
+                        const attemptToBeatBot = (existing as any).attemptToBeatBot ?? (achievedBeatNow ? difficultyAttemptNumber : null);
+
+                        if (shouldReplaceMoves) {
+                            newDiffObj = {
+                                attempts: difficultyAttemptNumber,
+                                totalAttempts: difficultyAttemptNumber,
+                                lowestMovesAttemptNumber: difficultyAttemptNumber,
+                                moves,
+                                firstTry: existing.firstTry ?? firstTry,
+                                eloScore: elo,
+                                attemptToTieBot,
+                                attemptToBeatBot,
+                                hintUsed: false
+                            };
+                            newDiffObj.firstToBeatBot = existing.firstToBeatBot || firstToBeatBot;
+                        } else {
+                            newDiffObj = {
+                                attempts: difficultyAttemptNumber,
+                                totalAttempts: difficultyAttemptNumber,
+                                lowestMovesAttemptNumber: existing.lowestMovesAttemptNumber ?? null,
+                                moves: existing.moves,
+                                firstTry: existing.firstTry ?? firstTry,
+                                eloScore: (existing as any).eloScore ?? (existing as any).elo ?? elo,
+                                attemptToTieBot,
+                                attemptToBeatBot,
+                                hintUsed: false
+                            };
+                            newDiffObj.firstToBeatBot = existing.firstToBeatBot || false;
+                        }
                     }
+
+                    // Also update totalAttempts
                 }
                 (puzzleData as any)[diffKey] = newDiffObj;
 
                 // --- New: Write per-difficulty daily score to separate collection (v2) ---
                 // Path: dailyScoresV2/{puzzleId}/{difficulty}/{userId} with field { moves }
                 // Mirror to V2 immediately in transaction and queue for stats recompute
-                try {
-                    const existingMoves = (existing as any)?.moves;
-                    const shouldMirror = !existing || typeof existingMoves !== 'number' || (typeof existingMoves === 'number' && moves < existingMoves);
-                    if (shouldMirror) {
-                        const v2DocRef = db.collection("dailyScoresV2").doc(puzzleId);
-                        // Write nested map using proper merge semantics (no dot-path in set)
-                        tx.set(v2DocRef, { [diffKey]: { [userId]: moves } }, { merge: true });
-                        v2Writes.push({ diffKey, moves });
+                // ONLY write if solution was NOT used on this difficulty
+                if (!solutionEverUsedOnThisDifficulty) {
+                    try {
+                        const existingMoves = (existing as any)?.moves;
+                        const shouldMirror = !existing || typeof existingMoves !== 'number' || (typeof existingMoves === 'number' && moves < existingMoves);
+                        if (shouldMirror) {
+                            const v2DocRef = db.collection("dailyScoresV2").doc(puzzleId);
+                            // Write nested map using proper merge semantics (no dot-path in set)
+                            tx.set(v2DocRef, { [diffKey]: { [userId]: moves } }, { merge: true });
+                            v2Writes.push({ diffKey, moves });
+                        }
+                    } catch (e) {
+                        logger.warn("Failed mirroring per-difficulty daily score (v2)", { puzzleId, difficulty: diffKey, userId }, e);
                     }
-                } catch (e) {
-                    logger.warn("Failed mirroring per-difficulty daily score (v2)", { puzzleId, difficulty: diffKey, userId }, e);
                 }
             } else {
                 // Loss: ensure difficulty entry exists with defaults on first recorded loss
                 // Reuse existingDiffData read earlier (no redundant read)
-                if (!existingDiffData) {
-                    (puzzleData as any)[diffKey] = {
+                if (solutionEverUsedOnThisDifficulty) {
+                    (puzzleData as any)[diffKey] = existingDiffData ? {
+                        ...existingDiffData,
                         attempts: difficultyAttemptNumber,
+                        totalAttempts: difficultyAttemptNumber,
+                        moves: typeof existingDiffData.moves === 'number' ? existingDiffData.moves : null,
+                        hintUsed: true
+                    } : {
+                        attempts: difficultyAttemptNumber,
+                        totalAttempts: difficultyAttemptNumber,
                         lowestMovesAttemptNumber: null,
                         moves: null,
                         attemptToBeatBot: null,
@@ -426,15 +499,31 @@ export const recordPuzzleHistory = onCall(
                         eloScore: null,
                         firstToBeatBot: false,
                         firstTry: false,
+                        hintUsed: true,
                     };
-                    // Loss: Do NOT write to dailyScoresV2
-                    logger.info("Loss recorded for puzzle history only, not writing to dailyScoresV2", { puzzleId, difficulty: diffKey, userId });
                 } else {
-                    // Update attempts counter for existing losses
-                    (puzzleData as any)[diffKey] = {
-                        ...existingDiffData,
-                        attempts: difficultyAttemptNumber,
-                    };
+                    if (!existingDiffData) {
+                        (puzzleData as any)[diffKey] = {
+                            attempts: difficultyAttemptNumber,
+                            totalAttempts: difficultyAttemptNumber,
+                            lowestMovesAttemptNumber: null,
+                            moves: null,
+                            attemptToBeatBot: null,
+                            attemptToTieBot: null,
+                            eloScore: null,
+                            firstToBeatBot: false,
+                            firstTry: false,
+                        };
+                        // Loss: Do NOT write to dailyScoresV2
+                        logger.info("Loss recorded for puzzle history only, not writing to dailyScoresV2", { puzzleId, difficulty: diffKey, userId });
+                    } else {
+                        // Update attempts counter for existing losses
+                        (puzzleData as any)[diffKey] = {
+                            ...existingDiffData,
+                            attempts: difficultyAttemptNumber,
+                            totalAttempts: difficultyAttemptNumber,
+                        };
+                    }
                 }
             }
 
@@ -486,7 +575,7 @@ export const recordPuzzleHistory = onCall(
                 let newFirstTryCurrent = prevFirstTryCurrent;
                 let newFirstTryLongest = prevFirstTryLongest;
                 let newLastFirstTryDate = prevLastFirstTryDate;
-                if (difficultyAttemptNumber === 1 && moves <= botMoves && !hintUsed) {
+                if (difficultyAttemptNumber === 1 && moves <= botMoves && !solutionEverUsedOnThisDifficulty) {
                     if (!prevLastFirstTryDate) {
                         newFirstTryCurrent = 1;
                     } else if (prevLastFirstTryDate === puzzleId) {
@@ -507,24 +596,27 @@ export const recordPuzzleHistory = onCall(
                 }
 
                 // Goals achieved/beaten
+                // ONLY count if solution was NOT used on this difficulty
+                const solutionUsedOnThisDifficulty = solutionEverUsedOnThisDifficulty;
                 let newGoalsAchieved = prevGoalsAchieved;
                 let newGoalAchievedDate = prevGoalAchievedDate;
-                if (moves <= botMoves && prevGoalAchievedDate !== puzzleId) {
+                if (moves <= botMoves && !solutionUsedOnThisDifficulty && prevGoalAchievedDate !== puzzleId) {
                     newGoalsAchieved = prevGoalsAchieved + 1;
                     newGoalAchievedDate = puzzleId;
                 }
                 let newGoalsBeaten = prevGoalsBeaten;
                 let newGoalBeatenDate = prevGoalBeatenDate;
-                if (moves < botMoves && prevGoalBeatenDate !== puzzleId) {
+                if (moves < botMoves && !solutionEverUsedOnThisDifficulty && prevGoalBeatenDate !== puzzleId) {
                     newGoalsBeaten = prevGoalsBeaten + 1;
                     newGoalBeatenDate = puzzleId;
                 }
 
                 // Tie/beat streak (based on moves <= botMoves)
+                // ONLY count if solution was NOT used on this difficulty
                 let newTieCurrent = prevTieCurrent;
                 let newTieLongest = prevTieLongest;
                 let newLastTieDate = prevLastTieDate;
-                if (moves <= botMoves) {
+                if (moves <= botMoves && !solutionEverUsedOnThisDifficulty) {
                     if (!prevLastTieDate) {
                         newTieCurrent = 1;
                     } else if (prevLastTieDate === puzzleId) {
@@ -652,14 +744,21 @@ export const recordPuzzleHistory = onCall(
                 puzzleAttempts: prevAttempts + 1,
             };
             if (isWin) {
-                const shouldIncrementSolved = prevLastCompletedDate !== puzzleId;
+                // Read difficulty-specific last completed date for per-difficulty puzzleSolved counting
+                const difficultyDateField = `last${difficulty.charAt(0).toUpperCase() + difficulty.slice(1)}CompletedDate`;
+                const prevLastCompletedForDifficulty = la?.[difficultyDateField] ?? null;
+
+                // Increment puzzleSolved if this puzzle hasn't been completed on THIS difficulty yet
+                const shouldIncrementSolved = prevLastCompletedForDifficulty !== puzzleId;
                 const newSolved = shouldIncrementSolved ? prevSolved + 1 : prevSolved;
+
                 tx.set(levelAgnosticRef, {
                     ...laBaseUpdate,
                     puzzleSolved: newSolved,
+                    [difficultyDateField]: puzzleId,  // Update difficulty-specific field
                     currentPuzzleCompletedStreak: currentStreak,
                     longestPuzzleCompletedStreak: longestStreak,
-                    lastPuzzleCompletedDate: puzzleId,
+                    lastPuzzleCompletedDate: puzzleId, // Keep global for streak tracking
                     ...(eloAggregateUpdate || {}),
                 }, { merge: true });
             } else {
@@ -673,7 +772,14 @@ export const recordPuzzleHistory = onCall(
             }
         });
 
-        
+        logger.info("recordPuzzleHistory: Transaction completed successfully", {
+            userId,
+            puzzleId,
+            difficulty,
+            isWin,
+            v2WritesQueued: v2Writes.length
+        });
+
         // Write to V2 daily scores for any queued writes and recompute stats for affected difficulties
         try {
             if (v2Writes.length > 0) {
@@ -688,6 +794,55 @@ export const recordPuzzleHistory = onCall(
         }
 
         return { success: true, firstTry, firstToBeatBot, elo };
+    }
+);
+
+// --- New: Mark hint/solution usage for a puzzle+difficulty ---
+interface SetHintUsedRequest {
+    puzzleId: string;
+    difficulty: DifficultyLevel | "easy" | "medium" | "hard";
+}
+
+export const setHintUsedForPuzzle = onCall(
+    {
+        memory: "256MiB",
+        timeoutSeconds: 60,
+        ...getAppCheckConfig(),
+    },
+    async (request) => {
+        if (!request.auth) {
+            throw new HttpsError("unauthenticated", "Authentication required.");
+        }
+        const userId = request.auth.uid;
+        const { puzzleId, difficulty } = (request.data || {}) as SetHintUsedRequest;
+
+        if (!puzzleId || !difficulty) {
+            throw new HttpsError("invalid-argument", "puzzleId and difficulty are required.");
+        }
+
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(puzzleId)) {
+            throw new HttpsError("invalid-argument", "Invalid puzzleId format. Expected YYYY-MM-DD.");
+        }
+
+        const normalizedDifficulty = normalizeDifficulty(difficulty);
+        const userHistoryRef = db.collection("userPuzzleHistory").doc(userId);
+        const puzzleRef = userHistoryRef.collection("puzzles").doc(puzzleId);
+
+        await db.runTransaction(async (tx) => {
+            const snap = await tx.get(puzzleRef);
+            const data = snap.exists ? (snap.data() as any) : {};
+            const existingDiffData = (data && typeof data[normalizedDifficulty] === "object") ? (data[normalizedDifficulty] as any) : {};
+
+            tx.set(puzzleRef, {
+                [normalizedDifficulty]: {
+                    ...existingDiffData,
+                    hintUsed: true
+                }
+            }, { merge: true });
+        });
+
+        logger.info("setHintUsedForPuzzle: hint marked as used", { userId, puzzleId, difficulty: normalizedDifficulty });
+        return { success: true };
     }
 );
 

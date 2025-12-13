@@ -12,6 +12,7 @@ interface GameGridProps {
   settings: AppSettings;
   onTileClick: (row: number, col: number) => void;
   getColorCSS: (color: TileColor) => string;
+  puzzleTargetColor?: TileColor;
 }
 
 const GameGrid: React.FC<GameGridProps> = ({
@@ -20,7 +21,8 @@ const GameGrid: React.FC<GameGridProps> = ({
   hintCell,
   settings,
   onTileClick,
-  getColorCSS
+  getColorCSS,
+  puzzleTargetColor
 }) => {
   // Calculate dynamic tile sizes based on grid dimensions
   const gridStyle = useMemo(() => {
@@ -78,6 +80,7 @@ const GameGrid: React.FC<GameGridProps> = ({
                   onClick={onTileClick}
                   getColorCSS={getColorCSS}
                   hintCell={hintCell}
+                  puzzleTargetColor={puzzleTargetColor}
                 />
               </div>
             );

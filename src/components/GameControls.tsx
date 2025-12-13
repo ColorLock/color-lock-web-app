@@ -12,8 +12,9 @@ interface GameHeaderProps {
   puzzle: DailyPuzzle;
   settings: AppSettings;
   getColorCSS: (color: TileColor) => string;
-  onHintClick: () => void;
+  onBotSolutionClick: () => void;
   showHintButton?: boolean;
+  isAutoSolving?: boolean;
   // Hamburger Menu Props
   isMenuOpen?: boolean;
   toggleMenu?: () => void;
@@ -30,8 +31,9 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
   puzzle,
   settings = {} as AppSettings,
   getColorCSS,
-  onHintClick,
+  onBotSolutionClick,
   showHintButton = true,
+  isAutoSolving = false,
   // Destructure menu props with defaults
   isMenuOpen = false,
   toggleMenu = () => {},
@@ -125,7 +127,13 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
           <span>Moves: {puzzle.userMovesUsed}</span>
         </div>
         {showHintButton && (
-          <button className="hint-button" onClick={onHintClick}>Get Hint</button>
+          <button
+            className="hint-button"
+            onClick={onBotSolutionClick}
+            disabled={isAutoSolving}
+          >
+            {isAutoSolving ? 'Solving...' : 'Bot Solution'}
+          </button>
         )}
       </div>
     </div>

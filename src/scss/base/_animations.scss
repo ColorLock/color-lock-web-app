@@ -65,23 +65,27 @@
   }
 }
 
-// Synchronized pulsate animation to match color-fade timing
-@keyframes hint-pulsate {
+// Synchronized pulsate animation with glow using target color - subtle version
+@keyframes hint-pulsate-glow {
   0% {
     transform: scale(1);
-    box-shadow: 0 0 3px 1px rgba(30, 144, 255, 0.4);
+    filter: drop-shadow(0 0 3px var(--target-color, #1E90FF))
+            drop-shadow(0 0 6px var(--target-color, #1E90FF));
   }
   35% {
-    transform: scale(1.035);
-    box-shadow: 0 0 6px 2px rgba(30, 144, 255, 0.6);
+    transform: scale(1.03);
+    filter: drop-shadow(0 0 5px var(--target-color, #1E90FF))
+            drop-shadow(0 0 10px var(--target-color, #1E90FF));
   }
   65% {
-    transform: scale(1.035);
-    box-shadow: 0 0 6px 2px rgba(30, 144, 255, 0.6);
+    transform: scale(1.03);
+    filter: drop-shadow(0 0 5px var(--target-color, #1E90FF))
+            drop-shadow(0 0 10px var(--target-color, #1E90FF));
   }
   100% {
     transform: scale(1);
-    box-shadow: 0 0 2px 0px rgba(30, 144, 255, 0.2);
+    filter: drop-shadow(0 0 3px var(--target-color, #1E90FF))
+            drop-shadow(0 0 6px var(--target-color, #1E90FF));
   }
 }
 

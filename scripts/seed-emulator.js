@@ -93,48 +93,59 @@ async function seedData() {
     console.log(`Creating puzzlesV2 examples for ${todayStr} (easy/medium/hard)...`);
     const puzzlesV2Examples = {
       easy: {
-        algoScore: 10,
-        targetColor: "green",
-        colorMap: [0, 1, 2, 3, 4, 5],
-        actions: [3, 18, 22, 45, 67, 10],
+        algoScore: 12,
+        targetColor: "blue",
+        colorMap: [3, 5, 0, 1, 2, 4],
+        actions: [59, 45, 18, 44, 55, 0, 72, 30, 42],
         states: [
-          {
-            0: ["red", "green", "blue", "yellow"],
-            1: ["purple", "orange", "green", "blue"],
-            2: ["yellow", "red", "purple", "green"],
-            3: ["blue", "orange", "red", "yellow"]
-          }
+          { 0: ["red", "green", "yellow", "purple"], 1: ["green", "red", "purple", "red"], 2: ["blue", "yellow", "red", "green"], 3: ["red", "blue", "purple", "yellow"] },
+          { 0: ["red", "green", "yellow", "purple"], 1: ["green", "green", "purple", "red"], 2: ["blue", "yellow", "red", "green"], 3: ["red", "blue", "purple", "yellow"] },
+          { 0: ["red", "green", "yellow", "purple"], 1: ["green", "green", "purple", "red"], 2: ["blue", "yellow", "red", "red"], 3: ["red", "blue", "purple", "yellow"] },
+          { 0: ["red", "green", "yellow", "purple"], 1: ["green", "green", "purple", "red"], 2: ["blue", "yellow", "red", "red"], 3: ["red", "blue", "purple", "blue"] },
+          { 0: ["red", "green", "yellow", "purple"], 1: ["green", "green", "purple", "purple"], 2: ["blue", "yellow", "purple", "purple"], 3: ["red", "blue", "purple", "blue"] },
+          { 0: ["red", "yellow", "yellow", "purple"], 1: ["yellow", "yellow", "purple", "purple"], 2: ["blue", "yellow", "purple", "purple"], 3: ["red", "blue", "purple", "blue"] },
+          { 0: ["red", "yellow", "yellow", "purple"], 1: ["yellow", "yellow", "purple", "purple"], 2: ["blue", "yellow", "purple", "purple"], 3: ["blue", "blue", "purple", "blue"] },
+          { 0: ["blue", "yellow", "yellow", "purple"], 1: ["yellow", "yellow", "purple", "purple"], 2: ["blue", "yellow", "purple", "purple"], 3: ["blue", "blue", "purple", "blue"] },
+          { 0: ["blue", "blue", "blue", "purple"], 1: ["blue", "blue", "purple", "purple"], 2: ["blue", "blue", "purple", "purple"], 3: ["blue", "blue", "purple", "blue"] },
+          { 0: ["blue", "blue", "blue", "blue"], 1: ["blue", "blue", "blue", "blue"], 2: ["blue", "blue", "blue", "blue"], 3: ["blue", "blue", "blue", "blue"] }
         ]
       },
       medium: {
-        algoScore: 13,
-        targetColor: "purple",
-        colorMap: [0, 1, 2, 3, 4, 5],
-        actions: [77, 14, 130, 64, 18, 99, 45],
+        algoScore: 12,
+        targetColor: "red",
+        colorMap: [0, 5, 4, 1, 3, 2],
+        actions: [79, 39, 141, 52, 16, 30, 18, 96, 138, 126],
         states: [
-          {
-            0: ["orange", "blue", "blue", "green", "yellow"],
-            1: ["yellow", "orange", "red", "red", "green"],
-            2: ["blue", "purple", "yellow", "green", "red"],
-            3: ["green", "yellow", "purple", "orange", "orange"],
-            4: ["red", "green", "blue", "purple", "blue"]
-          }
+          { 0: ["purple", "orange", "red", "green", "purple"], 1: ["purple", "blue", "red", "yellow", "blue"], 2: ["purple", "red", "red", "green", "yellow"], 3: ["yellow", "red", "green", "green", "red"], 4: ["red", "blue", "purple", "yellow", "blue"] },
+          { 0: ["purple", "orange", "red", "green", "purple"], 1: ["purple", "blue", "red", "yellow", "blue"], 2: ["purple", "red", "red", "yellow", "yellow"], 3: ["yellow", "red", "yellow", "yellow", "red"], 4: ["red", "blue", "purple", "yellow", "blue"] },
+          { 0: ["purple", "orange", "purple", "green", "purple"], 1: ["purple", "blue", "purple", "yellow", "blue"], 2: ["purple", "purple", "purple", "yellow", "yellow"], 3: ["yellow", "purple", "yellow", "yellow", "red"], 4: ["red", "blue", "purple", "yellow", "blue"] },
+          { 0: ["purple", "orange", "purple", "purple", "purple"], 1: ["purple", "blue", "purple", "yellow", "blue"], 2: ["purple", "purple", "purple", "yellow", "yellow"], 3: ["yellow", "purple", "yellow", "yellow", "red"], 4: ["red", "blue", "purple", "yellow", "blue"] },
+          { 0: ["purple", "orange", "purple", "purple", "purple"], 1: ["purple", "blue", "purple", "blue", "blue"], 2: ["purple", "purple", "purple", "blue", "blue"], 3: ["yellow", "purple", "blue", "blue", "red"], 4: ["red", "blue", "purple", "blue", "blue"] },
+          { 0: ["purple", "orange", "purple", "purple", "purple"], 1: ["purple", "blue", "purple", "blue", "blue"], 2: ["purple", "purple", "purple", "blue", "blue"], 3: ["yellow", "purple", "blue", "blue", "red"], 4: ["red", "blue", "blue", "blue", "blue"] },
+          { 0: ["purple", "orange", "purple", "purple", "purple"], 1: ["purple", "blue", "purple", "blue", "blue"], 2: ["purple", "purple", "purple", "blue", "blue"], 3: ["red", "purple", "blue", "blue", "red"], 4: ["red", "blue", "blue", "blue", "blue"] },
+          { 0: ["purple", "orange", "purple", "purple", "purple"], 1: ["purple", "blue", "purple", "red", "red"], 2: ["purple", "purple", "purple", "red", "red"], 3: ["red", "purple", "red", "red", "red"], 4: ["red", "red", "red", "red", "red"] },
+          { 0: ["purple", "orange", "purple", "purple", "purple"], 1: ["purple", "red", "purple", "red", "red"], 2: ["purple", "purple", "purple", "red", "red"], 3: ["red", "purple", "red", "red", "red"], 4: ["red", "red", "red", "red", "red"] },
+          { 0: ["red", "orange", "red", "red", "red"], 1: ["red", "red", "red", "red", "red"], 2: ["red", "red", "red", "red", "red"], 3: ["red", "red", "red", "red", "red"], 4: ["red", "red", "red", "red", "red"] },
+          { 0: ["red", "red", "red", "red", "red"], 1: ["red", "red", "red", "red", "red"], 2: ["red", "red", "red", "red", "red"], 3: ["red", "red", "red", "red", "red"], 4: ["red", "red", "red", "red", "red"] }
         ]
       },
       hard: {
-        algoScore: 16,
-        targetColor: "blue",
-        colorMap: [0, 1, 2, 3, 4, 5],
-        actions: [17, 58, 99, 135, 180, 201, 215],
+        algoScore: 15,
+        targetColor: "purple",
+        colorMap: [2, 1, 5, 3, 0, 4],
+        actions: [50, 62, 170, 133, 84, 83, 210, 75, 36, 126],
         states: [
-          {
-            0: ["purple", "yellow", "green", "blue", "red", "orange"],
-            1: ["blue", "purple", "orange", "orange", "green", "yellow"],
-            2: ["red", "yellow", "blue", "yellow", "purple", "green"],
-            3: ["orange", "green", "red", "green", "blue", "purple"],
-            4: ["yellow", "blue", "purple", "red", "orange", "green"],
-            5: ["green", "orange", "yellow", "blue", "red", "purple"]
-          }
+          { 0: ["green", "green", "green", "purple", "red", "red"], 1: ["purple", "red", "yellow", "yellow", "yellow", "red"], 2: ["yellow", "blue", "purple", "orange", "red", "green"], 3: ["red", "green", "yellow", "purple", "blue", "red"], 4: ["red", "green", "green", "red", "purple", "red"], 5: ["red", "blue", "purple", "yellow", "blue", "yellow"] },
+          { 0: ["green", "green", "green", "purple", "red", "red"], 1: ["purple", "red", "yellow", "yellow", "yellow", "red"], 2: ["yellow", "blue", "purple", "orange", "red", "green"], 3: ["red", "red", "yellow", "purple", "blue", "red"], 4: ["red", "red", "red", "red", "purple", "red"], 5: ["red", "blue", "purple", "yellow", "blue", "yellow"] },
+          { 0: ["green", "green", "green", "purple", "red", "red"], 1: ["purple", "red", "yellow", "yellow", "yellow", "red"], 2: ["yellow", "blue", "purple", "orange", "red", "green"], 3: ["red", "red", "yellow", "purple", "blue", "red"], 4: ["red", "red", "red", "red", "red", "red"], 5: ["red", "blue", "purple", "yellow", "blue", "yellow"] },
+          { 0: ["green", "green", "green", "purple", "red", "red"], 1: ["purple", "red", "red", "red", "red", "red"], 2: ["yellow", "blue", "purple", "orange", "red", "green"], 3: ["red", "red", "yellow", "purple", "blue", "red"], 4: ["red", "red", "red", "red", "red", "red"], 5: ["red", "blue", "purple", "yellow", "blue", "yellow"] },
+          { 0: ["green", "green", "green", "purple", "green", "green"], 1: ["purple", "green", "green", "green", "green", "green"], 2: ["yellow", "blue", "purple", "orange", "green", "green"], 3: ["red", "red", "yellow", "purple", "blue", "red"], 4: ["red", "red", "red", "red", "red", "red"], 5: ["red", "blue", "purple", "yellow", "blue", "yellow"] },
+          { 0: ["green", "green", "green", "purple", "green", "green"], 1: ["purple", "green", "green", "green", "green", "green"], 2: ["yellow", "blue", "purple", "orange", "green", "green"], 3: ["red", "red", "purple", "purple", "blue", "red"], 4: ["red", "red", "red", "red", "red", "red"], 5: ["red", "blue", "purple", "yellow", "blue", "yellow"] },
+          { 0: ["green", "green", "green", "purple", "green", "green"], 1: ["purple", "green", "green", "green", "green", "green"], 2: ["yellow", "blue", "purple", "orange", "green", "green"], 3: ["blue", "blue", "purple", "purple", "blue", "blue"], 4: ["blue", "blue", "blue", "blue", "blue", "blue"], 5: ["blue", "blue", "purple", "yellow", "blue", "yellow"] },
+          { 0: ["purple", "purple", "purple", "purple", "purple", "purple"], 1: ["purple", "purple", "purple", "purple", "purple", "purple"], 2: ["yellow", "blue", "purple", "orange", "purple", "purple"], 3: ["blue", "blue", "purple", "purple", "blue", "blue"], 4: ["blue", "blue", "blue", "blue", "blue", "blue"], 5: ["blue", "blue", "purple", "yellow", "blue", "yellow"] },
+          { 0: ["purple", "purple", "purple", "purple", "purple", "purple"], 1: ["purple", "purple", "purple", "purple", "purple", "purple"], 2: ["yellow", "yellow", "purple", "orange", "purple", "purple"], 3: ["yellow", "yellow", "purple", "purple", "yellow", "yellow"], 4: ["yellow", "yellow", "yellow", "yellow", "yellow", "yellow"], 5: ["yellow", "yellow", "purple", "yellow", "yellow", "yellow"] },
+          { 0: ["purple", "purple", "purple", "purple", "purple", "purple"], 1: ["purple", "purple", "purple", "purple", "purple", "purple"], 2: ["purple", "purple", "purple", "orange", "purple", "purple"], 3: ["purple", "purple", "purple", "purple", "purple", "purple"], 4: ["purple", "purple", "purple", "purple", "purple", "purple"], 5: ["purple", "purple", "purple", "purple", "purple", "purple"] },
+          { 0: ["purple", "purple", "purple", "purple", "purple", "purple"], 1: ["purple", "purple", "purple", "purple", "purple", "purple"], 2: ["purple", "purple", "purple", "purple", "purple", "purple"], 3: ["purple", "purple", "purple", "purple", "purple", "purple"], 4: ["purple", "purple", "purple", "purple", "purple", "purple"], 5: ["purple", "purple", "purple", "purple", "purple", "purple"] }
         ]
       }
     };

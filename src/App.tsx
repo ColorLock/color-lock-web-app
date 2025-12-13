@@ -16,6 +16,7 @@ import StatsModal from './components/StatsModal';
 import GameGrid from './components/GameGrid';
 import { GameHeader, GameFooter } from './components/GameControls';
 import AutocompleteModal from './components/AutocompleteModal';
+import BotSolutionModal from './components/BotSolutionModal';
 import LostGameModal from './components/LostGameModal';
 import TutorialModal from './components/TutorialModal';
 import TutorialOverlay from './components/TutorialOverlay';
@@ -100,6 +101,12 @@ const GameContainer = () => {
     showAutocompleteModal,
     setShowAutocompleteModal,
     handleAutoComplete,
+    handleBotSolutionClick,
+    handleBotSolutionConfirm,
+    handleCancelAutoSolution,
+    isAutoSolving,
+    showBotSolutionModal,
+    setShowBotSolutionModal,
     navigateToHome,
     isLoadingStats
   } = useGameContext();
@@ -279,7 +286,7 @@ const GameContainer = () => {
         )}
 
         {/* Game Header - updated with hamburger menu props */}
-        <GameHeader 
+        <GameHeader
           puzzle={isTutorialMode ? {
             ...puzzle,
             targetColor: 'red' as TileColor,
@@ -288,8 +295,9 @@ const GameContainer = () => {
           } : puzzle}
           settings={settings}
           getColorCSS={getColorCSSWithSettings}
-          onHintClick={handleHint}
+          onBotSolutionClick={handleBotSolutionClick}
           showHintButton={!isTutorialMode || useTutorialContext().showHintButton}
+          isAutoSolving={isAutoSolving}
           // Add hamburger menu props
           isMenuOpen={isMenuOpen}
           toggleMenu={toggleMenu}
@@ -304,13 +312,14 @@ const GameContainer = () => {
 
         {/* Game Grid */}
         <div className="grid-container" style={{ position: 'relative' }}>
-          <GameGrid 
+          <GameGrid
             grid={currentBoard}
             lockedCells={isTutorialMode ? tutorialLockedCells : puzzle.lockedCells}
             hintCell={hintCell}
             settings={settings}
             onTileClick={onTileClick}
             getColorCSS={getColorCSSWithSettings}
+            puzzleTargetColor={puzzle.targetColor}
           />
           
           {/* Tutorial Highlight for connected tiles */}
@@ -432,6 +441,17 @@ const GameContainer = () => {
           isOpen={showAutocompleteModal}
           onClose={() => setShowAutocompleteModal(false)}
           onAutoComplete={handleAutoComplete}
+          targetColor={puzzle.targetColor}
+          getColorCSS={getColorCSSWithSettings}
+        />
+      )}
+
+      {/* Bot Solution Modal */}
+      {showBotSolutionModal && puzzle && (
+        <BotSolutionModal
+          isOpen={showBotSolutionModal}
+          onClose={() => setShowBotSolutionModal(false)}
+          onConfirm={handleBotSolutionConfirm}
           targetColor={puzzle.targetColor}
           getColorCSS={getColorCSSWithSettings}
         />

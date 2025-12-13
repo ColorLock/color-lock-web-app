@@ -14,18 +14,20 @@ interface TileProps {
   onClick: (row: number, col: number) => void;
   getColorCSS: (color: TileColor) => string;
   hintCell?: HintResult | null;
+  puzzleTargetColor?: TileColor;
 }
 
-const Tile: React.FC<TileProps> = ({ 
-  color, 
-  row, 
-  col, 
-  isLocked, 
-  isHighlighted, 
-  isHinted, 
-  onClick, 
-  getColorCSS, 
-  hintCell 
+const Tile: React.FC<TileProps> = ({
+  color,
+  row,
+  col,
+  isLocked,
+  isHighlighted,
+  isHinted,
+  onClick,
+  getColorCSS,
+  hintCell,
+  puzzleTargetColor
 }) => {
   const colorName = tileColorToName(color);
   
@@ -43,7 +45,7 @@ const Tile: React.FC<TileProps> = ({
   const cellStyle = {
     backgroundColor: getColorCSS(color),
     ...(isHinted && hintCell && {
-      // All hinted cells (primary and connected) show color change animation
+      // All hinted cells (primary and connected) use move's target color for glow/border
       '--current-color': getColorCSS(color),
       '--target-color': getColorCSS(hintCell.newColor),
     })
