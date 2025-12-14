@@ -1,9 +1,9 @@
 import React, { createContext, useState, useEffect, useContext, ReactNode, useCallback, useRef } from 'react';
-import { TileColor, DailyPuzzle, FirestorePuzzleData } from '../types';
+import { TileColor, DailyPuzzle, FirestorePuzzleData, PuzzleGrid } from '../types';
 import { AppSettings, DifficultyLevel } from '../types/settings';
 import { GameStatistics, defaultStats } from '../types/stats';
-import { HintResult, decodeActionId } from '../utils/hintUtils';
-import { floodFill } from '../utils/gameLogic';
+import { HintResult, decodeActionId, encodeAction } from '../utils/hintUtils';
+import { floodFill, convertArrayToFirestoreGrid } from '../utils/gameLogic';
 import {
     fetchPuzzleV2Callable,
     getPersonalStatsCallable,
@@ -129,6 +129,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [isFirstTryOfDay, setIsFirstTryOfDay] = useState<boolean>(true);
   const [hintsUsedThisGame, setHintsUsedThisGame] = useState<number>(0);
   const [movesThisAttempt, setMovesThisAttempt] = useState<number>(0);
+  const [userStateHistory, setUserStateHistory] = useState<PuzzleGrid[]>([]);
+  const [userActionHistory, setUserActionHistory] = useState<number[]>([]);
   const [isAutoSolving, setIsAutoSolving] = useState<boolean>(false);
   const [autoSolveIntervalId, setAutoSolveIntervalId] = useState<NodeJS.Timeout | null>(null);
   const autoSolveTimeoutIdsRef = useRef<NodeJS.Timeout[]>([]);
@@ -252,6 +254,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
             setIsFirstTryOfDay(true);
             setHintsUsedThisGame(0);
             setMovesThisAttempt(0);
+            setUserStateHistory([]);
+            setUserActionHistory([]);
             setIsLostReported(false);
             setHasRecordedCompletion(false);
             setHasUsedBotSolutionThisAttempt(false);
@@ -292,6 +296,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
           setIsFirstTryOfDay(true);
           setHintsUsedThisGame(0);
           setMovesThisAttempt(0);
+          setUserStateHistory([]);
+          setUserActionHistory([]);
           setIsLostReported(false);
           setHasRecordedCompletion(false);
           setHasUsedBotSolutionThisAttempt(false);
@@ -368,7 +374,15 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
             moves: movesThisAttempt,
             hintUsed: hintsUsedThisGame > 0,
             botMoves: puzzle.algoScore,
-            win_loss: 'loss'
+            win_loss: 'loss',
+            states: userStateHistory,
+            actions: userActionHistory,
+            targetColor: puzzle.targetColor,
+            colorMap: firestoreData?.colorMap
+          }).finally(() => {
+            // Clear history after recording to prevent memory buildup
+            setUserStateHistory([]);
+            setUserActionHistory([]);
           });
           setIsLostReported(true);
           setHasRecordedCompletion(true);
@@ -427,6 +441,23 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     // Increment local move counter
     const newMovesThisAttempt = movesThisAttempt + 1;
     setMovesThisAttempt(newMovesThisAttempt);
+
+    // Capture state BEFORE move for history tracking
+    if (firestoreData) {
+      const puzzleGridState = convertArrayToFirestoreGrid(puzzle.grid);
+      setUserStateHistory(prev => {
+        const newHistory = [...prev, puzzleGridState];
+        console.log(`[HISTORY] Captured state #${newHistory.length}`, puzzleGridState);
+        return newHistory;
+      });
+
+      const encodedAction = encodeAction(row, col, newColor, firestoreData, puzzle.grid.length);
+      setUserActionHistory(prev => {
+        const newActions = [...prev, encodedAction];
+        console.log(`[HISTORY] Captured action #${newActions.length}:`, encodedAction);
+        return newActions;
+      });
+    }
 
     const updatedPuzzle = applyColorChange(puzzle, row, col, newColor);
     setPuzzle(updatedPuzzle);
@@ -704,6 +735,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setShowWinModal(true);
     
     // 3. Record puzzle history in the background (don't await to avoid UI delay)
+    console.log(`[HISTORY] Sending to backend - States: ${userStateHistory.length}, Actions: ${userActionHistory.length}, Moves: ${solvedPuzzle.userMovesUsed}`);
     recordPuzzleHistory({
       puzzle_id: solvedPuzzle.dateString,
       difficulty: settings.difficultyLevel,
@@ -711,10 +743,17 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       moves: solvedPuzzle.userMovesUsed,
       hintUsed: hintsUsedThisGame > 0,
       botMoves: solvedPuzzle.algoScore,
-      win_loss: 'win'
+      win_loss: 'win',
+      states: userStateHistory,
+      actions: userActionHistory,
+      targetColor: solvedPuzzle.targetColor,
+      colorMap: firestoreData?.colorMap
     }).finally(() => {
+      // Clear history after recording to prevent memory buildup
+      setUserStateHistory([]);
+      setUserActionHistory([]);
       setHasRecordedCompletion(true);
-      
+
       // 4. Fetch fresh stats from backend in the background to get accurate streaks
       getWinModalStatsCallable({ puzzleId: solvedPuzzle.dateString, difficulty: settings.difficultyLevel })
         .then(resp => {
@@ -777,7 +816,11 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         moves: movesThisAttempt,
         hintUsed: hintsUsedThisGame > 0,
         botMoves: puzzle.algoScore,
-        win_loss: 'loss'
+        win_loss: 'loss',
+        states: userStateHistory,
+        actions: userActionHistory,
+        targetColor: puzzle.targetColor,
+        colorMap: firestoreData?.colorMap
       });
       setHasRecordedCompletion(true);
     }
@@ -800,6 +843,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       setIsFirstTryOfDay(false);
       setHintsUsedThisGame(0);
       setMovesThisAttempt(0);
+      setUserStateHistory([]);
+      setUserActionHistory([]);
       setIsLostReported(false);
       setHasRecordedCompletion(false);
       setHasUsedBotSolutionThisAttempt(false);
@@ -888,8 +933,15 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         moves: completedPuzzle.userMovesUsed,
         hintUsed: hintsUsedThisGame > 0,
         botMoves: completedPuzzle.algoScore,
-        win_loss: 'win'
+        win_loss: 'win',
+        states: userStateHistory,
+        actions: userActionHistory,
+        targetColor: completedPuzzle.targetColor,
+        colorMap: firestoreData?.colorMap
       }).finally(() => {
+        // Clear history after recording to prevent memory buildup
+        setUserStateHistory([]);
+        setUserActionHistory([]);
         setHasRecordedCompletion(true);
         
         // 8. Fetch fresh stats from backend in the background to get accurate streaks

@@ -187,10 +187,18 @@ export function generatePuzzleFromDB(
 export function convertFirestoreGridToArray(gridData: PuzzleGrid): TileColor[][] {
   const size = Object.keys(gridData).length;
   const result: TileColor[][] = [];
-  
+
   for (let i = 0; i < size; i++) {
     result.push(gridData[i.toString()]);
   }
-  
+
+  return result;
+}
+
+export function convertArrayToFirestoreGrid(grid: TileColor[][]): PuzzleGrid {
+  const result: PuzzleGrid = {};
+  for (let i = 0; i < grid.length; i++) {
+    result[i.toString()] = [...grid[i]];
+  }
   return result;
 } 

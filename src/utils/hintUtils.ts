@@ -312,7 +312,39 @@ export function getHint(firestoreData: FirestorePuzzleData, moveNumber: number):
   if (!firestoreData || !firestoreData.actions || moveNumber >= firestoreData.actions.length) {
     return null;
   }
-  
+
   const actionId = firestoreData.actions[moveNumber];
   return decodeActionId(actionId, firestoreData);
+}
+
+/**
+ * Encodes a user action (row, col, newColor) into an actionId
+ * This is the reverse of decodeActionId - used to track user's moves
+ */
+export function encodeAction(
+  row: number,
+  col: number,
+  newColor: TileColor,
+  firestoreData: FirestorePuzzleData,
+  gridSize: number = 5
+): number {
+  // Reverse of decodeActionId logic
+  // actionId = ((gridSize - 1 - row) * gridSize * NUM_COLORS) + (col * NUM_COLORS) + colorIndex
+
+  const colorValues = Object.values(TileColor);
+  let colorIndex = colorValues.indexOf(newColor);
+
+  // Apply colorMap if present (reverse mapping)
+  if (firestoreData.colorMap && colorIndex >= 0) {
+    // For encoding, we need to find which value in colorMap corresponds to our color
+    // The colorMap maps from enum order to encoded value
+    // So colorMap[enumIndex] = encodedValue
+    // We need to use the colorMap value
+    const encodedValue = firestoreData.colorMap[colorIndex];
+    if (encodedValue !== undefined) {
+      colorIndex = encodedValue;
+    }
+  }
+
+  return ((gridSize - 1 - row) * gridSize * NUM_COLORS) + (col * NUM_COLORS) + colorIndex;
 } 

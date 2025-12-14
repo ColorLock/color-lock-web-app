@@ -187,6 +187,12 @@ interface RecordPuzzlePayload {
     hintUsed: boolean;
     botMoves: number;
     win_loss: "win" | "loss";
+    attemptNumber?: number;
+    // NEW OPTIONAL FIELDS for best scores tracking:
+    states?: any[];      // PuzzleGrid[] (Firebase admin doesn't have frontend types)
+    actions?: number[];
+    targetColor?: string;
+    colorMap?: number[];
 }
 
 // Export helper functions for testing
@@ -265,6 +271,22 @@ export const recordPuzzleHistory = onCall(
             throw new HttpsError("permission-denied", "User ID mismatch.");
         }
 
+        // Validate optional state/action history if provided
+        if (payload.states || payload.actions) {
+            if (payload.states && !Array.isArray(payload.states)) {
+                throw new HttpsError("invalid-argument", "states must be an array");
+            }
+            if (payload.actions && !Array.isArray(payload.actions)) {
+                throw new HttpsError("invalid-argument", "actions must be an array");
+            }
+            if (payload.states && payload.actions && payload.states.length !== payload.actions.length) {
+                logger.warn("State/action array length mismatch", {
+                    statesLength: payload.states?.length,
+                    actionsLength: payload.actions?.length
+                });
+            }
+        }
+
         const puzzleId = payload.puzzle_id;
         const difficulty = normalizeDifficulty(payload.difficulty);
         const moves = payload.moves;
@@ -312,12 +334,18 @@ export const recordPuzzleHistory = onCall(
         });
 
         let v2Writes: Array<{ diffKey: DifficultyLevel; moves: number }> = [];
+
         await db.runTransaction(async (tx) => {
-            // Read all docs first
-            const [puzzleSnap, laSnap, dSnap] = await Promise.all([
+            // Read all docs first (all reads must happen before any writes in Firestore transactions)
+            const dailyScoresV2Ref = db.collection("dailyScoresV2").doc(puzzleId);
+            const bestScoresRef = db.collection("bestScores").doc(`${puzzleId}-${difficulty}`);
+
+            const [puzzleSnap, laSnap, dSnap, dailyScoresSnap, bestScoresSnap] = await Promise.all([
                 tx.get(puzzleRef),
                 tx.get(levelAgnosticRef),
-                tx.get(difficultyRef)
+                tx.get(difficultyRef),
+                tx.get(dailyScoresV2Ref),
+                tx.get(bestScoresRef)
             ]);
 
             // Prepare in-memory data
@@ -470,10 +498,66 @@ export const recordPuzzleHistory = onCall(
                         const existingMoves = (existing as any)?.moves;
                         const shouldMirror = !existing || typeof existingMoves !== 'number' || (typeof existingMoves === 'number' && moves < existingMoves);
                         if (shouldMirror) {
-                            const v2DocRef = db.collection("dailyScoresV2").doc(puzzleId);
                             // Write nested map using proper merge semantics (no dot-path in set)
-                            tx.set(v2DocRef, { [diffKey]: { [userId]: moves } }, { merge: true });
+                            tx.set(dailyScoresV2Ref, { [diffKey]: { [userId]: moves } }, { merge: true });
                             v2Writes.push({ diffKey, moves });
+
+                            // --- Check if this is the global best score and write to bestScores ---
+                            // Use the pre-read dailyScoresSnap and bestScoresSnap from the beginning of the transaction
+                            const hasBestScoresPayload = !!(payload.states && payload.actions &&
+                                payload.states.length > 0 && payload.actions.length > 0);
+
+                            if (hasBestScoresPayload) {
+                                logger.info(`[BEST_SCORES] Checking conditions - has states: ${!!payload.states}, has actions: ${!!payload.actions}, states length: ${payload.states?.length || 0}, actions length: ${payload.actions?.length || 0}`);
+                                try {
+                                    const dailyScoresData = dailyScoresSnap.exists ? dailyScoresSnap.data() : {};
+                                    const difficultyScores = dailyScoresData?.[diffKey] || {};
+                                    const allScores = (Object.values(difficultyScores) as Array<number | unknown>)
+                                        .filter((val): val is number => typeof val === "number" && !isNaN(val));
+                                    const globalBestScore = allScores.length > 0 ? Math.min(...allScores) : Infinity;
+
+                                    logger.info(`[BEST_SCORES] Current user moves: ${moves}, Global best: ${globalBestScore}, All scores: ${JSON.stringify(allScores)}`);
+
+                                    // Only write to bestScores if this move count is the global best (or ties for best)
+                                    const isGlobalBest = moves <= globalBestScore;
+                                    const existingBestScoreValRaw = bestScoresSnap.data()?.userScore;
+                                    const existingBestScoreVal = typeof existingBestScoreValRaw === "number" ? existingBestScoreValRaw : Infinity;
+                                    const shouldOverwrite = !bestScoresSnap.exists || moves < existingBestScoreVal;
+
+                                    if (isGlobalBest && shouldOverwrite) {
+                                        tx.set(bestScoresRef, {
+                                            puzzleId: puzzleId,
+                                            userId: userId,
+                                            userScore: moves,
+                                            targetColor: payload.targetColor || null,
+                                            states: payload.states,
+                                            actions: payload.actions,
+                                            colorMap: payload.colorMap || null,
+                                        });
+
+                                        logger.info(`Wrote best score to bestScores/${puzzleId}-${diffKey}`, {
+                                            userId,
+                                            moves,
+                                            statesCount: payload.states?.length || 0,
+                                            actionsCount: payload.actions?.length || 0
+                                        });
+                                    } else {
+                                        logger.info(`[BEST_SCORES] Not writing - isGlobalBest: ${isGlobalBest}, shouldOverwrite: ${shouldOverwrite}`, {
+                                            userId,
+                                            moves,
+                                            globalBestScore,
+                                            existingScore: typeof existingBestScoreValRaw === "number" ? existingBestScoreValRaw : null
+                                        });
+                                    }
+                                } catch (e) {
+                                    logger.warn("Failed writing to bestScores collection", {
+                                        puzzleId,
+                                        difficulty: diffKey,
+                                        userId
+                                    }, e);
+                                    // Don't throw - bestScores is supplementary data
+                                }
+                            }
                         }
                     } catch (e) {
                         logger.warn("Failed mirroring per-difficulty daily score (v2)", { puzzleId, difficulty: diffKey, userId }, e);
