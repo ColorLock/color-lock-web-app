@@ -88,7 +88,7 @@ describe('calculateEloScore', () => {
       expect(score).toBe(800);
     });
 
-    it('should not award tie/beat bonus on Easy difficulty', () => {
+    it('should award scaled tie/beat bonus on Easy difficulty', () => {
       const userStats: GameStatistics = {
         ...defaultStats,
         attemptsToWinByDay: { [dateStr]: 1 },
@@ -104,8 +104,8 @@ describe('calculateEloScore', () => {
         DifficultyLevel.Easy
       );
 
-      // Easy difficulty multiplier is 0.5, so win bonus becomes 100
-      expect(score).toBe(100);
+      // Easy difficulty: win bonus 200 * 0.5 = 100, beat bonus 30 * (10-8+1) = 90
+      expect(score).toBe(190);
     });
   });
 
@@ -151,8 +151,8 @@ describe('calculateEloScore', () => {
     });
   });
 
-  describe('Hint Penalty', () => {
-    it('should apply 0.5 multiplier when hint was used before achieving bot score', () => {
+  describe('Hint Penalty (deprecated)', () => {
+    it('should not apply hint penalty - handled at record level', () => {
       const userStats: GameStatistics = {
         ...defaultStats,
         attemptsToWinByDay: { [dateStr]: 1 },
@@ -170,11 +170,12 @@ describe('calculateEloScore', () => {
         DifficultyLevel.Hard
       );
 
-      // (200 win + 200 tie) * 0.5 (hint penalty) = 200
-      expect(score).toBe(200);
+      // Hint penalty no longer applied in ELO calculation (handled at record level)
+      // 200 (win) + 200 (tie) = 400
+      expect(score).toBe(400);
     });
 
-    it('should not apply hint penalty when hint was not used', () => {
+    it('should treat hint usage same as no hint', () => {
       const userStats: GameStatistics = {
         ...defaultStats,
         attemptsToWinByDay: { [dateStr]: 1 },
@@ -191,7 +192,7 @@ describe('calculateEloScore', () => {
         DifficultyLevel.Hard
       );
 
-      // 200 (win) + 200 (tie) = 400 (no hint penalty)
+      // 200 (win) + 200 (tie) = 400
       expect(score).toBe(400);
     });
   });
@@ -214,11 +215,11 @@ describe('calculateEloScore', () => {
         DifficultyLevel.Hard
       );
 
-      // 200 (win) + 600 (beat by 2) - ~34 (attempt penalties for attempts 2 and 3)
-      // Penalty for attempt 2: -20/sqrt(1) = -20
-      // Penalty for attempt 3: -20/sqrt(2) ≈ -14.14
-      // Total penalty ≈ -34
-      expect(score).toBe(766);
+      // 200 (win) + 600 (beat by 2) - ~0.85 (attempt penalties for attempts 2 and 3)
+      // Penalty for attempt 2: -0.5/sqrt(1) = -0.5
+      // Penalty for attempt 3: -0.5/sqrt(2) ≈ -0.35
+      // Total penalty ≈ -0.85
+      expect(score).toBe(799);
     });
 
     it('should not apply penalty for first attempt', () => {
@@ -265,7 +266,7 @@ describe('calculateEloScore', () => {
           false,
           DifficultyLevel.Hard
         );
-      
+
         const scoreWith40 = calculateEloScore(
           userStatsWith40Attempts,
           mockPuzzleData,
@@ -274,9 +275,10 @@ describe('calculateEloScore', () => {
           false,
           DifficultyLevel.Hard
         );
-      
-        expect(scoreWith31).toBe(212);
-        expect(scoreWith40).toBe(212);
+
+        // With new penalty system: 200 (win) + 200 (tie) - ~4.7 (30 attempts penalty) = 395
+        expect(scoreWith31).toBe(395);
+        expect(scoreWith40).toBe(395);
         expect(scoreWith31).toBe(scoreWith40); // Explicitly test they're equal
       });
   });
@@ -358,9 +360,9 @@ describe('calculateEloScore', () => {
         15
       );
 
-      // Should default to Medium difficulty (multiplier 1.0)
-      // 200 (win bonus) = 200
-      expect(score).toBe(200);
+      // Should default to Medium difficulty (multiplier 0.75)
+      // 200 (win bonus) * 0.75 = 150
+      expect(score).toBe(150);
     });
   });
 });

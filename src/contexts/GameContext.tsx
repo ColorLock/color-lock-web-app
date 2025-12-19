@@ -467,6 +467,16 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
     closeColorPicker();
 
+    // Capture final state if puzzle is solved or lost
+    if ((updatedPuzzle.isSolved || updatedPuzzle.isLost) && firestoreData) {
+      const finalState = convertArrayToFirestoreGrid(updatedPuzzle.grid);
+      setUserStateHistory(prev => {
+        const newHistory = [...prev, finalState];
+        console.log(`[HISTORY] Captured FINAL state #${newHistory.length}`, finalState);
+        return newHistory;
+      });
+    }
+
     if (updatedPuzzle.isSolved) {
       handlePuzzleSolved(updatedPuzzle); // Will clear pending moves inside
     }
@@ -878,28 +888,121 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   };
 
   const handleAutoComplete = async () => {
-      if (!puzzle) return;
+      if (!puzzle || !firestoreData) return;
 
-      // 1. Get moves made *before* autocomplete
-      // Use the current state value as it represents moves up to this point
-      const movesBeforeAutocomplete = movesThisAttempt;
+      setShowAutocompleteModal(false);
 
-      // 2. Calculate additional moves needed by simulating autocomplete
-      // We need a temporary puzzle object to avoid modifying the main state yet
-      const tempPuzzleForCalc = { ...puzzle };
-      const completedPuzzleState = autoCompletePuzzle(tempPuzzleForCalc); 
-      
-      // Calculate moves added by comparing final score to moves before autocomplete
-      const additionalMoves = completedPuzzleState.userMovesUsed - tempPuzzleForCalc.userMovesUsed;
-      const finalMovesForThisAttempt = movesBeforeAutocomplete + additionalMoves;
+      // Helper function to find all regions (same as in autocompleteUtils.ts)
+      const findAllRegions = (grid: TileColor[][], lockedCells: Set<string>): Set<Set<string>> => {
+        const regions = new Set<Set<string>>();
+        const visited = new Set<string>();
 
-      // 3. Update local state with the additional moves for UI/state consistency
+        const findRegion = (row: number, col: number, color: TileColor): Set<string> => {
+          const region = new Set<string>();
+          const queue: [number, number][] = [[row, col]];
+
+          while (queue.length > 0) {
+            const [r, c] = queue.shift()!;
+            const cellKey = `${r},${c}`;
+
+            if (visited.has(cellKey) || lockedCells.has(cellKey)) continue;
+            if (grid[r][c] !== color) continue;
+
+            visited.add(cellKey);
+            region.add(cellKey);
+
+            const directions = [[-1, 0], [0, 1], [1, 0], [0, -1]];
+            for (const [dr, dc] of directions) {
+              const newRow = r + dr;
+              const newCol = c + dc;
+
+              if (newRow < 0 || newRow >= grid.length || newCol < 0 || newCol >= grid[0].length) continue;
+              queue.push([newRow, newCol]);
+            }
+          }
+
+          return region;
+        };
+
+        for (let row = 0; row < grid.length; row++) {
+          for (let col = 0; col < grid[0].length; col++) {
+            const cellKey = `${row},${col}`;
+            if (visited.has(cellKey) || lockedCells.has(cellKey)) continue;
+
+            const region = findRegion(row, col, grid[row][col]);
+            if (region.size > 0) {
+              regions.add(region);
+            }
+          }
+        }
+
+        return regions;
+      };
+
+      // Process autocomplete moves one at a time, tracking states and actions
+      let currentGrid = puzzle.grid.map(row => [...row]);
+      let currentLockedCells = new Set(puzzle.lockedCells);
+
+      // Collect states and actions in arrays, then update React state once at the end
+      const newStates: PuzzleGrid[] = [];
+      const newActions: number[] = [];
+
+      // Find all regions that need to be changed
+      const allRegions = findAllRegions(currentGrid, currentLockedCells);
+
+      for (const region of allRegions) {
+        const firstCell = region.values().next().value as string;
+        const [row, col] = firstCell.split(',').map(Number);
+
+        // Skip if already target color
+        if (currentGrid[row][col] === puzzle.targetColor) continue;
+
+        // Capture state BEFORE this autocomplete move
+        const stateBeforeMove = convertArrayToFirestoreGrid(currentGrid);
+        newStates.push(stateBeforeMove);
+
+        // Capture the action
+        const encodedAction = encodeAction(row, col, puzzle.targetColor, firestoreData, currentGrid.length);
+        newActions.push(encodedAction);
+
+        // Apply the move to all cells in this region
+        for (const cellKey of region) {
+          const [r, c] = cellKey.split(',').map(Number);
+          currentGrid[r][c] = puzzle.targetColor;
+        }
+      }
+
+      // Capture the final state
+      const finalState = convertArrayToFirestoreGrid(currentGrid);
+      newStates.push(finalState);
+
+      // Build complete state and action histories for recording
+      // IMPORTANT: Don't rely on React state here as it updates asynchronously
+      const completeStateHistory = [...userStateHistory, ...newStates];
+      const completeActionHistory = [...userActionHistory, ...newActions];
+
+      console.log(`[HISTORY] Autocomplete added ${newStates.length} states, ${newActions.length} actions`);
+      console.log(`[HISTORY] Complete history: ${completeStateHistory.length} states, ${completeActionHistory.length} actions`);
+
+      // Update state history with all collected states and actions at once
+      setUserStateHistory(completeStateHistory);
+      setUserActionHistory(completeActionHistory);
+
+      // Update moves count
+      const totalAdditionalMoves = newActions.length;
+      const finalMovesForThisAttempt = movesThisAttempt + totalAdditionalMoves;
       setMovesThisAttempt(finalMovesForThisAttempt);
 
-      // 4. Apply the autocomplete to the actual puzzle state for UI update
-      const completedPuzzle = autoCompletePuzzle(puzzle);
+      // Update puzzle state with completed grid
+      const completedPuzzle: DailyPuzzle = {
+        ...puzzle,
+        grid: currentGrid,
+        lockedCells: new Set(),
+        userMovesUsed: puzzle.userMovesUsed + totalAdditionalMoves,
+        isSolved: true,
+        isLost: false
+      };
       setPuzzle(completedPuzzle);
-      setShowAutocompleteModal(false);
 
       // 5. Update local win modal stats immediately for instant UI display
       setWinModalStats(prevStats => {
@@ -926,6 +1029,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
       // 7. Record the win in the background
       console.log(`[STATS-EVENT ${new Date().toISOString()}] Game won via Autocomplete - puzzle ID: ${completedPuzzle.dateString}, difficulty: ${settings.difficultyLevel}`);
+      console.log(`[HISTORY] Recording: ${completeStateHistory.length} states, ${completeActionHistory.length} actions, userScore: ${completedPuzzle.userMovesUsed}`);
       recordPuzzleHistory({
         puzzle_id: completedPuzzle.dateString,
         difficulty: settings.difficultyLevel,
@@ -934,8 +1038,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         hintUsed: hintsUsedThisGame > 0,
         botMoves: completedPuzzle.algoScore,
         win_loss: 'win',
-        states: userStateHistory,
-        actions: userActionHistory,
+        states: completeStateHistory,
+        actions: completeActionHistory,
         targetColor: completedPuzzle.targetColor,
         colorMap: firestoreData?.colorMap
       }).finally(() => {

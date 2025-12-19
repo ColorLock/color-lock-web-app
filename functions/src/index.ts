@@ -340,11 +340,10 @@ export const recordPuzzleHistory = onCall(
             const dailyScoresV2Ref = db.collection("dailyScoresV2").doc(puzzleId);
             const bestScoresRef = db.collection("bestScores").doc(`${puzzleId}-${difficulty}`);
 
-            const [puzzleSnap, laSnap, dSnap, dailyScoresSnap, bestScoresSnap] = await Promise.all([
+            const [puzzleSnap, laSnap, dSnap, bestScoresSnap] = await Promise.all([
                 tx.get(puzzleRef),
                 tx.get(levelAgnosticRef),
                 tx.get(difficultyRef),
-                tx.get(dailyScoresV2Ref),
                 tx.get(bestScoresRef)
             ]);
 
@@ -502,29 +501,21 @@ export const recordPuzzleHistory = onCall(
                             tx.set(dailyScoresV2Ref, { [diffKey]: { [userId]: moves } }, { merge: true });
                             v2Writes.push({ diffKey, moves });
 
-                            // --- Check if this is the global best score and write to bestScores ---
-                            // Use the pre-read dailyScoresSnap and bestScoresSnap from the beginning of the transaction
+                            // --- Check if this is the best score and write to bestScores ---
+                            // Use the pre-read bestScoresSnap from the beginning of the transaction
                             const hasBestScoresPayload = !!(payload.states && payload.actions &&
                                 payload.states.length > 0 && payload.actions.length > 0);
 
                             if (hasBestScoresPayload) {
                                 logger.info(`[BEST_SCORES] Checking conditions - has states: ${!!payload.states}, has actions: ${!!payload.actions}, states length: ${payload.states?.length || 0}, actions length: ${payload.actions?.length || 0}`);
                                 try {
-                                    const dailyScoresData = dailyScoresSnap.exists ? dailyScoresSnap.data() : {};
-                                    const difficultyScores = dailyScoresData?.[diffKey] || {};
-                                    const allScores = (Object.values(difficultyScores) as Array<number | unknown>)
-                                        .filter((val): val is number => typeof val === "number" && !isNaN(val));
-                                    const globalBestScore = allScores.length > 0 ? Math.min(...allScores) : Infinity;
-
-                                    logger.info(`[BEST_SCORES] Current user moves: ${moves}, Global best: ${globalBestScore}, All scores: ${JSON.stringify(allScores)}`);
-
-                                    // Only write to bestScores if this move count is the global best (or ties for best)
-                                    const isGlobalBest = moves <= globalBestScore;
                                     const existingBestScoreValRaw = bestScoresSnap.data()?.userScore;
-                                    const existingBestScoreVal = typeof existingBestScoreValRaw === "number" ? existingBestScoreValRaw : Infinity;
-                                    const shouldOverwrite = !bestScoresSnap.exists || moves < existingBestScoreVal;
+                                    const existingBestScoreVal = typeof existingBestScoreValRaw === "number" ? existingBestScoreValRaw : null;
 
-                                    if (isGlobalBest && shouldOverwrite) {
+                                    // Write if document doesn't exist OR if no existing score OR if current score is better than existing
+                                    const shouldWrite = !bestScoresSnap.exists || existingBestScoreVal === null || moves < existingBestScoreVal;
+
+                                    if (shouldWrite) {
                                         tx.set(bestScoresRef, {
                                             puzzleId: puzzleId,
                                             userId: userId,
@@ -538,15 +529,15 @@ export const recordPuzzleHistory = onCall(
                                         logger.info(`Wrote best score to bestScores/${puzzleId}-${diffKey}`, {
                                             userId,
                                             moves,
+                                            previousScore: existingBestScoreVal,
                                             statesCount: payload.states?.length || 0,
                                             actionsCount: payload.actions?.length || 0
                                         });
                                     } else {
-                                        logger.info(`[BEST_SCORES] Not writing - isGlobalBest: ${isGlobalBest}, shouldOverwrite: ${shouldOverwrite}`, {
+                                        logger.info(`[BEST_SCORES] Not writing - current score (${moves}) is not better than existing (${existingBestScoreVal})`, {
                                             userId,
                                             moves,
-                                            globalBestScore,
-                                            existingScore: typeof existingBestScoreValRaw === "number" ? existingBestScoreValRaw : null
+                                            existingScore: existingBestScoreVal
                                         });
                                     }
                                 } catch (e) {

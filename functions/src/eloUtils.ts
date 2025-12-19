@@ -11,19 +11,24 @@ const logger = v2Logger;
  * Calculates the total cumulative penalty for winning on attempt N.
  * For first attempts (N <= 1), there's no penalty.
  * For subsequent attempts, a penalty is calculated based on attempt number.
+ *
+ * The penalty is intentionally small (base -0.5) so that move count is the
+ * dominant factor in scoring. Even after many attempts, getting a better
+ * move count should still result in a higher score.
  */
 export function calculateEloAttemptPenalty(winAttempt: number | null | undefined): number {
   if (winAttempt === null || winAttempt === undefined || winAttempt <= 1) {
     return 0;
   }
-  
+
   let cumulativePenalty = 0;
   for (let k = 2; k <= winAttempt; k++) {
-    // Skip penalties for attempts beyond 21
+    // Skip penalties for attempts beyond 30
     if (k > 30) continue;
-    
+
     // Using Math.max to prevent division by zero or sqrt of negative
-    cumulativePenalty += -20 / Math.sqrt(Math.max(1, k - 1));
+    // Base penalty is -0.5 to make attempts minimally impactful compared to move improvements
+    cumulativePenalty += -0.5 / Math.sqrt(Math.max(1, k - 1));
   }
   return cumulativePenalty;
 }
@@ -90,8 +95,10 @@ export function calculateEloScore(
         winAttempt
     );
 
-    // Apply difficulty multiplier to attempt penalty
-    const adjustedAttemptPenalty = cumulativeAttemptPenalty * difficultyMultiplier;
+    // Do NOT apply difficulty multiplier to attempt penalty - this ensures that
+    // move count improvements are always more valuable than attempt penalties,
+    // regardless of difficulty level. The penalty remains consistent across all difficulties.
+    const adjustedAttemptPenalty = cumulativeAttemptPenalty; // No multiplier applied
 
     // Add first-to-beat-bot bonus (difficulty-scaled)
     // Hard: 200 points, Medium: 100 points, Easy: 50 points
